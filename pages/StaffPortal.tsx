@@ -179,24 +179,25 @@ export const StaffPortal: React.FC = () => {
       }
 
       // 2. Add Extra Lending Items from Booking (Task-Driven Logic)
-      // FIX: Ensure we pick the correct booking (Guest A vs Guest B collision)
       
-      // Step 1: Filter & Sort Newest First
+      // Step 1: Filter Bookings for this room and sort by created date (newest first)
       const sortedBookings = bookings
           .filter(b => b.facilityName === activeTask.facilityName && b.roomCode === activeTask.room_code)
           .sort((a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime());
 
       let booking: Booking | undefined;
-      const today = new Date();
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      // Step 2: Branch Logic based on Task Type
+      // Step 2: Context-Aware Selection (Turnover Day Fix)
       if (activeTask.task_type === 'Checkout') {
           // Rule: If Checkout task, find only the CheckedOut booking for today (The one leaving)
-          booking = sortedBookings.find(b => 
-              b.status === 'CheckedOut' && 
-              parseISO(b.checkoutDate).toDateString() === today.toDateString()
-          );
-      } else {
+          booking = sortedBookings.find(b => {
+              if (b.status !== 'CheckedOut') return false;
+              // Check actualCheckOut date first, then checkoutDate
+              const outDate = b.actualCheckOut ? b.actualCheckOut : b.checkoutDate;
+              return outDate.startsWith(todayStr);
+          });
+      } else if (activeTask.task_type === 'Stayover' || activeTask.task_type === 'Dirty') {
           // Rule: If Stayover/Dirty task, find the CheckedIn booking (The one staying)
           booking = sortedBookings.find(b => b.status === 'CheckedIn');
       }
@@ -221,7 +222,9 @@ export const StaffPortal: React.FC = () => {
                       }
                   }
               });
-          } catch(e) {}
+          } catch(e) {
+              console.warn("Error parsing lendingJson", e);
+          }
       }
 
       return Array.from(combinedMap.values());
