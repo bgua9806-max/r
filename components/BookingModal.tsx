@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal } from './Modal';
 import { Booking, Payment, ServiceUsage, BookingStatus, GuestProfile, Guest, InventoryTransaction, SheetBooking, LendingItem } from '../types';
@@ -1901,25 +1900,25 @@ If a field is not visible, return empty string "".`;
         </div>
         )}
 
-        <div className="flex justify-between gap-3 pt-6 border-t border-slate-100 mt-auto bg-white px-2 sticky bottom-0">
+        <div className="flex gap-2 md:justify-between md:gap-3 pt-6 border-t border-slate-100 mt-auto bg-white px-2 sticky bottom-0">
            {/* Nút hủy phòng (Chỉ hiện khi chưa hủy và chưa check-out xong) */}
            {formData.id && formData.status !== 'Cancelled' && formData.status !== 'CheckedOut' && !isCancelling ? (
                 <button 
                     type="button" 
                     onClick={() => setIsCancelling(true)} 
-                    className="px-6 py-3 rounded-xl text-rose-600 font-black text-xs uppercase tracking-widest hover:bg-rose-50 transition-colors border border-transparent hover:border-rose-100"
+                    className="flex-1 md:flex-none px-0 md:px-6 py-3 rounded-xl text-rose-600 font-black text-xs uppercase tracking-widest hover:bg-rose-50 transition-colors border border-transparent hover:border-rose-100 whitespace-nowrap"
                 >
-                    Hủy Đặt Phòng
+                    Hủy <span className="hidden md:inline">Đặt Phòng</span>
                 </button>
            ) : <div />}
 
            {/* Normal Footer Actions - Hidden when cancelling */}
            {!isCancelling && (
-               <div className="flex gap-3">
-                   <button type="button" onClick={onClose} disabled={isSubmitting} className="px-8 py-3 rounded-xl text-slate-500 hover:bg-slate-100 font-black text-xs uppercase tracking-widest transition-colors">Đóng</button>
-                   <button form="bookingForm" type="submit" disabled={!!availabilityError || isSubmitting} className={`px-10 py-3 bg-brand-600 text-white rounded-xl hover:bg-brand-700 font-black text-xs uppercase tracking-widest shadow-xl shadow-brand-100 transition-all active:scale-95 flex items-center gap-2 ${availabilityError || isSubmitting ? 'opacity-50' : ''}`}>
+               <div className="flex flex-1 md:flex-none gap-2 md:gap-3 w-full md:w-auto justify-end">
+                   <button type="button" onClick={onClose} disabled={isSubmitting} className="hidden md:block px-8 py-3 rounded-xl text-slate-500 hover:bg-slate-100 font-black text-xs uppercase tracking-widest transition-colors">Đóng</button>
+                   <button form="bookingForm" type="submit" disabled={!!availabilityError || isSubmitting} className={`flex-1 md:flex-none px-0 md:px-10 py-3 bg-brand-600 text-white rounded-xl hover:bg-brand-700 font-black text-xs uppercase tracking-widest shadow-xl shadow-brand-100 transition-all active:scale-95 flex items-center justify-center gap-2 ${availabilityError || isSubmitting ? 'opacity-50' : ''}`}>
                        {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Save size={18}/>}
-                       {isSubmitting ? 'Đang Lưu...' : 'Lưu Thông Tin'}
+                       {isSubmitting ? 'Đang Lưu...' : <>Lưu <span className="hidden md:inline">Thông Tin</span></>}
                    </button>
                </div>
            )}
