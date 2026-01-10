@@ -8,7 +8,7 @@ import {
   ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { HousekeepingTask, ChecklistItem, RoomRecipeItem, ServiceItem, LendingItem } from '../types';
+import { HousekeepingTask, ChecklistItem, RoomRecipeItem, ServiceItem, LendingItem, Booking } from '../types';
 import { storageService } from '../services/storage';
 import { ROOM_RECIPES } from '../constants';
 
@@ -159,32 +159,49 @@ export const StaffPortal: React.FC = () => {
 
   // --- LOGIC LẤY DANH SÁCH THU HỒI (RECIPE + LENDING) ---
   const checkoutReturnList = useMemo(() => {
-      if (!activeTask || activeTask.task_type !== 'Checkout') return [];
+      if (!activeTask) return [];
       
       const combinedMap = new Map<string, { id: string, name: string, qty: number, isExtra: boolean }>();
 
-      // 1. Add Recipe Items (Standard)
-      recipeItems.forEach(item => {
-          if (item.category === 'Linen' || item.category === 'Asset') {
-              const id = item.id || item.fallbackName;
-              combinedMap.set(id, {
-                  id: id,
-                  name: item.name || item.fallbackName,
-                  qty: item.requiredQty,
-                  isExtra: false
-              });
-          }
-      });
+      // 1. Add Recipe Items (Standard) - Only for Checkout Context
+      if (activeTask.task_type === 'Checkout') {
+          recipeItems.forEach(item => {
+              if (item.category === 'Linen' || item.category === 'Asset') {
+                  const id = item.id || item.fallbackName;
+                  combinedMap.set(id, {
+                      id: id,
+                      name: item.name || item.fallbackName,
+                      qty: item.requiredQty,
+                      isExtra: false
+                  });
+              }
+          });
+      }
 
-      // 2. Add Extra Lending Items from Booking
-      // Find latest booking for this room that is CheckedOut today or CheckedIn
+      // 2. Add Extra Lending Items from Booking (Task-Driven Logic)
+      // FIX: Ensure we pick the correct booking (Guest A vs Guest B collision)
+      
+      // Step 1: Filter & Sort Newest First
+      const sortedBookings = bookings
+          .filter(b => b.facilityName === activeTask.facilityName && b.roomCode === activeTask.room_code)
+          .sort((a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime());
+
+      let booking: Booking | undefined;
       const today = new Date();
-      const booking = bookings.find(b => 
-          b.facilityName === activeTask.facilityName && 
-          b.roomCode === activeTask.room_code && 
-          (b.status === 'CheckedIn' || (b.status === 'CheckedOut' && parseISO(b.checkoutDate).toDateString() === today.toDateString()))
-      );
 
+      // Step 2: Branch Logic based on Task Type
+      if (activeTask.task_type === 'Checkout') {
+          // Rule: If Checkout task, find only the CheckedOut booking for today (The one leaving)
+          booking = sortedBookings.find(b => 
+              b.status === 'CheckedOut' && 
+              parseISO(b.checkoutDate).toDateString() === today.toDateString()
+          );
+      } else {
+          // Rule: If Stayover/Dirty task, find the CheckedIn booking (The one staying)
+          booking = sortedBookings.find(b => b.status === 'CheckedIn');
+      }
+
+      // Step 3: Extract Lending
       if (booking && booking.lendingJson) {
           try {
               const lends: LendingItem[] = JSON.parse(booking.lendingJson);
