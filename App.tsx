@@ -270,51 +270,30 @@ export const App = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
           
-          <Route path="/" element={
-            <ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>
-          } />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           
-          <Route path="/dashboard" element={
-            <ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>
-          } />
+          <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
           
-          <Route path="/bookings" element={
-            <ProtectedRoute><Layout><Bookings /></Layout></ProtectedRoute>
-          } />
+          <Route path="/bookings" element={<ProtectedRoute><Layout><Bookings /></Layout></ProtectedRoute>} />
           
-          <Route path="/rooms" element={
-            <ProtectedRoute><Layout><Rooms /></Layout></ProtectedRoute>
-          } />
+          <Route path="/rooms" element={<ProtectedRoute><Layout><Rooms /></Layout></ProtectedRoute>} />
           
-          <Route path="/housekeeping" element={
-            <ProtectedRoute><Layout><Housekeeping /></Layout></ProtectedRoute>
-          } />
+          <Route path="/housekeeping" element={<ProtectedRoute><Layout><Housekeeping /></Layout></ProtectedRoute>} />
           
-          <Route path="/customers" element={
-            <ProtectedRoute><Layout><Customers /></Layout></ProtectedRoute>
-          } />
+          <Route path="/customers" element={<ProtectedRoute><Layout><Customers /></Layout></ProtectedRoute>} />
           
-          <Route path="/inventory" element={
-            <ProtectedRoute><Layout><Inventory /></Layout></ProtectedRoute>
-          } />
+          <Route path="/inventory" element={<ProtectedRoute><Layout><Inventory /></Layout></ProtectedRoute>} />
           
-          <Route path="/collaborators" element={
-            <ProtectedRoute><Layout><Collaborators /></Layout></ProtectedRoute>
-          } />
+          <Route path="/collaborators" element={<ProtectedRoute><Layout><Collaborators /></Layout></ProtectedRoute>} />
           
-          <Route path="/expenses" element={
-            <ProtectedRoute><Layout><Expenses /></Layout></ProtectedRoute>
-          } />
+          <Route path="/expenses" element={<ProtectedRoute><Layout><Expenses /></Layout></ProtectedRoute>} />
           
-          <Route path="/settings" element={
-            <ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>
-          } />
+          <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
 
           {/* Staff Portal: Standalone view */}
-          <Route path="/staff-portal" element={
-            <ProtectedRoute><StaffPortal /></ProtectedRoute>
-          } />
+          <Route path="/staff-portal" element={<ProtectedRoute><StaffPortal /></ProtectedRoute>} />
           
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </HashRouter>
     </AppProvider>

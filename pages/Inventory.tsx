@@ -205,6 +205,7 @@ export const Inventory: React.FC = () => {
             }
             const actualReturn = actionQty - damageQty;
             
+            // Logic: Reduce Dirty Stock, Increase Clean Stock
             newItem.laundryStock = (Number(newItem.laundryStock) || 0) - actionQty;
             newItem.stock = (Number(newItem.stock) || 0) + actualReturn;
 
@@ -913,7 +914,7 @@ export const Inventory: React.FC = () => {
                                    <button onClick={() => openTransaction(item, 'Liquidate')} className={`py-3 bg-white text-rose-600 hover:bg-rose-50 border border-rose-100 font-bold text-xs rounded-xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all ${activeTab !== 'Linen' ? 'col-span-2' : ''}`}>
                                        <Trash2 size={18} strokeWidth={2.5}/> Hủy
                                    </button>
-                               </div>
+                                </div>
                            </div>
                        );
                    })}

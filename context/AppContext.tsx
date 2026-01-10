@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { 
   Booking, Facility, Room, Collaborator, Expense, ServiceItem, HousekeepingTask, 
@@ -63,6 +64,7 @@ interface AppContextType {
   processMinibarUsage: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
   processLendingUsage: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
   processCheckoutLinenReturn: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>; 
+  processRoomRestock: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
 
   syncHousekeepingTasks: (tasks: HousekeepingTask[]) => Promise<void>;
   
@@ -144,6 +146,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       bookingsRef.current = bookings;
   }, [bookings]);
 
+  // Helper function to dynamically calculate "In Circulation"
+  const calculateInCirculation = (
+      service: ServiceItem, 
+      currentRooms: Room[], 
+      currentBookings: Booking[], 
+      currentRecipes: Record<string, RoomRecipe>
+  ): number => {
+      if (service.category !== 'Linen' && service.category !== 'Asset') {
+          return service.in_circulation || 0; // Return existing for non-linen/asset if any
+      }
+
+      let total = 0;
+
+      // Part A: Base Par Stock (From Room Recipes)
+      // Iterate over all rooms to see what should be in them
+      currentRooms.forEach(room => {
+          const type = room.type; 
+          if (type && currentRecipes[type]) {
+              const recipe = currentRecipes[type];
+              const itemInRecipe = recipe.items.find(i => i.itemId === service.id || i.itemId === service.name);
+              if (itemInRecipe) {
+                  total += itemInRecipe.quantity;
+              }
+          }
+      });
+
+      // Part B: Active Lending (From CheckedIn Bookings)
+      const activeBookings = currentBookings.filter(b => b.status === 'CheckedIn');
+      activeBookings.forEach(b => {
+          try {
+              const lends: LendingItem[] = JSON.parse(b.lendingJson || '[]');
+              const lentItem = lends.find(l => l.item_id === service.id && !l.returned);
+              if (lentItem) {
+                  total += lentItem.quantity;
+              }
+          } catch (e) {
+              // Ignore parse errors
+          }
+      });
+
+      return total;
+  };
+
   const refreshData = async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
@@ -161,16 +206,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         storageService.getSchedules(),
         storageService.getAdjustments(),
         storageService.getLeaveRequests(),
-        // NEW: Load Settings & Recipes
         storageService.getSettings(),
         storageService.getRoomRecipes()
       ]);
+      
       setFacilities(f);
       setRooms(r);
       setBookings(b);
       setCollaborators(c);
       setExpenses(e);
-      setServices(s);
+      
+      // DYNAMIC IN CIRCULATION CALCULATION
+      // Override the static database value with the calculated one to ensure data integrity
+      const calculatedServices = s.map(service => {
+          const dynamicInCirculation = calculateInCirculation(service, r, b, rr);
+          return { ...service, in_circulation: dynamicInCirculation };
+      });
+      setServices(calculatedServices);
+
       setInventoryTransactions(t);
       setHousekeepingTasks(h);
       setWebhooks(w);
@@ -178,7 +231,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSchedules(sch);
       setAdjustments(adj);
       setLeaveRequests(lr);
-      // Update new state
       setSettings(st);
       setRoomRecipes(rr);
     } catch (err) {
@@ -197,8 +249,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => handleRealtimeUpdate('bookings', payload))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'service_items' }, (payload) => handleRealtimeUpdate('service_items', payload))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, (payload) => handleRealtimeUpdate('leave_requests', payload))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => refreshData(true)) // Reload settings if changed
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_recipes' }, () => refreshData(true)) // Reload recipes if changed
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => refreshData(true)) 
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_recipes' }, () => refreshData(true)) 
       .subscribe();
 
     const interval = setInterval(() => { refreshData(true); }, 60000); 
@@ -206,6 +258,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   const handleRealtimeUpdate = (table: string, payload: any) => {
+      // If bookings change, we must refresh data to recalculate 'in_circulation'
+      if (table === 'bookings') {
+          refreshData(true);
+          return; 
+      }
+
       const { eventType, new: newRecord, old: oldRecord } = payload;
       const updateStateList = (setter: React.Dispatch<React.SetStateAction<any[]>>, idField = 'id') => {
           setter(prev => {
@@ -224,7 +282,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       };
       if (table === 'rooms') updateStateList(setRooms);
       if (table === 'housekeeping_tasks') updateStateList(setHousekeepingTasks);
-      if (table === 'bookings') updateStateList(setBookings);
       if (table === 'service_items') updateStateList(setServices);
       if (table === 'leave_requests') updateStateList(setLeaveRequests);
   };
@@ -249,38 +306,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const handleLinenExchange = async (task: HousekeepingTask, dirtyQuantity: number) => {
-      // Hàm này dùng cho đổi 1-1 (Stayover)
-      // Logic: Kho Sạch (-qty) --> Kho Bẩn (+qty)
-      // KHÔNG ẢNH HƯỞNG In_Circulation (vì lượng đồ trong phòng không đổi)
+      // Hàm này dùng cho đổi 1-1 (Stayover) - Cũ
       if (dirtyQuantity <= 0) return;
-      
-      // ... logic cũ ...
-      // Ở đây ta đơn giản hóa: Vì không biết chính xác món nào, ta sẽ không trừ kho ở đây nữa
-      // Mà sẽ dùng hàm processCheckoutLinenReturn cho chính xác.
-      // Hàm này tạm thời giữ nguyên cho tương thích ngược nếu có gọi ở đâu đó
   };
 
-  // CORE LOGIC: MINIBAR PROCESSING
+  // CORE LOGIC: MINIBAR PROCESSING (CONSUMABLES) - Logic unchanged
   const processMinibarUsage = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
       if (items.length === 0) return;
 
-      // 1. Tìm Booking đang Active của phòng này
       const activeBooking = bookingsRef.current.find(b => 
           b.facilityName === facilityName && 
           b.roomCode === roomCode && 
           (b.status === 'CheckedIn' || b.status === 'Confirmed')
       );
 
-      // 2. Trừ kho & Tạo Transaction
       for (const item of items) {
           const serviceDef = services.find(s => s.id === item.itemId);
           if (!serviceDef) continue;
 
-          // Trừ kho
+          // Minibar/Amenity is consumable, so we deduct stock.
           const newStock = Math.max(0, (serviceDef.stock || 0) - item.qty);
           await storageService.updateService({ ...serviceDef, stock: newStock });
 
-          // Lưu lịch sử kho
           const trans: InventoryTransaction = {
               id: `TR-MB-${Date.now()}-${Math.random()}`,
               created_at: new Date().toISOString(),
@@ -297,11 +344,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
           await storageService.addInventoryTransaction(trans);
 
-          // 3. Nếu có Booking & Món có tính tiền -> Cộng vào bill khách
           if (activeBooking && serviceDef.price > 0) {
               const currentServices: ServiceUsage[] = activeBooking.servicesJson ? JSON.parse(activeBooking.servicesJson) : [];
-              
-              // Kiểm tra xem món này đã có trong list chưa để cộng dồn
               const existingIndex = currentServices.findIndex(s => s.serviceId === serviceDef.id);
               if (existingIndex >= 0) {
                   currentServices[existingIndex].quantity += item.qty;
@@ -316,17 +360,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                       time: new Date().toISOString()
                   });
               }
-              
-              // Recalculate totals
               const serviceTotal = currentServices.reduce((sum, s) => sum + s.total, 0);
               const totalRevenue = activeBooking.price + activeBooking.extraFee + serviceTotal;
               
-              // Update Booking Optimistically
               const updatedBooking = {
                   ...activeBooking,
                   servicesJson: JSON.stringify(currentServices),
                   totalRevenue: totalRevenue,
-                  remainingAmount: totalRevenue - (activeBooking.totalRevenue - activeBooking.remainingAmount) // Recalc remaining
+                  remainingAmount: totalRevenue - (activeBooking.totalRevenue - activeBooking.remainingAmount)
               };
               
               setBookings(prev => prev.map(b => b.id === updatedBooking.id ? updatedBooking : b));
@@ -337,6 +378,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // CORE LOGIC: LENDING PROCESSING (Assets/Linen OUT)
+  // MODIFIED: Do NOT touch in_circulation manually. Just decrement stock.
+  // In_circulation is updated automatically because Booking lendingJson is updated via UI/Form.
   const processLendingUsage = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
       if (items.length === 0) return;
 
@@ -344,14 +387,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const serviceDef = services.find(s => s.id === item.itemId);
           if (!serviceDef) continue;
 
-          // Logic Mượn đồ: Trừ kho sạch -> Chuyển sang "Đang lưu hành" (In Circulation)
+          // Logic Mượn đồ: Trừ kho sạch.
+          // Không cộng In Circulation thủ công nữa -> Đã được tính dynamic từ Booking Lending.
           const newStock = Math.max(0, (serviceDef.stock || 0) - item.qty);
-          const newCirculation = (serviceDef.in_circulation || 0) + item.qty;
           
           await storageService.updateService({ 
               ...serviceDef, 
-              stock: newStock,
-              in_circulation: newCirculation
+              stock: newStock
           });
 
           // Lưu Transaction (Type OUT - Xuất dùng/Mượn)
@@ -374,7 +416,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       refreshData(true);
   };
 
-  // CORE LOGIC: CHECKOUT RETURN (Linen/Assets IN to Dirty)
+  // CORE LOGIC: CHECKOUT RETURN (Lending IN to Dirty)
+  // MODIFIED: Do NOT touch in_circulation manually. Just increment laundryStock.
+  // In_circulation decreases automatically when Booking status changes to CheckedOut.
   const processCheckoutLinenReturn = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
       if (items.length === 0) return;
 
@@ -382,18 +426,59 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const serviceDef = services.find(s => s.id === item.itemId || s.name === item.itemId);
           if (!serviceDef) continue;
 
-          // Logic Checkout: "Đang lưu hành" -> "Kho Bẩn" (Chờ giặt)
-          const newCirculation = Math.max(0, (serviceDef.in_circulation || 0) - item.qty);
+          // Logic Checkout Lending Return: Tăng "Kho Bẩn".
           const newLaundry = (serviceDef.laundryStock || 0) + item.qty;
           
           await storageService.updateService({ 
               ...serviceDef, 
-              in_circulation: newCirculation,
+              laundryStock: newLaundry
+          });
+      }
+      refreshData(true);
+  };
+
+  // CORE LOGIC: AUTO-RESTOCK (Swap Clean for Dirty based on Recipe/Par Stock)
+  // MODIFIED: Ensure in_circulation is NOT touched.
+  const processRoomRestock = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
+      if (items.length === 0) return;
+
+      for (const item of items) {
+          // Find service by ID or Name
+          const serviceDef = services.find(s => s.id === item.itemId || s.name === item.itemId);
+          if (!serviceDef) continue;
+
+          // Logic Swap: 
+          // 1. Staff removes dirty linen (Par Stock) -> Laundry Stock increases (+qty)
+          // 2. Staff replaces with clean linen -> Clean Stock decreases (-qty)
+          
+          const newStock = (serviceDef.stock || 0) - item.qty;
+          const newLaundry = (serviceDef.laundryStock || 0) + item.qty;
+          
+          if (newStock < 0) console.warn(`[Stock Warning] Item ${item.itemId} went negative during restock/swap.`);
+
+          // IMPORTANT: Do NOT update in_circulation here.
+          await storageService.updateService({ 
+              ...serviceDef, 
+              stock: newStock,
               laundryStock: newLaundry
           });
 
-          // Lưu Transaction (Log để đối soát, không phải transaction tài chính)
-          // Không tạo Transaction quá chi tiết để tránh spam bảng log, chỉ cập nhật state
+          // Transaction Log
+          const trans: InventoryTransaction = {
+              id: `TR-SWAP-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              created_at: new Date().toISOString(),
+              staff_id: currentUser?.id || 'SYSTEM',
+              staff_name: currentUser?.collaboratorName || 'Buồng phòng',
+              item_id: serviceDef.id,
+              item_name: serviceDef.name,
+              type: 'EXCHANGE', 
+              quantity: item.qty,
+              price: 0,
+              total: 0,
+              facility_name: facilityName,
+              note: `Dọn phòng ${roomCode} - Auto Swap (Bẩn ra/Sạch vào)`
+          };
+          await storageService.addInventoryTransaction(trans);
       }
       refreshData(true);
   };
@@ -535,7 +620,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
        addCollaborator, updateCollaborator, deleteCollaborator,
        addExpense, updateExpense, deleteExpense,
        addService, updateService, deleteService, addInventoryTransaction,
-       handleLinenCheckIn, handleLinenExchange, processMinibarUsage, processLendingUsage, processCheckoutLinenReturn,
+       handleLinenCheckIn, handleLinenExchange, processMinibarUsage, processLendingUsage, processCheckoutLinenReturn, processRoomRestock,
        syncHousekeepingTasks, 
        addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
        getGeminiApiKey, setAppConfig,

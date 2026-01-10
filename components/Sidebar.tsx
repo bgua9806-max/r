@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, CalendarCheck, DoorOpen, Users, 
   Wallet, Settings, LogOut, Brush, ChevronRight, Contact, Package, Clock, X, Smartphone
@@ -12,6 +12,7 @@ import { ShiftModal } from './ShiftModal';
 export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isOpen, toggle }) => {
   const { currentUser, setCurrentUser, canAccess, currentShift } = useAppContext();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isShiftModalOpen, setShiftModalOpen] = useState(false);
 
   const handleLogout = () => {
@@ -71,40 +72,40 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
       </div>
 
       <nav className="flex-1 px-2 space-y-1 overflow-y-auto custom-scrollbar">
-        {menuItems.filter(i => canAccess(i.to)).map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            onClick={() => window.innerWidth < 768 && toggle()} // Auto close on mobile click
-            title={!isOpen ? item.label : ''}
-            className={({ isActive }) => `
-              relative flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group mb-1
-              ${isActive 
-                ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/20 font-medium' 
-                : 'hover:bg-slate-800/80 hover:text-white text-slate-400'}
-            `}
-          >
-            {({ isActive }) => (
-              <>
-                <item.icon size={20} className={`shrink-0 transition-colors ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
-                
-                <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 text-sm ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
-                  {item.label}
-                </span>
+        {menuItems.filter(i => canAccess(i.to)).map((item) => {
+          const isActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+          
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              onClick={() => window.innerWidth < 768 && toggle()} // Auto close on mobile click
+              title={!isOpen ? item.label : ''}
+              className={`
+                relative flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group mb-1
+                ${isActive 
+                  ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/20 font-medium' 
+                  : 'hover:bg-slate-800/80 hover:text-white text-slate-400'}
+              `}
+            >
+              <item.icon size={20} className={`shrink-0 transition-colors ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+              
+              <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 text-sm ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
+                {item.label}
+              </span>
 
-                {(!isOpen && window.innerWidth >= 768) && (
-                  <div className="absolute left-full ml-4 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap shadow-xl">
-                    {item.label}
-                  </div>
-                )}
-                
-                {isActive && (isOpen || window.innerWidth < 768) && (
-                   <ChevronRight size={14} className="ml-auto opacity-50" />
-                )}
-              </>
-            )}
-          </NavLink>
-        ))}
+              {(!isOpen && window.innerWidth >= 768) && (
+                <div className="absolute left-full ml-4 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap shadow-xl">
+                  {item.label}
+                </div>
+              )}
+              
+              {isActive && (isOpen || window.innerWidth < 768) && (
+                  <ChevronRight size={14} className="ml-auto opacity-50" />
+              )}
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="p-3 border-t border-slate-800/80 bg-[#020617]">
