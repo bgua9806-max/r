@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal } from './Modal';
-import { Booking, Payment, ServiceUsage, BookingStatus, GuestProfile, Guest, InventoryTransaction, SheetBooking, LendingItem } from '../types';
+import { Booking, Payment, ServiceUsage, BookingStatus, GuestProfile, Guest, InventoryTransaction, SheetBooking, LendingItem, HousekeepingTask } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { 
   FileText, ShoppingCart, Banknote, ScanLine, AlertTriangle, Loader2, LogIn, LogOut, CheckCircle,
@@ -81,7 +82,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       facilities, rooms, services, currentUser, bookings,
       addBooking, updateBooking, checkAvailability,
       notify, triggerWebhook, upsertRoom, refreshData, webhooks, addGuestProfile,
-      updateService, addInventoryTransaction, getGeminiApiKey, processLendingUsage
+      updateService, addInventoryTransaction, getGeminiApiKey, processLendingUsage,
+      syncHousekeepingTasks
   } = useAppContext();
   
   const [activeTab, setActiveTab] = useState<'info' | 'services' | 'payment' | 'ocr'>('info');
@@ -1175,10 +1177,26 @@ If a field is not visible, return empty string "".`;
          };
          
          const facility = facilities.find(f => f.facilityName === formData.facilityName);
-         if (facility) {
+         if (facility && formData.roomCode) {
+             // 1. Create Explicit Checkout Task
+             const checkoutTask: HousekeepingTask = {
+                 id: crypto.randomUUID(),
+                 facility_id: facility.id,
+                 room_code: formData.roomCode,
+                 task_type: 'Checkout',
+                 status: 'Pending',
+                 priority: 'High',
+                 created_at: new Date().toISOString(),
+                 note: 'Khách trả phòng (Auto-generated)',
+                 assignee: null
+             };
+             await syncHousekeepingTasks([checkoutTask]);
+
+             // 2. Update Room Status (Legacy/Visual)
              const room = rooms.find(r => r.facility_id === facility.id && r.name === formData.roomCode);
              if (room) await upsertRoom({ ...room, status: 'Bẩn' });
          }
+         
          await updateBooking(updatedBooking);
          triggerWebhook('checkout', { room: formData.roomCode, facility: formData.facilityName, customer: formData.customerName });
          
