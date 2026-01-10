@@ -64,7 +64,7 @@ interface AppContextType {
   processMinibarUsage: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
   processLendingUsage: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
   processCheckoutLinenReturn: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>; 
-  processRoomRestock: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
+  processRoomRestock: (facilityName: string, roomCode: string, items: {itemId: string, dirtyReturnQty: number, cleanRestockQty: number}[]) => Promise<void>;
 
   syncHousekeepingTasks: (tasks: HousekeepingTask[]) => Promise<void>;
   
@@ -416,9 +416,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       refreshData(true);
   };
 
-  // CORE LOGIC: CHECKOUT RETURN (Lending IN to Dirty)
-  // MODIFIED: Do NOT touch in_circulation manually. Just increment laundryStock.
-  // In_circulation decreases automatically when Booking status changes to CheckedOut.
+  // CORE LOGIC: CHECKOUT RETURN (Legacy - Now mostly handled by processRoomRestock)
+  // Used if only lending items are returned without full restock
   const processCheckoutLinenReturn = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
       if (items.length === 0) return;
 
@@ -437,9 +436,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       refreshData(true);
   };
 
-  // CORE LOGIC: AUTO-RESTOCK (Swap Clean for Dirty based on Recipe/Par Stock)
-  // MODIFIED: Ensure in_circulation is NOT touched.
-  const processRoomRestock = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
+  // CORE LOGIC: ONE-CLICK RESTOCK (Standard + Lending Logic)
+  // Refactored to separate Dirty Return and Clean Replenish
+  const processRoomRestock = async (
+      facilityName: string, 
+      roomCode: string, 
+      items: {itemId: string, dirtyReturnQty: number, cleanRestockQty: number}[]
+  ) => {
       if (items.length === 0) return;
 
       for (const item of items) {
@@ -447,16 +450,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const serviceDef = services.find(s => s.id === item.itemId || s.name === item.itemId);
           if (!serviceDef) continue;
 
-          // Logic Swap: 
-          // 1. Staff removes dirty linen (Par Stock) -> Laundry Stock increases (+qty)
-          // 2. Staff replaces with clean linen -> Clean Stock decreases (-qty)
+          // Logic: 
+          // 1. Calculate Dirty Return (Recipe + Lending) -> Laundry Stock increases (+dirtyReturnQty)
+          // 2. Calculate Clean Replenish (Recipe Only) -> Clean Stock decreases (-cleanRestockQty)
           
-          const newStock = (serviceDef.stock || 0) - item.qty;
-          const newLaundry = (serviceDef.laundryStock || 0) + item.qty;
+          const newLaundry = (serviceDef.laundryStock || 0) + item.dirtyReturnQty;
+          const newStock = (serviceDef.stock || 0) - item.cleanRestockQty;
           
-          if (newStock < 0) console.warn(`[Stock Warning] Item ${item.itemId} went negative during restock/swap.`);
+          if (newStock < 0) console.warn(`[Stock Warning] Item ${item.itemId} went negative during restock.`);
 
-          // IMPORTANT: Do NOT update in_circulation here.
+          // IMPORTANT: Do NOT update in_circulation manually.
           await storageService.updateService({ 
               ...serviceDef, 
               stock: newStock,
@@ -465,18 +468,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
           // Transaction Log
           const trans: InventoryTransaction = {
-              id: `TR-SWAP-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              id: `TR-RESTOCK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               created_at: new Date().toISOString(),
               staff_id: currentUser?.id || 'SYSTEM',
               staff_name: currentUser?.collaboratorName || 'Buồng phòng',
               item_id: serviceDef.id,
               item_name: serviceDef.name,
               type: 'EXCHANGE', 
-              quantity: item.qty,
+              quantity: item.dirtyReturnQty, // Log the dirty return count
               price: 0,
               total: 0,
               facility_name: facilityName,
-              note: `Dọn phòng ${roomCode} - Auto Swap (Bẩn ra/Sạch vào)`
+              note: `Restock P.${roomCode}: Dirty +${item.dirtyReturnQty}, Clean -${item.cleanRestockQty}`
           };
           await storageService.addInventoryTransaction(trans);
       }

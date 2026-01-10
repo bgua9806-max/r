@@ -1,69 +1,167 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { HousekeepingTask, Booking, LendingItem, ServiceItem } from '../types';
-import { CheckCircle, Clock, AlertTriangle, LogOut, BedDouble, Brush, ChevronLeft, Save, Camera, RotateCcw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { 
+  LogOut, CheckCircle, Clock, MapPin, 
+  ChevronRight, CheckSquare, Square, 
+  ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle
+} from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { HousekeepingTask, ChecklistItem, RoomRecipeItem, ServiceItem, LendingItem, Booking } from '../types';
+import { storageService } from '../services/storage';
+import { ROOM_RECIPES } from '../constants';
+
+const DEFAULT_CHECKLIST: ChecklistItem[] = [
+    { id: '1', text: 'Thay ga giường và vỏ gối', completed: false },
+    { id: '2', text: 'Lau dọn nhà vệ sinh', completed: false },
+    { id: '3', text: 'Hút bụi và Lau sàn', completed: false },
+    { id: '4', text: 'Xịt thơm phòng', completed: false },
+];
+
+const PlayIcon = ({ size = 20, fill = "currentColor", className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polygon points="5,3 19,12 5,21" />
+  </svg>
+);
 
 export const StaffPortal: React.FC = () => {
   const { 
-    currentUser, housekeepingTasks, rooms, bookings, facilities, services, roomRecipes,
-    syncHousekeepingTasks, upsertRoom, processCheckoutLinenReturn, processRoomRestock, notify, refreshData
+    facilities, rooms, housekeepingTasks, syncHousekeepingTasks, services, bookings,
+    currentUser, setCurrentUser, notify, upsertRoom, 
+    refreshData, isLoading, handleLinenExchange, processMinibarUsage, processCheckoutLinenReturn, processRoomRestock
   } = useAppContext();
-
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   
-  // Extend tasks with facility name
+  const [activeTask, setActiveTask] = useState<(HousekeepingTask & { facilityName: string, roomType?: string }) | null>(null);
+  const [localChecklist, setLocalChecklist] = useState<ChecklistItem[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  // State quản lý tiêu hao (Minibar, Amenity)
+  const [consumedItems, setConsumedItems] = useState<Record<string, number>>({});
+  
+  // State quản lý thu hồi đồ vải (Linen Return - Actual Count)
+  const [returnedLinenCounts, setReturnedLinenCounts] = useState<Record<string, number>>({});
+
+  const navigate = useNavigate();
+  
+  const handleLogout = () => {
+    setCurrentUser(null);
+    storageService.saveUser(null);
+    navigate('/login');
+  };
+
+  const handleRefresh = async () => {
+    try {
+        await refreshData(false);
+        notify('success', 'Đã cập nhật dữ liệu mới nhất');
+    } catch (err) {
+        notify('error', 'Không thể kết nối máy chủ');
+    }
+  };
+
   const myTasks = useMemo(() => {
-      if (!currentUser) return [];
-      
-      // Filter tasks assigned to current user OR unassigned (if configured)
-      // For simplicity, let's show tasks assigned to this user.
-      const assigned = housekeepingTasks.filter(t => t.assignee === currentUser.collaboratorName && t.status !== 'Done');
-      
-      return assigned.map(t => {
-          const f = facilities.find(fac => fac.id === t.facility_id);
-          return { ...t, facilityName: f?.facilityName || 'Unknown' };
-      }).sort((a,b) => {
-          // Sort priority: In Progress > Priority High > Normal
-          if (a.status === 'In Progress' && b.status !== 'In Progress') return -1;
-          if (a.status !== 'In Progress' && b.status === 'In Progress') return 1;
-          if (a.priority === 'High' && b.priority !== 'High') return -1;
-          if (a.priority !== 'High' && b.priority === 'High') return 1;
-          return 0;
-      });
-  }, [housekeepingTasks, currentUser, facilities]);
+    const today = new Date();
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const taskList: (HousekeepingTask & { facilityName: string, roomStatus: string, roomType: string })[] = [];
 
-  const activeTask = useMemo(() => 
-      myTasks.find(t => t.id === selectedTaskId) || null
-  , [myTasks, selectedTaskId]);
+    const dbTasksMap = new Map<string, HousekeepingTask>();
+    housekeepingTasks.forEach(t => {
+        const tDate = format(parseISO(t.created_at), 'yyyy-MM-dd');
+        if (t.status !== 'Done' || tDate === todayStr) {
+            dbTasksMap.set(`${t.facility_id}_${t.room_code}`, t);
+        }
+    });
 
-  const currentRoom = useMemo(() => {
-      if (!activeTask) return null;
-      return rooms.find(r => r.facility_id === activeTask.facility_id && r.name === activeTask.room_code);
-  }, [activeTask, rooms]);
+    rooms.forEach(room => {
+        const facility = facilities.find(f => f.id === room.facility_id);
+        if (!facility) return;
+        
+        // Logic: Nếu không phải Buồng phòng (vd Admin/Quản lý), hiển thị ALL tasks
+        // Nếu là Buồng phòng, chỉ hiển thị task thuộc cơ sở được phân công (hoặc all nếu ko phân công)
+        const canViewAll = currentUser?.role !== 'Buồng phòng';
+        const isAssigned = !facility.staff || facility.staff.length === 0 || (currentUser && facility.staff.includes(currentUser.collaboratorName));
+        
+        if (!canViewAll && !isAssigned) return;
 
+        if (room.status === 'Đã dọn') {
+            const existingTask = dbTasksMap.get(`${room.facility_id}_${room.name}`);
+            if (existingTask && existingTask.status === 'Done') {
+                 taskList.push({
+                    ...existingTask,
+                    facilityName: facility.facilityName,
+                    roomStatus: room.status,
+                    roomType: room.type || '1GM8'
+                });
+            }
+            return; 
+        }
+
+        if (room.status === 'Bẩn' || room.status === 'Đang dọn') {
+            const existingTask = dbTasksMap.get(`${room.facility_id}_${room.name}`);
+            if (existingTask) {
+                taskList.push({
+                    ...existingTask,
+                    status: room.status === 'Đang dọn' ? 'In Progress' : existingTask.status === 'Done' ? 'Pending' : existingTask.status,
+                    facilityName: facility.facilityName,
+                    roomStatus: room.status,
+                    roomType: room.type || '1GM8'
+                });
+            } else {
+                taskList.push({
+                    id: `VIRTUAL_${room.facility_id}_${room.name}`,
+                    facility_id: room.facility_id,
+                    room_code: room.name,
+                    task_type: 'Dirty', 
+                    status: room.status === 'Đang dọn' ? 'In Progress' : 'Pending',
+                    assignee: currentUser?.collaboratorName || null,
+                    priority: 'High',
+                    created_at: new Date().toISOString(),
+                    note: 'Phòng báo Bẩn (Tự động đồng bộ)',
+                    facilityName: facility.facilityName,
+                    roomStatus: room.status,
+                    roomType: room.type || '1GM8'
+                });
+            }
+        }
+    });
+
+    return taskList.sort((a,b) => {
+        const sOrder = { 'In Progress': 0, 'Pending': 1, 'Done': 2 };
+        if (sOrder[a.status] !== sOrder[b.status]) return (sOrder[a.status] ?? 3) - (sOrder[b.status] ?? 3);
+        const pOrder = { 'Checkout': 0, 'Dirty': 1, 'Stayover': 2, 'Vacant': 3 };
+        return (pOrder[a.task_type] ?? 4) - (pOrder[b.task_type] ?? 4);
+    });
+  }, [facilities, rooms, housekeepingTasks, currentUser]);
+
+  const workloadStats = useMemo(() => {
+    const total = myTasks.length;
+    const completed = myTasks.filter(t => t.status === 'Done').length;
+    return { total, completed, pending: total - completed };
+  }, [myTasks]);
+
+  // --- LOGIC LOAD CÔNG THỨC ---
   const recipeItems = useMemo(() => {
-      if (!currentRoom || !currentRoom.type || !roomRecipes[currentRoom.type]) return [];
-      const recipe = roomRecipes[currentRoom.type];
-      
-      return recipe.items.map(ri => {
-          const service = services.find(s => s.id === ri.itemId);
+      if (!activeTask || !activeTask.roomType) return [];
+      const recipe = ROOM_RECIPES[activeTask.roomType];
+      if (!recipe) return [];
+
+      // Map Recipe Items to Service Items details
+      return recipe.items.map(rItem => {
+          // Find service by ID first, then Name
+          const service = services.find(s => s.id === rItem.itemId || s.name === rItem.itemId);
           return {
-              ...ri,
-              name: service?.name,
-              category: service?.category,
-              fallbackName: ri.itemId,
-              requiredQty: ri.quantity,
-              id: service?.id
+              ...service,
+              requiredQty: rItem.quantity,
+              fallbackName: rItem.itemId
           };
       });
-  }, [currentRoom, roomRecipes, services]);
+  }, [activeTask, services]);
 
-  // --- LOGIC LẤY DANH SÁCH THU HỒI (RECIPE + LENDING) ---
+  // --- LOGIC LẤY DANH SÁCH THU HỒI (ONE-CLICK: MERGE RECIPE + LENDING) ---
   const checkoutReturnList = useMemo(() => {
       if (!activeTask) return [];
       
-      const combinedMap = new Map<string, { id: string, name: string, qty: number, isExtra: boolean }>();
+      const combinedMap = new Map<string, { id: string, name: string, totalQty: number, standardQty: number, lendingQty: number }>();
 
       // 1. Add Recipe Items (Standard) - Only for Checkout Context
       if (activeTask.task_type === 'Checkout') {
@@ -73,8 +171,9 @@ export const StaffPortal: React.FC = () => {
                   combinedMap.set(id, {
                       id: id,
                       name: item.name || item.fallbackName,
-                      qty: item.requiredQty,
-                      isExtra: false
+                      totalQty: item.requiredQty,
+                      standardQty: item.requiredQty,
+                      lendingQty: 0
                   });
               }
           });
@@ -88,17 +187,23 @@ export const StaffPortal: React.FC = () => {
           .sort((a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime());
 
       let booking: Booking | undefined;
-      
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+
       // Step 2: Context-Aware Selection (Turnover Day Fix)
       if (activeTask.task_type === 'Checkout') {
-          // Rule: Lấy booking đã CheckedOut gần nhất. 
-          booking = sortedBookings.find(b => b.status === 'CheckedOut');
+          // Rule: If Checkout task, find only the CheckedOut booking for today (The one leaving)
+          booking = sortedBookings.find(b => {
+              if (b.status !== 'CheckedOut') return false;
+              // Check actualCheckOut date first, then checkoutDate
+              const outDate = b.actualCheckOut ? b.actualCheckOut : b.checkoutDate;
+              return outDate.startsWith(todayStr);
+          });
       } else if (activeTask.task_type === 'Stayover' || activeTask.task_type === 'Dirty') {
           // Rule: If Stayover/Dirty task, find the CheckedIn booking (The one staying)
           booking = sortedBookings.find(b => b.status === 'CheckedIn');
       }
 
-      // Step 3: Extract Lending
+      // Step 3: Merge Lending
       if (booking && booking.lendingJson) {
           try {
               const lends: LendingItem[] = JSON.parse(booking.lendingJson);
@@ -106,14 +211,15 @@ export const StaffPortal: React.FC = () => {
                   if (l.quantity > 0) {
                       const existing = combinedMap.get(l.item_id);
                       if (existing) {
-                          existing.qty += l.quantity;
-                          existing.isExtra = true; // Mark as having extra
+                          existing.totalQty += l.quantity;
+                          existing.lendingQty += l.quantity;
                       } else {
                           combinedMap.set(l.item_id, {
                               id: l.item_id,
                               name: l.item_name,
-                              qty: l.quantity,
-                              isExtra: true
+                              totalQty: l.quantity,
+                              standardQty: 0,
+                              lendingQty: l.quantity
                           });
                       }
                   }
@@ -126,209 +232,412 @@ export const StaffPortal: React.FC = () => {
       return Array.from(combinedMap.values());
   }, [activeTask, recipeItems, bookings]);
 
+  // --- INITIALIZE ACTUAL COUNTS ON TASK OPEN ---
+  useEffect(() => {
+      if (activeTask?.task_type === 'Checkout' && checkoutReturnList.length > 0) {
+          const initialCounts: Record<string, number> = {};
+          checkoutReturnList.forEach(item => {
+              initialCounts[item.id] = item.totalQty; // Default actual = expected Total (Full return)
+          });
+          setReturnedLinenCounts(initialCounts);
+      } else {
+          setReturnedLinenCounts({});
+      }
+  }, [activeTask, checkoutReturnList]);
+
+  const openTaskDetail = (task: typeof myTasks[0]) => {
+      if (task.status === 'Done') return;
+      setActiveTask(task);
+      const savedChecklist = task.checklist ? JSON.parse(task.checklist) : [...DEFAULT_CHECKLIST];
+      setLocalChecklist(savedChecklist);
+      setConsumedItems({}); // Reset consumables
+  };
+
+  const toggleCheckItem = (id: string) => {
+      setLocalChecklist(prev => prev.map(item => item.id === id ? { ...item, completed: !item.completed } : item));
+  };
+
+  const updateConsumed = (itemId: string, delta: number) => {
+      setConsumedItems(prev => {
+          const current = prev[itemId] || 0;
+          const next = Math.max(0, current + delta);
+          return { ...prev, [itemId]: next };
+      });
+  };
+
+  const updateReturnedLinen = (itemId: string, delta: number) => {
+      setReturnedLinenCounts(prev => {
+          const current = prev[itemId] || 0;
+          const next = Math.max(0, current + delta);
+          return { ...prev, [itemId]: next };
+      });
+  };
+
   const handleStartTask = async () => {
-      if (!activeTask) return;
-      const updated = { ...activeTask, status: 'In Progress' as const, started_at: new Date().toISOString() };
-      // Remove local 'facilityName' before syncing if necessary, but syncHousekeepingTasks sanitizes usually or Supabase ignores extra fields?
-      // Better to be safe and use exact HousekeepingTask type
-      const { facilityName, ...taskData } = updated;
-      await syncHousekeepingTasks([taskData as HousekeepingTask]);
-      
-      if (currentRoom) {
-          await upsertRoom({ ...currentRoom, status: 'Đang dọn' });
+      if (!activeTask || isProcessing) return;
+      setIsProcessing(true);
+      try {
+        const isVirtual = activeTask.id.startsWith('VIRTUAL_');
+        const taskToSync: HousekeepingTask = {
+            ...activeTask,
+            id: isVirtual ? crypto.randomUUID() : activeTask.id,
+            status: 'In Progress',
+            started_at: new Date().toISOString(),
+            assignee: currentUser?.collaboratorName || activeTask.assignee,
+            points: 2
+        };
+        await Promise.all([
+            syncHousekeepingTasks([taskToSync]),
+            (async () => {
+                const room = rooms.find(r => r.facility_id === activeTask.facility_id && r.name === activeTask.room_code);
+                if (room && room.status !== 'Đang dọn') await upsertRoom({ ...room, status: 'Đang dọn' });
+            })()
+        ]);
+        setActiveTask({ ...taskToSync, facilityName: activeTask.facilityName, roomType: activeTask.roomType });
+        notify('info', `Đã bắt đầu dọn phòng ${activeTask.room_code}`);
+      } catch (e) {
+        notify('error', 'Có lỗi xảy ra, vui lòng thử lại');
+      } finally {
+        setIsProcessing(false);
       }
-      notify('success', 'Bắt đầu dọn phòng');
   };
 
-  const handleCompleteTask = async () => {
-      if (!activeTask) return;
+  const handleComplete = async () => {
+      if (!activeTask || isProcessing) return;
       
-      // 1. Return Dirty Linen (Inventory Logic)
-      if (activeTask.task_type === 'Checkout') {
-          // Items from checklist/recipe -> Dirty Stock
-          const returnItems = checkoutReturnList.map(i => ({ itemId: i.id, qty: i.qty }));
-          if (returnItems.length > 0) {
-              await processCheckoutLinenReturn(activeTask.facilityName, activeTask.room_code, returnItems);
-          }
+      // Validation: Bắt buộc check hết checklist
+      if (localChecklist.some(i => !i.completed)) {
+          if (!confirm('Bạn chưa hoàn thành hết checklist. Vẫn muốn hoàn tất?')) return;
       }
 
-      // 2. Restock Clean Linen (Inventory Logic)
-      // For now, assume full restock to par level if recipe exists
-      if (recipeItems.length > 0) {
-          const restockItems = recipeItems
-              .filter(i => i.category === 'Linen' || i.category === 'Amenity' || i.category === 'Minibar')
-              .map(i => ({ itemId: i.id || i.fallbackName, qty: i.requiredQty }));
-          
-          if (restockItems.length > 0) {
-              await processRoomRestock(activeTask.facilityName, activeTask.room_code, restockItems);
-          }
+      setIsProcessing(true);
+      try {
+        // 1. Process Minibar & Amenities (Consumables) - UNTOUCHED
+        const itemsToProcess = (Object.entries(consumedItems) as [string, number][])
+            .filter(([_, qty]) => qty > 0)
+            .map(([itemId, qty]) => ({ itemId, qty }));
+        
+        await processMinibarUsage(activeTask.facilityName, activeTask.room_code, itemsToProcess);
+
+        // 2. ONE-CLICK RESTOCK LOGIC
+        // Merge "Dirty Return" and "Clean Replenish" logic into one payload
+        let linenNote = '';
+        if (activeTask.task_type === 'Checkout' || activeTask.task_type === 'Dirty') {
+            const missingItems: string[] = [];
+            const restockPayload: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[] = [];
+
+            checkoutReturnList.forEach(item => {
+                // A: Dirty Return (Based on actual count by maid)
+                // Default to totalQty if not modified, or take user input
+                const actualDirtyCount = returnedLinenCounts[item.id] ?? item.totalQty;
+                
+                // B: Clean Replenish (Based on Recipe ONLY)
+                // We do NOT replenish lending items for the next guest
+                const replenishCount = item.standardQty;
+
+                if (actualDirtyCount > 0 || replenishCount > 0) {
+                    restockPayload.push({
+                        itemId: item.id,
+                        dirtyReturnQty: actualDirtyCount,
+                        cleanRestockQty: replenishCount
+                    });
+                }
+
+                // Check Variance for logs (Standard + Lending vs Actual)
+                if (actualDirtyCount < item.totalQty) {
+                    missingItems.push(`${item.name} x${item.totalQty - actualDirtyCount}`);
+                }
+            });
+
+            if (restockPayload.length > 0) {
+                await processRoomRestock(activeTask.facilityName, activeTask.room_code, restockPayload);
+            }
+            
+            // Auto append Lost Item Note
+            if (missingItems.length > 0) {
+                linenNote += `\n[BÁO MẤT/HỎNG]: ${missingItems.join(', ')}`;
+            }
+        }
+        
+        // 3. Update Task Status
+        const updatedTask: HousekeepingTask = {
+            ...activeTask,
+            status: 'Done',
+            checklist: JSON.stringify(localChecklist),
+            completed_at: new Date().toISOString(),
+            linen_exchanged: activeTask.task_type === 'Checkout' ? checkoutReturnList.reduce((sum, i) => sum + (returnedLinenCounts[i.id] ?? i.totalQty), 0) : 0,
+            note: (activeTask.note || '') + linenNote
+        };
+
+        await syncHousekeepingTasks([updatedTask]);
+
+        // 4. Update Room Status
+        const roomObj = rooms.find(r => r.facility_id === activeTask.facility_id && r.name === activeTask.room_code);
+        if (roomObj) {
+            await upsertRoom({ ...roomObj, status: 'Đã dọn' });
+            notify('success', `Hoàn thành P.${activeTask.room_code}.`);
+        }
+        
+        setActiveTask(null);
+      } catch (e) {
+        console.error(e);
+        notify('error', 'Có lỗi xử lý. Vui lòng thử lại.');
+      } finally {
+        setIsProcessing(false);
       }
-
-      // 3. Update Task Status
-      const updated = { 
-          ...activeTask, 
-          status: 'Done' as const, 
-          completed_at: new Date().toISOString() 
-      };
-      const { facilityName, ...taskData } = updated;
-      
-      await syncHousekeepingTasks([taskData as HousekeepingTask]);
-
-      // 4. Update Room Status
-      if (currentRoom) {
-          await upsertRoom({ ...currentRoom, status: 'Đã dọn' });
-      }
-
-      notify('success', 'Hoàn thành nhiệm vụ!');
-      setSelectedTaskId(null);
   };
-
-  if (!currentUser) return <div className="p-4 text-center">Vui lòng đăng nhập</div>;
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 md:rounded-2xl overflow-hidden">
-        {/* HEADER */}
-        <div className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm z-10 sticky top-0">
-            {selectedTaskId ? (
-                <button onClick={() => setSelectedTaskId(null)} className="flex items-center gap-1 text-slate-500 font-bold text-sm">
-                    <ChevronLeft size={20}/> Quay lại
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans max-w-md mx-auto shadow-2xl relative">
+        <header className="bg-white border-b border-slate-200 p-4 sticky top-0 z-50 shadow-sm flex justify-between items-center">
+            <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-brand-600 flex items-center justify-center text-white font-bold shadow-lg shadow-brand-200">
+                    {currentUser?.collaboratorName?.charAt(0) || 'U'}
+                </div>
+                <div>
+                    <h1 className="text-sm font-black text-slate-800 tracking-tight uppercase">Housekeeper App</h1>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{currentUser?.collaboratorName}</p>
+                </div>
+            </div>
+            <div className="flex gap-2">
+                {currentUser?.role !== 'Buồng phòng' && (
+                    <button onClick={() => navigate('/dashboard')} className="p-2 text-slate-400 hover:text-brand-600 transition-colors" title="Về Dashboard">
+                        <LayoutDashboard size={20} />
+                    </button>
+                )}
+                <button onClick={handleRefresh} disabled={isLoading} className={`p-2 transition-colors ${isLoading ? 'text-brand-600 animate-spin' : 'text-slate-400 hover:text-brand-600'}`}>
+                    <RefreshCw size={20} />
                 </button>
-            ) : (
-                <h1 className="font-bold text-lg text-slate-800">Danh sách nhiệm vụ</h1>
-            )}
-            <div className="flex items-center gap-2">
-                <button onClick={() => refreshData()} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200"><RotateCcw size={18}/></button>
-                <div className="w-8 h-8 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold text-xs shadow-md">
-                    {currentUser.collaboratorName.charAt(0)}
+                <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-600 transition-colors">
+                    <LogOut size={20} />
+                </button>
+            </div>
+        </header>
+
+        <div className="p-4 pt-6">
+            <div className={`rounded-2xl p-4 shadow-sm border bg-white border-slate-100`}>
+                <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                        <CheckCircle className="text-green-500" size={16}/> Tiến độ dọn dẹp
+                    </h3>
+                    <span className={`text-xs font-black px-2 py-0.5 rounded-full bg-brand-100 text-brand-700`}>
+                        {workloadStats.completed}/{workloadStats.total}
+                    </span>
+                </div>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full transition-all duration-1000 bg-brand-500`} style={{ width: `${(workloadStats.completed / (workloadStats.total || 1)) * 100}%` }}></div>
                 </div>
             </div>
         </div>
 
-        {/* CONTENT */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-            {!selectedTaskId ? (
-                // LIST VIEW
-                <div className="space-y-3">
-                    {myTasks.length === 0 ? (
-                        <div className="text-center py-10 text-slate-400">
-                            <CheckCircle size={48} className="mx-auto mb-2 opacity-50"/>
-                            <p className="text-sm font-medium">Không có nhiệm vụ nào!</p>
-                        </div>
-                    ) : (
-                        myTasks.map(task => (
-                            <div 
-                                key={task.id} 
-                                onClick={() => setSelectedTaskId(task.id)}
-                                className={`bg-white p-4 rounded-xl border-l-4 shadow-sm active:scale-95 transition-all cursor-pointer
-                                    ${task.status === 'In Progress' ? 'border-l-blue-500 ring-1 ring-blue-100' : 'border-l-slate-300'}
-                                `}
-                            >
-                                <div className="flex justify-between items-start mb-2">
-                                    <div>
-                                        <div className="text-2xl font-black text-slate-800">{task.room_code}</div>
-                                        <div className="text-xs text-slate-500">{task.facilityName}</div>
-                                    </div>
-                                    {task.priority === 'High' && <span className="bg-red-100 text-red-600 px-2 py-1 rounded text-[10px] font-black uppercase">Gấp</span>}
-                                </div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border
-                                        ${task.task_type === 'Checkout' ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                                          task.task_type === 'Stayover' ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                                          'bg-amber-50 text-amber-600 border-amber-100'}
-                                    `}>
-                                        {task.task_type}
-                                    </span>
-                                    {task.status === 'In Progress' && <span className="text-[10px] font-bold text-blue-600 flex items-center gap-1"><Clock size={10}/> Đang làm</span>}
-                                </div>
-                                {task.note && <div className="text-xs text-slate-500 italic bg-slate-50 p-2 rounded">{task.note}</div>}
-                            </div>
-                        ))
-                    )}
+        <div className="flex-1 px-4 pb-24 space-y-4 overflow-y-auto">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Cần thực hiện</h2>
+            {myTasks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-center">
+                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-4">
+                        <CheckCircle size={40} className="text-emerald-400" />
+                    </div>
+                    <p className="font-bold text-sm">Tuyệt vời! Tất cả phòng đã sạch.</p>
                 </div>
             ) : (
-                // DETAIL VIEW
-                activeTask && (
-                    <div className="space-y-6">
-                        {/* TASK HEADER */}
-                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <div className="text-3xl font-black text-slate-800">{activeTask.room_code}</div>
-                                    <div className="text-sm font-medium text-slate-500">{activeTask.facilityName}</div>
-                                </div>
-                                <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase border
-                                    ${activeTask.task_type === 'Checkout' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-blue-50 text-blue-600 border-blue-100'}
-                                `}>
-                                    {activeTask.task_type}
-                                </div>
-                            </div>
-                            
-                            {activeTask.status === 'Pending' ? (
-                                <button 
-                                    onClick={handleStartTask}
-                                    className="w-full mt-4 py-3 bg-brand-600 text-white rounded-xl font-bold shadow-lg shadow-brand-200 active:scale-95 transition-transform"
-                                >
-                                    Bắt đầu dọn
-                                </button>
-                            ) : (
-                                <div className="mt-4 p-3 bg-blue-50 text-blue-700 rounded-xl text-center font-bold text-sm border border-blue-100">
-                                    Đang thực hiện...
-                                </div>
-                            )}
+                myTasks.map(task => (
+                    <div 
+                        key={task.id} 
+                        onClick={() => openTaskDetail(task)}
+                        className={`
+                            bg-white rounded-2xl p-5 shadow-sm border-2 transition-all active:scale-[0.97] relative group
+                            ${task.status === 'Done' ? 'border-slate-100 opacity-60' : 
+                              task.status === 'In Progress' ? 'border-brand-500 shadow-brand-100 ring-2 ring-brand-500/10' : 'border-white'}
+                        `}
+                    >
+                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${task.task_type === 'Checkout' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+                        <div className="flex justify-between items-center mb-3">
+                             <div className="flex items-center gap-4">
+                                 <h2 className="text-3xl font-black text-slate-800">{task.room_code}</h2>
+                                 <div className="space-y-1">
+                                     <div className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase border w-fit ${task.task_type === 'Checkout' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'}`}>
+                                         {task.task_type}
+                                     </div>
+                                     <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold">
+                                         <MapPin size={10}/> {task.facilityName} - {task.roomType}
+                                     </div>
+                                 </div>
+                             </div>
+                             {task.status !== 'Done' && <ChevronRight className="text-slate-300" size={20} />}
                         </div>
-
-                        {/* ITEMS TO COLLECT / CHECK */}
-                        {activeTask.status === 'In Progress' && (
-                            <div className="space-y-4">
-                                <div className="bg-white p-4 rounded-xl border border-slate-200">
-                                    <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
-                                        <LogOut size={16} className="text-rose-500"/> 
-                                        {activeTask.task_type === 'Checkout' ? 'Thu hồi & Kiểm tra' : 'Kiểm tra đồ'}
-                                    </h3>
-                                    <div className="space-y-2">
-                                        {checkoutReturnList.length === 0 ? (
-                                            <div className="text-xs text-slate-400 italic text-center py-2">Không có đồ cần thu hồi đặc biệt</div>
-                                        ) : (
-                                            checkoutReturnList.map((item, idx) => (
-                                                <div key={idx} className="flex justify-between items-center p-2 bg-slate-50 rounded-lg border border-slate-100">
-                                                    <span className="text-sm font-medium text-slate-700">{item.name}</span>
-                                                    <div className="flex items-center gap-2">
-                                                        {item.isExtra && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold">Mượn thêm</span>}
-                                                        <span className="font-black text-slate-800">x{item.qty}</span>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div className="bg-white p-4 rounded-xl border border-slate-200">
-                                    <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
-                                        <BedDouble size={16} className="text-emerald-500"/> 
-                                        Setup mới (Restock)
-                                    </h3>
-                                    <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
-                                        {recipeItems.filter(i => i.category !== 'Asset').map((item, idx) => (
-                                            <div key={idx} className="flex justify-between items-center p-2 border-b border-slate-50 last:border-0">
-                                                <span className="text-sm text-slate-600">{item.name}</span>
-                                                <span className="font-bold text-emerald-600">x{item.requiredQty}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <button 
-                                    onClick={handleCompleteTask}
-                                    className="w-full py-4 bg-green-600 text-white rounded-xl font-black shadow-xl shadow-green-200 active:scale-95 transition-all text-sm uppercase tracking-widest flex items-center justify-center gap-2"
-                                >
-                                    <CheckCircle size={20}/> Hoàn thành & Báo sạch
-                                </button>
-                            </div>
-                        )}
+                        {task.status === 'In Progress' && <div className="mt-4 flex items-center gap-1 text-[10px] text-emerald-600 font-bold animate-pulse"><Clock size={10}/> Đang dọn...</div>}
                     </div>
-                )
+                ))
             )}
         </div>
+
+        {activeTask && (
+            <div className="fixed inset-0 z-[100] bg-white animate-in slide-in-from-bottom duration-300 flex flex-col">
+                <div className="bg-white border-b border-slate-100 p-4 flex items-center gap-4 shrink-0">
+                    <button onClick={() => setActiveTask(null)} disabled={isProcessing} className="p-2 -ml-2 text-slate-400 hover:bg-slate-50 rounded-full transition-all">
+                        <ArrowLeft size={24} />
+                    </button>
+                    <div>
+                        <h2 className="text-lg font-black text-slate-800">Phòng {activeTask.room_code}</h2>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{activeTask.roomType} ({ROOM_RECIPES[activeTask.roomType || '1GM8']?.description})</p>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar pb-32">
+                    {/* INFO BOX */}
+                    <div className="bg-slate-50 rounded-2xl p-4 flex items-start gap-3 border border-slate-200/50">
+                        <div className="bg-white p-2 rounded-xl text-slate-400 shadow-sm"><Info size={20}/></div>
+                        <div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Ghi chú</span>
+                            <p className="text-sm font-bold text-slate-700 italic">"{activeTask.note || 'Không có ghi chú'}"</p>
+                        </div>
+                    </div>
+
+                    {/* SECTION 1: Checklist Công Việc */}
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                                <ListChecks size={18} className="text-brand-600"/> 1. Checklist Dọn Dẹp
+                            </h3>
+                            <span className="text-[10px] font-black text-slate-400">{localChecklist.filter(i => i.completed).length}/{localChecklist.length}</span>
+                        </div>
+                        <div className="space-y-3">
+                            {localChecklist.map(item => (
+                                <button key={item.id} onClick={() => toggleCheckItem(item.id)} className={`w-full p-4 rounded-xl border-2 flex items-center justify-between transition-all ${item.completed ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-100'}`}>
+                                    <span className={`text-sm font-bold ${item.completed ? 'text-emerald-700 line-through opacity-60' : 'text-slate-700'}`}>{item.text}</span>
+                                    {item.completed ? <CheckSquare className="text-emerald-600" size={20}/> : <Square className="text-slate-300" size={20}/>}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* SECTION 2: Báo Cáo Minibar & Đồ Vải (Only when Active) */}
+                    {activeTask.status === 'In Progress' && (
+                        <>
+                            <div className="h-px bg-slate-100 my-4"></div>
+                            
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-4">
+                                <Beer size={18} className="text-orange-500"/> 2. Kiểm tra Minibar & Đồ dùng
+                            </h3>
+                            <p className="text-[10px] text-slate-400 mb-2 italic">Hãy nhập số lượng khách đã dùng/bóc vỏ để tính tiền.</p>
+
+                            <div className="space-y-3">
+                                {recipeItems.filter(i => i.category === 'Minibar' || i.category === 'Amenity').map((item, idx) => {
+                                    const consumed = consumedItems[item.id || item.fallbackName] || 0;
+                                    const isMinibar = item.category === 'Minibar';
+                                    
+                                    return (
+                                        <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                            <div>
+                                                <div className="font-bold text-slate-700 text-sm">{item.name || item.fallbackName}</div>
+                                                <div className="text-[10px] text-slate-400 mt-0.5 font-medium uppercase">
+                                                    Setup chuẩn: {item.requiredQty} {item.unit} {isMinibar && <span className="text-orange-500 font-bold ml-1">(Có phí)</span>}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button onClick={() => updateConsumed(item.id || item.fallbackName, -1)} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 active:scale-90 transition-transform"><Minus size={16}/></button>
+                                                <span className={`w-6 text-center font-black ${consumed > 0 ? 'text-red-600' : 'text-slate-300'}`}>{consumed}</span>
+                                                <button onClick={() => updateConsumed(item.id || item.fallbackName, 1)} className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 active:scale-90 transition-transform"><Plus size={16}/></button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="h-px bg-slate-100 my-4"></div>
+
+                            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-4">
+                                <ArchiveRestore size={18} className="text-blue-500"/> 3. Thu hồi Đồ vải (Linen)
+                            </h3>
+                            {activeTask.task_type === 'Checkout' ? (
+                                <div className="space-y-3">
+                                    <div className="bg-blue-50 p-4 rounded-xl text-blue-800 text-xs font-bold border border-blue-100 flex items-center gap-2 mb-2">
+                                        <Info size={16}/> Thu hồi cả Đồ mượn và Đồ chuẩn.
+                                    </div>
+                                    {checkoutReturnList.map((item, idx) => {
+                                        // Default actual count to Total Qty (Standard + Lending)
+                                        const actual = returnedLinenCounts[item.id] ?? item.totalQty;
+                                        const diff = actual - item.totalQty;
+                                        
+                                        return (
+                                        <div key={idx} className={`flex items-center justify-between bg-white p-3 rounded-xl border shadow-sm ${diff < 0 ? 'border-red-200 bg-red-50' : 'border-blue-100'}`}>
+                                            <div className="flex items-center gap-3">
+                                                <Shirt size={20} className={diff < 0 ? "text-red-400" : "text-blue-400"}/>
+                                                <div>
+                                                    <div className="font-bold text-slate-700 text-sm">{item.name}</div>
+                                                    <div className="text-[10px] text-slate-500 font-medium">
+                                                        Tổng thu: <b className="text-slate-800 text-xs">{item.totalQty}</b> 
+                                                        <span className="text-slate-400 ml-1">(Chuẩn: {item.standardQty}{item.lendingQty > 0 ? `, Mượn: ${item.lendingQty}` : ''})</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Counter UI */}
+                                            <div className="flex items-center gap-3">
+                                                <button onClick={() => updateReturnedLinen(item.id, -1)} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 active:scale-90 transition-transform"><Minus size={16}/></button>
+                                                <div className="flex flex-col items-center w-12">
+                                                    <span className={`text-lg font-black ${diff < 0 ? 'text-red-600' : 'text-blue-600'}`}>{actual}</span>
+                                                    {diff !== 0 && (
+                                                        <span className={`text-[8px] font-bold uppercase ${diff < 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                                                            {diff < 0 ? `Thiếu ${Math.abs(diff)}` : `Dư ${diff}`}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <button onClick={() => updateReturnedLinen(item.id, 1)} className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 active:scale-90 transition-transform"><Plus size={16}/></button>
+                                            </div>
+                                        </div>
+                                        );
+                                    })}
+                                    {checkoutReturnList.length === 0 && <div className="text-center text-xs text-slate-400 italic">Không có đồ vải cần thu hồi.</div>}
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <p className="text-[10px] text-slate-400 mb-2 italic">Stayover: Nhập số lượng đồ bẩn bạn mang ra khỏi phòng (để đổi sạch).</p>
+                                    {recipeItems.filter(i => i.category === 'Linen').map((item, idx) => {
+                                        const consumed = consumedItems[item.id || item.fallbackName] || 0;
+                                        return (
+                                            <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                                <div>
+                                                    <div className="font-bold text-slate-700 text-sm">{item.name || item.fallbackName}</div>
+                                                    <div className="text-[10px] text-slate-400 mt-0.5 font-medium uppercase">Setup chuẩn: {item.requiredQty}</div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <button onClick={() => updateConsumed(item.id || item.fallbackName, -1)} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 active:scale-90 transition-transform"><Minus size={16}/></button>
+                                                    <span className={`w-6 text-center font-black ${consumed > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{consumed}</span>
+                                                    <button onClick={() => updateConsumed(item.id || item.fallbackName, 1)} className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 active:scale-90 transition-transform"><Plus size={16}/></button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+
+                <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-100 flex gap-3 pb-8">
+                    {activeTask.status === 'Pending' ? (
+                        <button 
+                            onClick={handleStartTask}
+                            disabled={isProcessing}
+                            className={`w-full bg-brand-600 text-white py-4 rounded-2xl font-black shadow-xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all text-sm tracking-widest ${isProcessing ? 'opacity-80 cursor-not-allowed' : ''}`}
+                        >
+                            {isProcessing ? <Loader2 size={20} className="animate-spin" /> : <PlayIcon size={20} fill="white" />} 
+                            {isProcessing ? 'ĐANG XỬ LÝ...' : 'BẮT ĐẦU DỌN'}
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={handleComplete}
+                            disabled={isProcessing}
+                            className={`w-full py-4 rounded-2xl font-black shadow-xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all text-sm tracking-widest bg-emerald-600 text-white shadow-emerald-100 ${isProcessing ? 'opacity-80 cursor-not-allowed' : ''}`}
+                        >
+                             {isProcessing ? <Loader2 size={20} className="animate-spin" /> : <CheckCircle size={20} />} 
+                             {isProcessing ? 'ĐANG CẬP NHẬT...' : 'HOÀN TẤT & TRỪ KHO'}
+                        </button>
+                    )}
+                </div>
+            </div>
+        )}
     </div>
   );
 };
