@@ -650,7 +650,27 @@ export const storageService = {
   },
   syncHousekeepingTasks: async (tasks: HousekeepingTask[]) => {
       if (IS_USING_MOCK) return;
-      const sanitizedTasks = tasks.map(({ checklist, photo_before, photo_after, ...rest }) => rest);
+      
+      // Strict allowlist sanitization to remove UI-only fields (facilityName, roomType, etc.)
+      const sanitizedTasks = tasks.map(task => ({
+          id: task.id,
+          facility_id: task.facility_id,
+          room_code: task.room_code,
+          task_type: task.task_type,
+          status: task.status,
+          assignee: task.assignee,
+          priority: task.priority,
+          created_at: task.created_at,
+          started_at: task.started_at, 
+          completed_at: task.completed_at,
+          note: task.note,
+          points: task.points,
+          checklist: task.checklist,
+          photo_before: task.photo_before,
+          photo_after: task.photo_after,
+          linen_exchanged: task.linen_exchanged
+      }));
+
       const { error } = await supabase.from('housekeeping_tasks').upsert(sanitizedTasks);
       if (error) logError('Error syncing tasks', error);
   },

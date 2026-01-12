@@ -1161,8 +1161,7 @@ If a field is not visible, return empty string "".`;
      setIsSubmitting(true);
      try {
          await handleInventoryDeduction(usedServices);
-         // Note: Checkout does NOT deduct lending again, it should handle returning items (logic skipped for now per prompt)
-
+         
          const now = new Date();
          const updatedBooking: Booking = { 
              ...(formData as Booking), 
@@ -1177,6 +1176,10 @@ If a field is not visible, return empty string "".`;
          };
          
          const facility = facilities.find(f => f.facilityName === formData.facilityName);
+         
+         // Dual-Write Logic: Update Booking, Room and Create Task simultaneously
+         const updates: Promise<any>[] = [updateBooking(updatedBooking)];
+
          if (facility && formData.roomCode) {
              // 1. Create Explicit Checkout Task
              const checkoutTask: HousekeepingTask = {
@@ -1190,19 +1193,26 @@ If a field is not visible, return empty string "".`;
                  note: 'Khách trả phòng (Auto-generated)',
                  assignee: null
              };
-             await syncHousekeepingTasks([checkoutTask]);
+             updates.push(syncHousekeepingTasks([checkoutTask]));
 
-             // 2. Update Room Status (Legacy/Visual)
+             // 2. Update Room Status (Mark as Dirty)
              const room = rooms.find(r => r.facility_id === facility.id && r.name === formData.roomCode);
-             if (room) await upsertRoom({ ...room, status: 'Bẩn' });
+             if (room) {
+                 updates.push(upsertRoom({ ...room, status: 'Bẩn' }));
+             }
          }
          
-         await updateBooking(updatedBooking);
+         await Promise.all(updates);
          triggerWebhook('checkout', { room: formData.roomCode, facility: formData.facilityName, customer: formData.customerName });
          
          notify('success', '👋 Đã Checkout thành công!');
          onClose();
-     } catch (err) { notify('error', 'Lỗi khi Checkout.'); refreshData(); } finally { setIsSubmitting(false); }
+     } catch (err) { 
+         notify('error', 'Lỗi khi Checkout.'); 
+         refreshData(); 
+     } finally { 
+         setIsSubmitting(false); 
+     }
   };
 
   // --- CANCELLATION LOGIC ---

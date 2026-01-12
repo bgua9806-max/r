@@ -1,13 +1,13 @@
 
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Trash2, Pencil, Home, DollarSign, Settings2, Box, Maximize2, Mountain } from 'lucide-react';
-import { Facility, Room } from '../types';
+import { Plus, Trash2, Pencil, Home, DollarSign, Settings2, Box, Maximize2, Mountain, Loader2 } from 'lucide-react';
+import { Facility, Room, HousekeepingTask } from '../types';
 import { FacilityModal } from '../components/FacilityModal';
 import { RoomModal } from '../components/RoomModal';
 
 export const Rooms: React.FC = () => {
-  const { facilities, rooms, updateFacility, deleteFacility, notify, upsertRoom, deleteRoom } = useAppContext();
+  const { facilities, rooms, updateFacility, deleteFacility, notify, upsertRoom, deleteRoom, syncHousekeepingTasks, housekeepingTasks } = useAppContext();
   
   // Facility Modal State
   const [isFacilityModalOpen, setFacilityModalOpen] = useState(false);
@@ -20,6 +20,9 @@ export const Rooms: React.FC = () => {
   // Local state for adding rooms inline
   const [newRoomCodes, setNewRoomCodes] = useState<Record<string, string>>({});
   const [newRoomPrices, setNewRoomPrices] = useState<Record<string, string>>({});
+
+  // Prevent double clicks
+  const [processingRoomId, setProcessingRoomId] = useState<string | null>(null);
 
   const handleEditFacility = (f: Facility) => {
     setEditingFacility(f);
@@ -101,14 +104,68 @@ export const Rooms: React.FC = () => {
       notify('success', 'Đã cập nhật phòng');
   };
 
-  const toggleStatus = (room: Room) => {
-    const current = room.status;
-    const next = current === 'Đã dọn' ? 'Bẩn' : current === 'Bẩn' ? 'Đang dọn' : 'Đã dọn';
+  const toggleStatus = async (room: Room) => {
+    // Ngăn chặn click đúp
+    if (processingRoomId === room.id) return;
     
-    upsertRoom({
-        ...room,
-        status: next
-    });
+    setProcessingRoomId(room.id);
+    try {
+        const current = room.status;
+        const next = current === 'Đã dọn' ? 'Bẩn' : current === 'Bẩn' ? 'Đang dọn' : 'Đã dọn';
+        
+        const updates: Promise<any>[] = [];
+
+        // 1. Cập nhật trạng thái phòng (UI Optimistic)
+        updates.push(upsertRoom({
+            ...room,
+            status: next
+        }));
+
+        // 2. LOGIC ĐỒNG BỘ TASK (Dual-Write)
+        if (next === 'Bẩn') {
+            // Nếu chuyển sang Bẩn -> Tạo Task mới
+            const newTask: HousekeepingTask = {
+                id: crypto.randomUUID(),
+                facility_id: room.facility_id,
+                room_code: room.name,
+                task_type: 'Dirty',
+                status: 'Pending',
+                priority: 'Normal',
+                created_at: new Date().toISOString(),
+                note: 'Báo bẩn thủ công từ Quản lý Phòng',
+                assignee: null,
+                points: 2
+            };
+            updates.push(syncHousekeepingTasks([newTask]));
+            notify('info', `Đã tạo yêu cầu dọn phòng ${room.name}`);
+        } 
+        else if (next === 'Đã dọn') {
+            // Nếu chuyển sang Sạch -> Tìm và Đóng các task cũ đang treo
+            const pendingTasks = housekeepingTasks.filter(t => 
+                t.facility_id === room.facility_id && 
+                t.room_code === room.name && 
+                t.status !== 'Done'
+            );
+            
+            if (pendingTasks.length > 0) {
+                const closedTasks = pendingTasks.map(t => ({
+                    ...t, 
+                    status: 'Done' as const,
+                    completed_at: new Date().toISOString(),
+                    note: (t.note || '') + ' (Đóng bởi Quản lý)'
+                }));
+                updates.push(syncHousekeepingTasks(closedTasks));
+            }
+        }
+
+        await Promise.all(updates);
+
+    } catch (e) {
+        console.error(e);
+        notify('error', 'Có lỗi khi cập nhật trạng thái');
+    } finally {
+        setProcessingRoomId(null);
+    }
   };
 
   const getRoomTypeBadgeColor = (type?: string) => {
@@ -171,17 +228,26 @@ export const Rooms: React.FC = () => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
-                        {facilityRooms.map((r) => (
+                        {facilityRooms.map((r) => {
+                            const isProcessing = processingRoomId === r.id;
+                            return (
                             <div key={r.id} className="relative group/room h-full">
                                 <div 
                                 onClick={() => toggleStatus(r)}
                                 className={`
-                                flex flex-col p-3 rounded-xl border-2 cursor-pointer select-none transition-all shadow-sm h-full justify-between
+                                flex flex-col p-3 rounded-xl border-2 cursor-pointer select-none transition-all shadow-sm h-full justify-between relative overflow-hidden
                                 ${r.status === 'Đã dọn' ? 'bg-white border-green-500/50 hover:border-green-500' :
                                     r.status === 'Bẩn' ? 'bg-gray-50 border-gray-300 hover:border-gray-400' : 
                                     r.status === 'Sửa chữa' ? 'bg-red-50 border-red-300 hover:border-red-500' :
                                     'bg-white border-yellow-400 hover:border-yellow-500'}
                                 `}>
+                                    {/* Processing Overlay */}
+                                    {isProcessing && (
+                                        <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-20 flex items-center justify-center">
+                                            <Loader2 size={24} className="animate-spin text-brand-600"/>
+                                        </div>
+                                    )}
+
                                     {/* HEADER: Name + Badge */}
                                     <div className="flex justify-between items-start mb-2">
                                         <span className={`text-xl font-black ${r.status === 'Đã dọn' ? 'text-green-700' : 'text-slate-700'}`}>{r.name}</span>
@@ -246,7 +312,7 @@ export const Rooms: React.FC = () => {
                                     </button>
                                 </div>
                             </div>
-                        ))}
+                        )})}
                         </div>
                     )}
                  </div>

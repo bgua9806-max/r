@@ -7,7 +7,7 @@ import {
   ChevronRight, CheckSquare, Square, 
   ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, differenceInMinutes } from 'date-fns';
 import { HousekeepingTask, ChecklistItem, RoomRecipeItem, ServiceItem, LendingItem, Booking } from '../types';
 import { storageService } from '../services/storage';
 import { ROOM_RECIPES } from '../constants';
@@ -35,11 +35,7 @@ export const StaffPortal: React.FC = () => {
   const [activeTask, setActiveTask] = useState<(HousekeepingTask & { facilityName: string, roomType?: string }) | null>(null);
   const [localChecklist, setLocalChecklist] = useState<ChecklistItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // State quản lý tiêu hao (Minibar, Amenity)
   const [consumedItems, setConsumedItems] = useState<Record<string, number>>({});
-  
-  // State quản lý thu hồi đồ vải (Linen Return - Actual Count)
   const [returnedLinenCounts, setReturnedLinenCounts] = useState<Record<string, number>>({});
 
   const navigate = useNavigate();
@@ -64,6 +60,19 @@ export const StaffPortal: React.FC = () => {
     const todayStr = format(today, 'yyyy-MM-dd');
     const taskList: (HousekeepingTask & { facilityName: string, roomStatus: string, roomType: string })[] = [];
 
+    // ANTI-GHOST LOGIC:
+    // Tạo danh sách các phòng vừa được dọn xong gần đây (trong 2 tiếng)
+    // Để tránh hiển thị lại task "Bẩn" (Virtual Task) nếu DB chưa kịp cập nhật trạng thái phòng
+    const recentDoneMap = new Map<string, number>();
+    housekeepingTasks.forEach(t => {
+        if (t.status === 'Done') {
+            const key = `${t.facility_id}_${t.room_code}`;
+            const time = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
+            const current = recentDoneMap.get(key) || 0;
+            if (time > current) recentDoneMap.set(key, time);
+        }
+    });
+
     const dbTasksMap = new Map<string, HousekeepingTask>();
     housekeepingTasks.forEach(t => {
         const tDate = format(parseISO(t.created_at), 'yyyy-MM-dd');
@@ -76,13 +85,12 @@ export const StaffPortal: React.FC = () => {
         const facility = facilities.find(f => f.id === room.facility_id);
         if (!facility) return;
         
-        // Logic: Nếu không phải Buồng phòng (vd Admin/Quản lý), hiển thị ALL tasks
-        // Nếu là Buồng phòng, chỉ hiển thị task thuộc cơ sở được phân công (hoặc all nếu ko phân công)
         const canViewAll = currentUser?.role !== 'Buồng phòng';
         const isAssigned = !facility.staff || facility.staff.length === 0 || (currentUser && facility.staff.includes(currentUser.collaboratorName));
         
         if (!canViewAll && !isAssigned) return;
 
+        // Nếu phòng Đã dọn -> Chỉ hiện nếu có task Done hôm nay (để xem lại)
         if (room.status === 'Đã dọn') {
             const existingTask = dbTasksMap.get(`${room.facility_id}_${room.name}`);
             if (existingTask && existingTask.status === 'Done') {
@@ -96,9 +104,12 @@ export const StaffPortal: React.FC = () => {
             return; 
         }
 
+        // Nếu phòng Bẩn/Đang dọn -> Hiện task
         if (room.status === 'Bẩn' || room.status === 'Đang dọn') {
             const existingTask = dbTasksMap.get(`${room.facility_id}_${room.name}`);
+            
             if (existingTask) {
+                // Task thật có sẵn trong DB
                 taskList.push({
                     ...existingTask,
                     status: room.status === 'Đang dọn' ? 'In Progress' : existingTask.status === 'Done' ? 'Pending' : existingTask.status,
@@ -107,6 +118,15 @@ export const StaffPortal: React.FC = () => {
                     roomType: room.type || '1GM8'
                 });
             } else {
+                // Task ảo (Virtual)
+                // ANTI-GHOST CHECK: Nếu vừa làm xong task này cách đây < 2 tiếng -> KHÔNG HIỆN LẠI
+                const uniqueKey = `${room.facility_id}_${room.name}`;
+                const lastDoneTime = recentDoneMap.get(uniqueKey);
+                
+                if (lastDoneTime && differenceInMinutes(today, new Date(lastDoneTime)) < 120) {
+                    return; // Skip ghost task
+                }
+
                 taskList.push({
                     id: `VIRTUAL_${room.facility_id}_${room.name}`,
                     facility_id: room.facility_id,
@@ -139,15 +159,12 @@ export const StaffPortal: React.FC = () => {
     return { total, completed, pending: total - completed };
   }, [myTasks]);
 
-  // --- LOGIC LOAD CÔNG THỨC ---
+  // ... (Recipe Logic unchanged) ...
   const recipeItems = useMemo(() => {
       if (!activeTask || !activeTask.roomType) return [];
       const recipe = ROOM_RECIPES[activeTask.roomType];
       if (!recipe) return [];
-
-      // Map Recipe Items to Service Items details
       return recipe.items.map(rItem => {
-          // Find service by ID first, then Name
           const service = services.find(s => s.id === rItem.itemId || s.name === rItem.itemId);
           return {
               ...service,
@@ -157,13 +174,11 @@ export const StaffPortal: React.FC = () => {
       });
   }, [activeTask, services]);
 
-  // --- LOGIC LẤY DANH SÁCH THU HỒI (ONE-CLICK: MERGE RECIPE + LENDING) ---
   const checkoutReturnList = useMemo(() => {
       if (!activeTask) return [];
       
       const combinedMap = new Map<string, { id: string, name: string, totalQty: number, standardQty: number, lendingQty: number }>();
 
-      // 1. Add Recipe Items (Standard) - Only for Checkout Context
       if (activeTask.task_type === 'Checkout') {
           recipeItems.forEach(item => {
               if (item.category === 'Linen' || item.category === 'Asset') {
@@ -179,9 +194,6 @@ export const StaffPortal: React.FC = () => {
           });
       }
 
-      // 2. Add Extra Lending Items from Booking (Task-Driven Logic)
-      
-      // Step 1: Filter Bookings for this room and sort by created date (newest first)
       const sortedBookings = bookings
           .filter(b => b.facilityName === activeTask.facilityName && b.roomCode === activeTask.room_code)
           .sort((a, b) => new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime());
@@ -189,21 +201,16 @@ export const StaffPortal: React.FC = () => {
       let booking: Booking | undefined;
       const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      // Step 2: Context-Aware Selection (Turnover Day Fix)
       if (activeTask.task_type === 'Checkout') {
-          // Rule: If Checkout task, find only the CheckedOut booking for today (The one leaving)
           booking = sortedBookings.find(b => {
               if (b.status !== 'CheckedOut') return false;
-              // Check actualCheckOut date first, then checkoutDate
               const outDate = b.actualCheckOut ? b.actualCheckOut : b.checkoutDate;
               return outDate.startsWith(todayStr);
           });
       } else if (activeTask.task_type === 'Stayover' || activeTask.task_type === 'Dirty') {
-          // Rule: If Stayover/Dirty task, find the CheckedIn booking (The one staying)
           booking = sortedBookings.find(b => b.status === 'CheckedIn');
       }
 
-      // Step 3: Merge Lending
       if (booking && booking.lendingJson) {
           try {
               const lends: LendingItem[] = JSON.parse(booking.lendingJson);
@@ -224,20 +231,18 @@ export const StaffPortal: React.FC = () => {
                       }
                   }
               });
-          } catch(e) {
-              console.warn("Error parsing lendingJson", e);
-          }
+          } catch(e) { }
       }
 
       return Array.from(combinedMap.values());
   }, [activeTask, recipeItems, bookings]);
 
-  // --- INITIALIZE ACTUAL COUNTS ON TASK OPEN ---
+  // ... (Effect and Handlers unchanged) ...
   useEffect(() => {
       if (activeTask?.task_type === 'Checkout' && checkoutReturnList.length > 0) {
           const initialCounts: Record<string, number> = {};
           checkoutReturnList.forEach(item => {
-              initialCounts[item.id] = item.totalQty; // Default actual = expected Total (Full return)
+              initialCounts[item.id] = item.totalQty; 
           });
           setReturnedLinenCounts(initialCounts);
       } else {
@@ -250,7 +255,7 @@ export const StaffPortal: React.FC = () => {
       setActiveTask(task);
       const savedChecklist = task.checklist ? JSON.parse(task.checklist) : [...DEFAULT_CHECKLIST];
       setLocalChecklist(savedChecklist);
-      setConsumedItems({}); // Reset consumables
+      setConsumedItems({}); 
   };
 
   const toggleCheckItem = (id: string) => {
@@ -305,34 +310,25 @@ export const StaffPortal: React.FC = () => {
   const handleComplete = async () => {
       if (!activeTask || isProcessing) return;
       
-      // Validation: Bắt buộc check hết checklist
       if (localChecklist.some(i => !i.completed)) {
           if (!confirm('Bạn chưa hoàn thành hết checklist. Vẫn muốn hoàn tất?')) return;
       }
 
       setIsProcessing(true);
       try {
-        // 1. Process Minibar & Amenities (Consumables) - UNTOUCHED
         const itemsToProcess = (Object.entries(consumedItems) as [string, number][])
             .filter(([_, qty]) => qty > 0)
             .map(([itemId, qty]) => ({ itemId, qty }));
         
         await processMinibarUsage(activeTask.facilityName, activeTask.room_code, itemsToProcess);
 
-        // 2. ONE-CLICK RESTOCK LOGIC
-        // Merge "Dirty Return" and "Clean Replenish" logic into one payload
         let linenNote = '';
         if (activeTask.task_type === 'Checkout' || activeTask.task_type === 'Dirty') {
             const missingItems: string[] = [];
             const restockPayload: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[] = [];
 
             checkoutReturnList.forEach(item => {
-                // A: Dirty Return (Based on actual count by maid)
-                // Default to totalQty if not modified, or take user input
                 const actualDirtyCount = returnedLinenCounts[item.id] ?? item.totalQty;
-                
-                // B: Clean Replenish (Based on Recipe ONLY)
-                // We do NOT replenish lending items for the next guest
                 const replenishCount = item.standardQty;
 
                 if (actualDirtyCount > 0 || replenishCount > 0) {
@@ -343,7 +339,6 @@ export const StaffPortal: React.FC = () => {
                     });
                 }
 
-                // Check Variance for logs (Standard + Lending vs Actual)
                 if (actualDirtyCount < item.totalQty) {
                     missingItems.push(`${item.name} x${item.totalQty - actualDirtyCount}`);
                 }
@@ -353,13 +348,11 @@ export const StaffPortal: React.FC = () => {
                 await processRoomRestock(activeTask.facilityName, activeTask.room_code, restockPayload);
             }
             
-            // Auto append Lost Item Note
             if (missingItems.length > 0) {
                 linenNote += `\n[BÁO MẤT/HỎNG]: ${missingItems.join(', ')}`;
             }
         }
         
-        // 3. Update Task Status
         const updatedTask: HousekeepingTask = {
             ...activeTask,
             status: 'Done',
@@ -369,15 +362,19 @@ export const StaffPortal: React.FC = () => {
             note: (activeTask.note || '') + linenNote
         };
 
-        await syncHousekeepingTasks([updatedTask]);
+        // DUAL WRITE: Update Task AND Room Status simultaneously
+        const updates: Promise<any>[] = [
+            syncHousekeepingTasks([updatedTask])
+        ];
 
-        // 4. Update Room Status
         const roomObj = rooms.find(r => r.facility_id === activeTask.facility_id && r.name === activeTask.room_code);
         if (roomObj) {
-            await upsertRoom({ ...roomObj, status: 'Đã dọn' });
-            notify('success', `Hoàn thành P.${activeTask.room_code}.`);
+            updates.push(upsertRoom({ ...roomObj, status: 'Đã dọn' }));
         }
+
+        await Promise.all(updates);
         
+        notify('success', `Hoàn thành P.${activeTask.room_code}.`);
         setActiveTask(null);
       } catch (e) {
         console.error(e);
@@ -555,7 +552,6 @@ export const StaffPortal: React.FC = () => {
                                         <Info size={16}/> Thu hồi cả Đồ mượn và Đồ chuẩn.
                                     </div>
                                     {checkoutReturnList.map((item, idx) => {
-                                        // Default actual count to Total Qty (Standard + Lending)
                                         const actual = returnedLinenCounts[item.id] ?? item.totalQty;
                                         const diff = actual - item.totalQty;
                                         
@@ -572,7 +568,6 @@ export const StaffPortal: React.FC = () => {
                                                 </div>
                                             </div>
                                             
-                                            {/* Counter UI */}
                                             <div className="flex items-center gap-3">
                                                 <button onClick={() => updateReturnedLinen(item.id, -1)} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 active:scale-90 transition-transform"><Minus size={16}/></button>
                                                 <div className="flex flex-col items-center w-12">

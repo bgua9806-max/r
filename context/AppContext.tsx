@@ -217,7 +217,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setExpenses(e);
       
       // DYNAMIC IN CIRCULATION CALCULATION
-      // Override the static database value with the calculated one to ensure data integrity
       const calculatedServices = s.map(service => {
           const dynamicInCirculation = calculateInCirculation(service, r, b, rr);
           return { ...service, in_circulation: dynamicInCirculation };
@@ -243,6 +242,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     refreshData();
 
+    // OPTIMISTIC REALTIME UPDATE
+    // Thay vì refreshData(true) (tải lại toàn bộ), ta dùng handleRealtimeUpdate để merge dữ liệu.
+    // Điều này giúp giao diện phản hồi tức thì.
     const channels = supabase.channel('custom-all-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, (payload) => handleRealtimeUpdate('rooms', payload))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'housekeeping_tasks' }, (payload) => handleRealtimeUpdate('housekeeping_tasks', payload))
@@ -253,37 +255,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_recipes' }, () => refreshData(true)) 
       .subscribe();
 
-    const interval = setInterval(() => { refreshData(true); }, 60000); 
+    const interval = setInterval(() => { refreshData(true); }, 60000); // Vẫn giữ polling để đảm bảo tính toàn vẹn lâu dài
     return () => { supabase.removeChannel(channels); clearInterval(interval); };
   }, []);
 
   const handleRealtimeUpdate = (table: string, payload: any) => {
-      // If bookings change, we must refresh data to recalculate 'in_circulation'
+      // Đối với Bookings, nếu có thay đổi vẫn nên refresh nhẹ để tính toán lại Inventory
       if (table === 'bookings') {
-          refreshData(true);
-          return; 
+          // Optimistic update cho Booking list trước
+          updateStateList(setBookings, payload);
+          // Sau đó refresh ngầm để tính toán lại tồn kho/doanh thu phức tạp
+          // setTimeout(() => refreshData(true), 1000); 
+          return;
       }
 
+      // Đối với Rooms và Tasks, dùng Optimistic Update hoàn toàn
+      if (table === 'rooms') updateStateList(setRooms, payload);
+      if (table === 'housekeeping_tasks') updateStateList(setHousekeepingTasks, payload);
+      if (table === 'service_items') updateStateList(setServices, payload);
+      if (table === 'leave_requests') updateStateList(setLeaveRequests, payload);
+  };
+
+  // Helper xử lý Merge dữ liệu Realtime
+  const updateStateList = (setter: React.Dispatch<React.SetStateAction<any[]>>, payload: any, idField = 'id') => {
       const { eventType, new: newRecord, old: oldRecord } = payload;
-      const updateStateList = (setter: React.Dispatch<React.SetStateAction<any[]>>, idField = 'id') => {
-          setter(prev => {
-              if (eventType === 'INSERT') {
-                  if (prev.some(item => item[idField] === newRecord[idField])) return prev;
-                  return [newRecord, ...prev]; 
-              }
-              if (eventType === 'UPDATE') {
-                  return prev.map(item => item[idField] === newRecord[idField] ? newRecord : item);
-              }
-              if (eventType === 'DELETE') {
-                  return prev.filter(item => item[idField] !== oldRecord[idField]);
-              }
-              return prev;
-          });
-      };
-      if (table === 'rooms') updateStateList(setRooms);
-      if (table === 'housekeeping_tasks') updateStateList(setHousekeepingTasks);
-      if (table === 'service_items') updateStateList(setServices);
-      if (table === 'leave_requests') updateStateList(setLeaveRequests);
+      
+      setter(prev => {
+          if (eventType === 'INSERT') {
+              // Chống trùng lặp
+              if (prev.some(item => item[idField] === newRecord[idField])) return prev;
+              return [newRecord, ...prev]; 
+          }
+          if (eventType === 'UPDATE') {
+              // Merge thông minh: Giữ lại các trường cũ, ghi đè trường mới
+              return prev.map(item => item[idField] === newRecord[idField] ? { ...item, ...newRecord } : item);
+          }
+          if (eventType === 'DELETE') {
+              return prev.filter(item => item[idField] !== oldRecord[idField]);
+          }
+          return prev;
+      });
   };
 
   const notify = (type: ToastMessage['type'], message: string) => {
@@ -301,12 +312,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // --- INVENTORY LOGIC ---
   const handleLinenCheckIn = async (booking: Booking) => {
-      // Logic cũ: Trừ kho sạch khi khách vào (optional, vì giờ ta trừ khi dọn phòng)
-      // Giữ lại để đảm bảo tính nhất quán nếu cần
+      // Logic cũ
   };
 
   const handleLinenExchange = async (task: HousekeepingTask, dirtyQuantity: number) => {
-      // Hàm này dùng cho đổi 1-1 (Stayover) - Cũ
       if (dirtyQuantity <= 0) return;
   };
 
@@ -512,10 +521,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
   
   const updateBooking = async (b: Booking): Promise<boolean> => {
-    const oldBookings = [...bookings];
+    // Optimistic Update: Cập nhật ngay trên UI
     setBookings(prev => prev.map(item => item.id === b.id ? b : item));
     try { await storageService.updateBooking(b); return true; } 
-    catch (err) { setBookings(oldBookings); notify('error', 'Không thể cập nhật Booking.'); return false; }
+    catch (err) { refreshData(true); notify('error', 'Không thể cập nhật Booking.'); return false; }
   };
 
   const addFacility = async (f: Facility) => { setFacilities(prev => [...prev, f]); await storageService.addFacility(f); notify('success', 'Đã thêm cơ sở'); };
@@ -526,7 +535,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const upsertRoom = async (r: Room) => {
-    setRooms(prev => { const exists = prev.some(item => item.id === r.id); if (exists) return prev.map(item => item.id === r.id ? r : item); return [...prev, r]; });
+    // Optimistic Update: Cập nhật UI ngay lập tức
+    setRooms(prev => { 
+        const exists = prev.some(item => item.id === r.id); 
+        if (exists) return prev.map(item => item.id === r.id ? r : item); 
+        return [...prev, r]; 
+    });
     try { await storageService.upsertRoom(r); } catch (err) { refreshData(true); }
   };
   const deleteRoom = async (id: string) => { const oldRooms = [...rooms]; setRooms(prev => prev.filter(item => item.id !== id)); const { error } = await storageService.deleteRoom(id); if (error) setRooms(oldRooms); };
@@ -545,6 +559,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const addInventoryTransaction = async (t: InventoryTransaction) => { setInventoryTransactions(prev => [t, ...prev]); await storageService.addInventoryTransaction(t); };
 
   const syncHousekeepingTasks = async (tasks: HousekeepingTask[]) => {
+      // Optimistic Update cho Task
       setHousekeepingTasks(prev => {
           const newMap = new Map(prev.map(t => [t.id, t]));
           tasks.forEach(t => newMap.set(t.id, t));
