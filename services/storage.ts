@@ -76,11 +76,11 @@ const safeFetch = async <T>(promise: PromiseLike<{ data: T[] | null; error: any 
     }
 };
 
-// Helper để lấy ngày đầu năm hiện tại (Dùng để lọc dữ liệu cũ)
+// Helper để lấy ngày giới hạn dữ liệu (Tối ưu cho gói Free: 1 tháng gần nhất)
 const getDataStartDate = () => {
     const d = new Date();
     d.setDate(1); 
-    d.setMonth(d.getMonth() - 6);
+    d.setMonth(d.getMonth() - 1); // Lấy lùi lại 1 tháng thay vì 6 tháng
     return d.toISOString();
 };
 
