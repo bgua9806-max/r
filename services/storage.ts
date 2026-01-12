@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { Facility, Room, Booking, Collaborator, Expense, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe } from '../types';
+import { Facility, Room, Booking, Collaborator, Expense, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount } from '../types';
 import { MOCK_FACILITIES, MOCK_ROOMS, MOCK_COLLABORATORS, MOCK_BOOKINGS, MOCK_SERVICES, DEFAULT_SETTINGS, ROOM_RECIPES } from '../constants';
 
 const logError = (message: string, error: any) => {
@@ -126,8 +126,9 @@ export const storageService = {
       // Also check for new tables
       const { error: tableError } = await supabase.from('settings').select('id').limit(1);
       const { error: recipeError } = await supabase.from('room_recipes').select('id').limit(1);
+      const { error: bankError } = await supabase.from('bank_accounts').select('id').limit(1);
 
-      if ((error && isColumnMissingError(error)) || (tableError && isTableMissingError(tableError)) || (recipeError && isTableMissingError(recipeError))) {
+      if ((error && isColumnMissingError(error)) || (tableError && isTableMissingError(tableError)) || (recipeError && isTableMissingError(recipeError)) || (bankError && isTableMissingError(bankError))) {
           return { missing: true, table: 'bookings_or_settings' };
       }
       return { missing: false };
@@ -197,6 +198,74 @@ export const storageService = {
           raw_json: settings
       });
       if (error) logError('Error saving settings', error);
+  },
+
+  // --- BANK ACCOUNTS ---
+  getBankAccounts: async (): Promise<BankAccount[]> => {
+      if (IS_USING_MOCK) return [];
+      const rawData = await safeFetch(supabase.from('bank_accounts').select('*').order('created_at', { ascending: true }), [], 'bank_accounts');
+      return rawData.map((b: any) => ({
+          id: b.id,
+          bankId: b.bank_id, // Map snake_case to camelCase
+          accountNo: b.account_no,
+          accountName: b.account_name,
+          branch: b.branch,
+          template: b.template,
+          is_default: b.is_default,
+          created_at: b.created_at
+      }));
+  },
+
+  addBankAccount: async (account: BankAccount) => {
+      if (IS_USING_MOCK) return;
+      // Auto-set is_default if it's the first account
+      const existing = await storageService.getBankAccounts();
+      const isDefault = existing.length === 0 ? true : account.is_default;
+
+      if (isDefault) {
+          // Unset other defaults
+          await supabase.from('bank_accounts').update({ is_default: false }).neq('id', '0'); // Unset all
+      }
+
+      const payload = {
+          id: account.id,
+          bank_id: account.bankId,
+          account_no: account.accountNo,
+          account_name: account.accountName,
+          branch: account.branch || '',
+          template: account.template,
+          is_default: isDefault
+      };
+
+      const { error } = await supabase.from('bank_accounts').insert(payload);
+      if (error) logError('Error adding bank account', error);
+  },
+
+  updateBankAccount: async (account: BankAccount) => {
+      if (IS_USING_MOCK) return;
+      
+      if (account.is_default) {
+          // Unset other defaults first
+          await supabase.from('bank_accounts').update({ is_default: false }).neq('id', account.id);
+      }
+
+      const payload = {
+          bank_id: account.bankId,
+          account_no: account.accountNo,
+          account_name: account.accountName,
+          branch: account.branch || '',
+          template: account.template,
+          is_default: account.is_default
+      };
+
+      const { error } = await supabase.from('bank_accounts').update(payload).eq('id', account.id);
+      if (error) logError('Error updating bank account', error);
+  },
+
+  deleteBankAccount: async (id: string) => {
+      if (IS_USING_MOCK) return;
+      const { error } = await supabase.from('bank_accounts').delete().eq('id', id);
+      if (error) logError('Error deleting bank account', error);
   },
 
   getRoomRecipes: async (): Promise<Record<string, RoomRecipe>> => {

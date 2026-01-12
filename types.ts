@@ -247,6 +247,18 @@ export interface Shift {
   status: 'Open' | 'Closed';
 }
 
+// NEW: Bank Account Interface
+export interface BankAccount {
+  id: string;
+  bankId: string; // MB, VCB
+  accountNo: string;
+  accountName: string;
+  branch?: string;
+  template: 'compact' | 'qr_only' | 'print';
+  is_default: boolean;
+  created_at?: string;
+}
+
 export interface Settings {
   room_status: string[];
   sources: string[];
@@ -254,6 +266,13 @@ export interface Settings {
   expense_categories: string[];
   cleaning_staff: string[]; 
   service_menu?: ServiceItem[]; 
+  // Deprecated: Use bank_accounts table instead
+  bankAccount?: {
+    bankId: string;
+    accountNo: string;
+    accountName: string;
+    template: 'compact' | 'qr_only' | 'print';
+  };
 }
 
 export interface ToastMessage {

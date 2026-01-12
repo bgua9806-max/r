@@ -1,13 +1,21 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Trash, Save, Check, X, ShoppingCart, RefreshCw, Database, Radio, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, Eye } from 'lucide-react';
-import { Settings as SettingsType, ServiceItem, ItemCategory, WebhookConfig, RoomRecipe } from '../types';
+import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2 } from 'lucide-react';
+import { Settings as SettingsType, ServiceItem, ItemCategory, WebhookConfig, RoomRecipe, BankAccount } from '../types';
 import { MOCK_SERVICES } from '../constants';
 import { storageService } from '../services/storage';
 import { RecipeModal } from '../components/RecipeModal';
+import { Modal } from '../components/Modal';
 
 export const Settings: React.FC = () => {
-  const { settings, updateSettings, services, addService, deleteService, notify, refreshData, webhooks, addWebhook, deleteWebhook, updateWebhook, triggerWebhook, getGeminiApiKey, setAppConfig, roomRecipes, deleteRoomRecipe } = useAppContext();
+  const { 
+      settings, updateSettings, services, addService, deleteService, notify, refreshData, 
+      webhooks, addWebhook, deleteWebhook, updateWebhook, triggerWebhook, 
+      getGeminiApiKey, setAppConfig, roomRecipes, deleteRoomRecipe,
+      bankAccounts, addBankAccount, updateBankAccount, deleteBankAccount
+  } = useAppContext();
+  
   const [localSettings, setLocalSettings] = useState(settings);
   
   // State for adding simple strings
@@ -26,6 +34,18 @@ export const Settings: React.FC = () => {
   const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
   const [editingRecipeKey, setEditingRecipeKey] = useState<string | undefined>(undefined);
   const [editingRecipeData, setEditingRecipeData] = useState<RoomRecipe | null>(null);
+
+  // State for Bank Accounts
+  const [isBankModalOpen, setBankModalOpen] = useState(false);
+  const [editingBank, setEditingBank] = useState<BankAccount | null>(null);
+  const [bankForm, setBankForm] = useState<Partial<BankAccount>>({
+      bankId: '',
+      accountNo: '',
+      accountName: '',
+      branch: '',
+      template: 'print',
+      is_default: false
+  });
 
   // State for Gemini Key
   const [geminiKey, setGeminiKey] = useState('');
@@ -117,6 +137,57 @@ export const Settings: React.FC = () => {
       }
   };
 
+  // --- BANK ACCOUNT LOGIC ---
+  const handleOpenBankModal = (bank?: BankAccount) => {
+      if (bank) {
+          setEditingBank(bank);
+          setBankForm(bank);
+      } else {
+          setEditingBank(null);
+          setBankForm({
+              bankId: '',
+              accountNo: '',
+              accountName: '',
+              branch: '',
+              template: 'print',
+              is_default: bankAccounts.length === 0
+          });
+      }
+      setBankModalOpen(true);
+  };
+
+  const handleSaveBank = async () => {
+      if (!bankForm.bankId || !bankForm.accountNo || !bankForm.accountName) {
+          notify('error', 'Vui lòng điền đủ thông tin ngân hàng.');
+          return;
+      }
+
+      const payload: BankAccount = {
+          id: editingBank?.id || `BA${Date.now()}`,
+          bankId: bankForm.bankId.toUpperCase(),
+          accountNo: bankForm.accountNo,
+          accountName: bankForm.accountName.toUpperCase(),
+          branch: bankForm.branch || '',
+          template: bankForm.template as any,
+          is_default: bankForm.is_default || false,
+          created_at: editingBank?.created_at || new Date().toISOString()
+      };
+
+      if (editingBank) {
+          await updateBankAccount(payload);
+          notify('success', 'Đã cập nhật tài khoản.');
+      } else {
+          await addBankAccount(payload);
+          notify('success', 'Đã thêm tài khoản mới.');
+      }
+      setBankModalOpen(false);
+  };
+
+  const handleSetDefaultBank = async (bank: BankAccount) => {
+      await updateBankAccount({ ...bank, is_default: true });
+      notify('success', `Đã đặt ${bank.bankId} làm mặc định.`);
+  };
+
   const handleTestWebhook = (wh: WebhookConfig) => {
       const mockPayload = {
           message: "Đây là tín hiệu kiểm tra (Test Signal)",
@@ -150,6 +221,7 @@ export const Settings: React.FC = () => {
 
   const handleSave = () => {
     updateSettings(localSettings);
+    notify('success', 'Đã lưu cấu hình chung');
   };
 
   const Section = ({ title, dataKey }: { title: string, dataKey: keyof SettingsType }) => (
@@ -203,6 +275,57 @@ export const Settings: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
          
+         {/* BANK CONFIGURATION (MULTIPLE ACCOUNTS) */}
+         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
+             <div className="flex justify-between items-center mb-4">
+                <div>
+                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><CreditCard size={20}/> Danh sách Tài khoản Ngân hàng (VietQR)</h3>
+                   <p className="text-xs text-slate-500 mt-1">Quản lý các tài khoản nhận tiền chuyển khoản.</p>
+                </div>
+                <button 
+                    onClick={() => handleOpenBankModal()} 
+                    className="flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-lg border border-blue-200 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                >
+                    <Plus size={16}/> Thêm tài khoản
+                </button>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                 {bankAccounts.map(bank => (
+                     <div key={bank.id} className={`p-4 rounded-xl border-2 transition-all hover:shadow-md relative group ${bank.is_default ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-100 hover:border-brand-200'}`}>
+                         <div className="flex justify-between items-start mb-2">
+                             <div className="flex items-center gap-2">
+                                 <Building size={20} className="text-slate-400"/>
+                                 <span className="font-black text-lg text-slate-800">{bank.bankId}</span>
+                             </div>
+                             {bank.is_default && (
+                                 <span className="bg-brand-100 text-brand-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-brand-200">
+                                     <CheckCircle2 size={10}/> Mặc định
+                                 </span>
+                             )}
+                         </div>
+                         <div className="font-mono font-bold text-slate-700 text-lg tracking-wide mb-1">{bank.accountNo}</div>
+                         <div className="text-xs font-bold text-slate-500 uppercase">{bank.accountName}</div>
+                         
+                         <div className="mt-4 pt-3 border-t border-slate-200/50 flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                             {!bank.is_default && (
+                                 <button onClick={() => handleSetDefaultBank(bank)} className="text-[10px] bg-white border border-slate-200 px-2 py-1 rounded hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors">
+                                     Đặt mặc định
+                                 </button>
+                             )}
+                             <button onClick={() => handleOpenBankModal(bank)} className="p-1.5 text-blue-600 bg-blue-50 rounded hover:bg-blue-100"><Pencil size={14}/></button>
+                             <button onClick={() => { if(confirm('Xóa tài khoản này?')) deleteBankAccount(bank.id); }} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100"><Trash size={14}/></button>
+                         </div>
+                     </div>
+                 ))}
+                 {bankAccounts.length === 0 && (
+                     <div className="col-span-full py-8 text-center text-slate-400 italic text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                         Chưa có tài khoản nào. Hãy thêm mới để tạo mã QR.
+                     </div>
+                 )}
+             </div>
+         </div>
+
          {/* SYSTEM CONFIG (AI KEY) */}
          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
              <div className="flex justify-between items-center mb-4">
@@ -448,6 +571,73 @@ export const Settings: React.FC = () => {
           recipeKey={editingRecipeKey}
           existingRecipe={editingRecipeData}
       />
+
+      {/* BANK ACCOUNT MODAL */}
+      <Modal isOpen={isBankModalOpen} onClose={() => setBankModalOpen(false)} title={editingBank ? "Sửa Tài Khoản" : "Thêm Tài Khoản Mới"} size="md">
+          <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mã Ngân Hàng</label>
+                      <input 
+                          className="w-full border rounded p-2.5 text-sm bg-slate-50 uppercase font-bold"
+                          placeholder="MB, VCB..."
+                          value={bankForm.bankId}
+                          onChange={e => setBankForm({...bankForm, bankId: e.target.value.toUpperCase()})}
+                      />
+                  </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Số Tài Khoản</label>
+                      <input 
+                          className="w-full border rounded p-2.5 text-sm bg-white font-mono font-bold"
+                          placeholder="0123456789"
+                          value={bankForm.accountNo}
+                          onChange={e => setBankForm({...bankForm, accountNo: e.target.value})}
+                      />
+                  </div>
+              </div>
+              
+              <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tên Chủ Tài Khoản</label>
+                  <input 
+                      className="w-full border rounded p-2.5 text-sm bg-white uppercase font-bold"
+                      placeholder="NGUYEN VAN A"
+                      value={bankForm.accountName}
+                      onChange={e => setBankForm({...bankForm, accountName: e.target.value.toUpperCase()})}
+                  />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mẫu VietQR</label>
+                      <select 
+                          className="w-full border rounded p-2.5 text-sm bg-white"
+                          value={bankForm.template}
+                          onChange={e => setBankForm({...bankForm, template: e.target.value as any})}
+                      >
+                          <option value="print">Print (In)</option>
+                          <option value="compact">Compact</option>
+                          <option value="qr_only">QR Only</option>
+                      </select>
+                  </div>
+                  <div className="flex items-center pt-5">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                          <input 
+                              type="checkbox" 
+                              className="w-5 h-5 text-brand-600 rounded focus:ring-brand-500 border-gray-300"
+                              checked={bankForm.is_default}
+                              onChange={e => setBankForm({...bankForm, is_default: e.target.checked})}
+                          />
+                          <span className="text-sm font-bold text-slate-700">Đặt làm mặc định</span>
+                      </label>
+                  </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-end gap-2">
+                  <button onClick={() => setBankModalOpen(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg font-bold text-sm">Hủy</button>
+                  <button onClick={handleSaveBank} className="px-6 py-2 bg-brand-600 text-white rounded-lg font-bold text-sm shadow-md hover:bg-brand-700">Lưu Tài Khoản</button>
+              </div>
+          </div>
+      </Modal>
     </div>
   );
 };

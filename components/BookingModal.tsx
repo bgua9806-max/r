@@ -6,10 +6,11 @@ import { useAppContext } from '../context/AppContext';
 import { 
   FileText, ShoppingCart, Banknote, ScanLine, AlertTriangle, Loader2, LogIn, LogOut, CheckCircle,
   Plus, Minus, Trash2, History, Upload, ShieldCheck, UserPlus, Users, ToggleLeft, ToggleRight, List, Group, Calendar, Check, Send, Printer, Save, XCircle, AlertOctagon, FileSpreadsheet,
-  Package, Shirt
+  Package, Shirt, QrCode
 } from 'lucide-react';
 import { format, parseISO, differenceInCalendarDays } from 'date-fns';
 import { GoogleGenAI } from "@google/genai";
+import { BillPreviewModal } from './BillPreviewModal';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -83,7 +84,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       addBooking, updateBooking, checkAvailability,
       notify, triggerWebhook, upsertRoom, refreshData, webhooks, addGuestProfile,
       updateService, addInventoryTransaction, getGeminiApiKey, processLendingUsage,
-      syncHousekeepingTasks
+      syncHousekeepingTasks, settings
   } = useAppContext();
   
   const [activeTab, setActiveTab] = useState<'info' | 'services' | 'payment' | 'ocr'>('info');
@@ -131,6 +132,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
   const [payMethod, setPayMethod] = useState<'Cash' | 'Transfer' | 'Card'>('Cash');
   const [payNote, setPayNote] = useState('');
 
+  // Bill Preview State
+  const [showBillPreview, setShowBillPreview] = useState(false);
+
   // Reset trạng thái gửi khi đổi người
   useEffect(() => {
       setIsSheetSent(false);
@@ -153,6 +157,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
     setCancelFee(0);
     setShowSheetList(false);
     setSelectedSheetRow(null);
+    setShowBillPreview(false);
 
     if (booking) {
       setFormData(booking);
@@ -483,6 +488,49 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       });
   };
 
+  const processSinglePayment = async (amount: number, method: 'Cash' | 'Transfer' | 'Card', note: string) => {
+      const newPayment: Payment = {
+          ngayThanhToan: new Date().toISOString(),
+          soTien: amount,
+          method: method,
+          ghiChu: note
+      };
+      
+      const nextPayments = [...payments, newPayment];
+      setPayments(nextPayments);
+      
+      // Also update form data immediately to reflect UI
+      setFormData(prev => ({
+          ...prev,
+          paymentsJson: JSON.stringify(nextPayments),
+          remainingAmount: totalRevenue - (totalPaid + amount)
+      }));
+
+      // If existing booking, save immediately
+      if (formData.id) {
+          setIsSubmitting(true);
+          try {
+              const currentRevenue = Number(formData.price || 0) + Number(formData.extraFee || 0) + serviceTotal;
+              const currentPaid = nextPayments.reduce((sum, p) => sum + Number(p.soTien), 0);
+              const currentRemaining = currentRevenue - currentPaid;
+
+              const updatedBooking: Booking = {
+                  ...(formData as Booking),
+                  paymentsJson: JSON.stringify(nextPayments),
+                  totalRevenue: currentRevenue,
+                  remainingAmount: currentRemaining
+              };
+
+              await updateBooking(updatedBooking);
+              notify('success', `Đã thu ${amount.toLocaleString()}đ.`);
+          } catch(e) {
+              notify('error', 'Lỗi lưu thanh toán');
+          } finally {
+              setIsSubmitting(false);
+          }
+      }
+  };
+
   const handleAddPayment = async () => {
       const amount = Number(payAmount);
       if (amount <= 0) {
@@ -540,56 +588,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
           }
 
       } else {
-          const newPayment: Payment = {
-              ngayThanhToan: new Date().toISOString(),
-              soTien: amount,
-              method: payMethod,
-              ghiChu: payNote || 'Thanh toán'
-          };
-          
-          const nextPayments = [...payments, newPayment];
-          setPayments(nextPayments);
+          await processSinglePayment(amount, payMethod, payNote || 'Thanh toán');
           setPayAmount('');
           setPayNote('');
-          
-          if (formData.id) {
-              setIsSubmitting(true);
-              try {
-                  await handleInventoryDeduction(usedServices);
-                  await handleLendingDeduction(lendingList); // Handle Lending Stock
-
-                  const currentServiceTotal = usedServices.reduce((sum, s) => sum + s.total, 0);
-                  const currentRevenue = Number(formData.price || 0) + Number(formData.extraFee || 0) + currentServiceTotal;
-                  const currentPaid = nextPayments.reduce((sum, p) => sum + Number(p.soTien), 0);
-                  const currentRemaining = currentRevenue - currentPaid;
-
-                  const updatedBooking: Booking = {
-                      ...(formData as Booking),
-                      paymentsJson: JSON.stringify(nextPayments),
-                      servicesJson: JSON.stringify(usedServices),
-                      lendingJson: JSON.stringify(lendingList),
-                      guestsJson: JSON.stringify(guestList),      
-                      totalRevenue: currentRevenue,
-                      remainingAmount: currentRemaining
-                  };
-
-                  const success = await updateBooking(updatedBooking);
-                  
-                  if (success) {
-                      setFormData(updatedBooking); 
-                      notify('success', `Đã thu ${amount.toLocaleString()}đ. Dư nợ: ${currentRemaining.toLocaleString()}đ`);
-                  } else {
-                      throw new Error("Failed to update booking");
-                  }
-              } catch (err) {
-                  notify('error', 'Lỗi lưu thanh toán. Vui lòng thử lại.');
-              } finally {
-                  setIsSubmitting(false);
-              }
-          } else {
-              notify('success', `Đã ghi nhận ${amount.toLocaleString()}đ. (Vui lòng bấm 'Lưu Thông Tin' để hoàn tất)`);
-          }
       }
+  };
+
+  const handlePaymentFromPreview = async (amount: number, method: 'Cash' | 'Transfer') => {
+      await processSinglePayment(amount, method, 'Thanh toán qua QR/Bill Preview');
+      setShowBillPreview(false);
   };
 
   const handleQuickPayAll = () => {
@@ -1269,37 +1276,13 @@ If a field is not visible, return empty string "".`;
      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
-  const handleCreateGroupForExisting = async () => {
-      if (!formData.id) return;
-      const groupName = prompt('Nhập tên đoàn mới:');
-      if (!groupName) return;
-
-      setIsSubmitting(true);
-      try {
-          const groupId = `GRP-${Date.now()}`;
-          const updatedBooking: Booking = {
-              ...(formData as Booking),
-              groupId: groupId,
-              groupName: groupName,
-              isGroupLeader: true
-          };
-          await updateBooking(updatedBooking);
-          setFormData(updatedBooking);
-          notify('success', `Đã tạo đoàn "${groupName}". Phòng này là Trưởng đoàn.`);
-      } catch(e) {
-          notify('error', 'Lỗi tạo đoàn.');
-      } finally {
-          setIsSubmitting(false);
-      }
-  };
-
   const handlePrintBill = () => {
       if (isGroupPaymentMode) {
           notify('info', `Đang in Hóa đơn tổng hợp cho đoàn "${formData.groupName}"...`);
       } else {
-          notify('info', 'Đang in Hóa đơn lẻ...');
+          // Open new Bill Preview Modal
+          setShowBillPreview(true);
       }
-      setTimeout(() => window.print(), 500);
   };
 
   const selectedFacilityId = facilities.find(f => f.facilityName === formData.facilityName)?.id;
@@ -1309,6 +1292,7 @@ If a field is not visible, return empty string "".`;
   const displayTotal = isGroupPaymentMode ? groupFinancials.total : totalRevenue;
 
   return (
+    <>
     <Modal isOpen={isOpen} onClose={onClose} title={booking ? `Chi tiết Booking` : 'Tạo Booking Mới'} size="lg">
       <div className="flex flex-col h-full md:h-[80vh]">
         {/* Process Status Bar */}
@@ -1747,8 +1731,8 @@ If a field is not visible, return empty string "".`;
                                 {isGroupPaymentMode ? 'Xác Nhận Thu (Cả Đoàn)' : 'Xác Nhận Thu'}
                             </button>
                             
-                            <button type="button" onClick={handlePrintBill} className="w-full bg-white text-slate-600 border-2 border-slate-200 py-3 rounded-xl font-black hover:bg-slate-50 active:scale-95 transition-all text-sm uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
-                                <Printer size={16}/> {isGroupPaymentMode ? 'In Hóa Đơn Tổng' : 'In Hóa Đơn'}
+                            <button type="button" onClick={handlePrintBill} className="w-full bg-indigo-50 text-indigo-700 border-2 border-indigo-100 py-3 rounded-xl font-black hover:bg-indigo-100 active:scale-95 transition-all text-sm uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
+                                <QrCode size={16}/> Xem Hóa Đơn & QR
                             </button>
                         </div>
                     </div>
@@ -1953,5 +1937,16 @@ If a field is not visible, return empty string "".`;
         </div>
       </div>
     </Modal>
+
+    {showBillPreview && formData.id && (
+        <BillPreviewModal
+            isOpen={showBillPreview}
+            onClose={() => setShowBillPreview(false)}
+            booking={formData as Booking}
+            settings={settings}
+            onConfirmPayment={handlePaymentFromPreview}
+        />
+    )}
+    </>
   );
 };

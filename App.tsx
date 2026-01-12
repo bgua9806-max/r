@@ -103,7 +103,19 @@ CREATE TABLE IF NOT EXISTS settings (
   raw_json JSONB
 );
 
--- 5. Cập nhật Booking (Các cột mới)
+-- 5. BẢNG Bank Accounts (Mới)
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  id TEXT PRIMARY KEY,
+  bank_id TEXT,
+  account_no TEXT,
+  account_name TEXT,
+  branch TEXT,
+  template TEXT DEFAULT 'print',
+  is_default BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Cập nhật Booking (Các cột mới)
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS lendingJson TEXT DEFAULT '[]';
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guestsJson TEXT DEFAULT '[]';
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS isDeclared BOOLEAN DEFAULT FALSE;
@@ -111,17 +123,19 @@ ALTER TABLE bookings ADD COLUMN IF NOT EXISTS groupId TEXT;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS groupName TEXT;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS isGroupLeader BOOLEAN DEFAULT FALSE;
 
--- 6. Cập nhật Phòng
+-- 7. Cập nhật Phòng
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS type TEXT;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS view TEXT;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS area NUMERIC;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS price_saturday NUMERIC;
 
--- 7. Cấp quyền
+-- 8. Cấp quyền
 ALTER TABLE room_recipes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE service_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bank_accounts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Enable all for users" ON room_recipes FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Enable all for users" ON service_items FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Enable all for users" ON bank_accounts FOR ALL USING (true) WITH CHECK (true);
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 `;
       navigator.clipboard.writeText(sql);
@@ -221,7 +235,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
                     <div className="flex-1">
                         <h3 className="text-sm font-bold text-amber-800 uppercase tracking-wide">Cập nhật Database cần thiết</h3>
                         <p className="text-xs text-amber-700 mt-1 mb-2 leading-relaxed">
-                            Hệ thống phát hiện Database thiếu bảng hoặc cột dữ liệu (cho tính năng Cấu hình, Định mức, Kho...). 
+                            Hệ thống phát hiện Database thiếu bảng hoặc cột dữ liệu (cho tính năng Cấu hình, Định mức, Kho, Ngân hàng...). 
                             Vui lòng chạy lệnh sau trong <b>Supabase SQL Editor</b> để khắc phục:
                         </p>
                         

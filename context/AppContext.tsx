@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { 
   Booking, Facility, Room, Collaborator, Expense, ServiceItem, HousekeepingTask, 
-  Settings, WebhookConfig, Shift, ToastMessage, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, ServiceUsage, AppConfig, RoomRecipe, LendingItem
+  Settings, WebhookConfig, Shift, ToastMessage, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, ServiceUsage, AppConfig, RoomRecipe, LendingItem, BankAccount
 } from '../types';
 import { storageService } from '../services/storage';
 import { supabase } from '../services/supabaseClient'; 
@@ -23,6 +23,7 @@ interface AppContextType {
   adjustments: AttendanceAdjustment[];
   leaveRequests: LeaveRequest[];
   roomRecipes: Record<string, RoomRecipe>; 
+  bankAccounts: BankAccount[]; // New
   currentShift: Shift | null;
   currentUser: Collaborator | null;
   settings: Settings;
@@ -93,6 +94,11 @@ interface AppContextType {
   updateRoomRecipe: (key: string, recipe: RoomRecipe) => Promise<void>; 
   deleteRoomRecipe: (key: string) => Promise<void>; 
   
+  // New Bank Methods
+  addBankAccount: (acc: BankAccount) => Promise<void>;
+  updateBankAccount: (acc: BankAccount) => Promise<void>;
+  deleteBankAccount: (id: string) => Promise<void>;
+
   checkAvailability: (facilityName: string, roomCode: string, checkin: string, checkout: string, excludeId?: string) => boolean;
 }
 
@@ -120,6 +126,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [schedules, setSchedules] = useState<ShiftSchedule[]>([]);
   const [adjustments, setAdjustments] = useState<AttendanceAdjustment[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   
   // Initialize recipes from constants, in a real app this would come from DB
   const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>(INITIAL_RECIPES);
@@ -192,7 +199,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const refreshData = async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
-      const [f, r, b, c, e, s, t, h, w, sh, sch, adj, lr, st, rr] = await Promise.all([
+      const [f, r, b, c, e, s, t, h, w, sh, sch, adj, lr, st, rr, ba] = await Promise.all([
         storageService.getFacilities(),
         storageService.getRooms(),
         storageService.getBookings(),
@@ -207,7 +214,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         storageService.getAdjustments(),
         storageService.getLeaveRequests(),
         storageService.getSettings(),
-        storageService.getRoomRecipes()
+        storageService.getRoomRecipes(),
+        storageService.getBankAccounts()
       ]);
       
       setFacilities(f);
@@ -232,6 +240,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setLeaveRequests(lr);
       setSettings(st);
       setRoomRecipes(rr);
+      setBankAccounts(ba);
     } catch (err) {
       console.warn('Refresh Data error:', err);
     } finally {
@@ -253,6 +262,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, (payload) => handleRealtimeUpdate('leave_requests', payload))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => refreshData(true)) 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_recipes' }, () => refreshData(true)) 
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bank_accounts' }, () => refreshData(true)) 
       .subscribe();
 
     const interval = setInterval(() => { refreshData(true); }, 60000); // Vẫn giữ polling để đảm bảo tính toàn vẹn lâu dài
@@ -616,6 +626,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       await storageService.deleteRoomRecipe(key);
   };
 
+  // --- Bank Account CRUD ---
+  const addBankAccount = async (acc: BankAccount) => {
+      if (acc.is_default) {
+          setBankAccounts(prev => prev.map(b => ({ ...b, is_default: false })));
+      }
+      setBankAccounts(prev => [...prev, acc]);
+      await storageService.addBankAccount(acc);
+      refreshData(true);
+  };
+
+  const updateBankAccount = async (acc: BankAccount) => {
+      if (acc.is_default) {
+          setBankAccounts(prev => prev.map(b => ({ ...b, is_default: false })));
+      }
+      setBankAccounts(prev => prev.map(b => b.id === acc.id ? acc : b));
+      await storageService.updateBankAccount(acc);
+      refreshData(true);
+  };
+
+  const deleteBankAccount = async (id: string) => {
+      setBankAccounts(prev => prev.filter(b => b.id !== id));
+      await storageService.deleteBankAccount(id);
+  };
+
   const checkAvailability = (facilityName: string, roomCode: string, checkin: string, checkout: string, excludeId?: string) => {
       const inDate = new Date(checkin).getTime();
       const outDate = new Date(checkout).getTime();
@@ -630,7 +664,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-       facilities, rooms, bookings, collaborators, expenses, services, inventoryTransactions, housekeepingTasks, webhooks, schedules, adjustments, leaveRequests, roomRecipes, currentShift, currentUser, settings, toasts, isLoading,
+       facilities, rooms, bookings, collaborators, expenses, services, inventoryTransactions, housekeepingTasks, webhooks, schedules, adjustments, leaveRequests, roomRecipes, bankAccounts, currentShift, currentUser, settings, toasts, isLoading,
        setCurrentUser, refreshData, notify, removeToast, canAccess,
        addBooking, updateBooking, 
        addFacility, updateFacility, deleteFacility,
@@ -646,7 +680,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
        openShift, closeShift,
        upsertSchedule, deleteSchedule, upsertAdjustment,
        addLeaveRequest, updateLeaveRequest,
-       updateSettings, updateRoomRecipe, deleteRoomRecipe, checkAvailability
+       updateSettings, updateRoomRecipe, deleteRoomRecipe, 
+       addBankAccount, updateBankAccount, deleteBankAccount,
+       checkAvailability
     }}>
       {children}
     </AppContext.Provider>

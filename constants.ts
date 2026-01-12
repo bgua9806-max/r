@@ -16,6 +16,12 @@ export const DEFAULT_SETTINGS: Settings = {
   room_methods: ['Qua đêm', 'Theo giờ', 'Theo ngày', 'Combo 2H', 'Combo Đêm'],
   expense_categories: ['Điện nước', 'Vệ sinh', 'Bảo trì', 'Lương nhân viên', 'Marketing', 'Nhập hàng', 'Hoàn tiền'],
   cleaning_staff: ['Cô Lan', 'Chị Mai', 'Cô Cúc', 'Chú Ba bảo vệ'],
+  bankAccount: {
+      bankId: '',
+      accountNo: '',
+      accountName: '',
+      template: 'print'
+  }
 };
 
 // Cấu hình danh mục vật tư chuẩn theo yêu cầu khách sạn
