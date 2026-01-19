@@ -84,7 +84,7 @@ interface AppContextType {
   addLeaveRequest: (item: LeaveRequest) => Promise<void>;
   updateLeaveRequest: (item: LeaveRequest) => Promise<void>;
   
-  syncOtaOrders: () => Promise<void>;
+  syncOtaOrders: (overrideWebhooks?: WebhookConfig[], silent?: boolean) => Promise<void>;
   updateOtaOrder: (id: string, updates: Partial<OtaOrder>) => Promise<void>;
   
   updateSettings: (newSettings: Settings) => Promise<void>;
@@ -203,6 +203,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setSettings(sett);
           setRoomRecipes(rec);
           setBankAccounts(ba);
+
+          // Trigger OTA Sync immediately in background (Silent Mode)
+          // Pass 'wh' directly because state setWebhooks(wh) might not be ready yet
+          syncOtaOrders(wh, true);
 
       } catch (err) {
           console.error("Refresh Error", err);
@@ -440,9 +444,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return 'Pay at hotel';
   };
 
-  const syncOtaOrders = async () => {
-      const hook = webhooks.find(w => w.event_type === 'ota_import' && w.is_active);
-      setIsLoading(true);
+  const syncOtaOrders = async (overrideWebhooks?: WebhookConfig[], silent = false) => {
+      const hooksToUse = overrideWebhooks || webhooks;
+      const hook = hooksToUse.find(w => w.event_type === 'ota_import' && w.is_active);
+      
+      if (!silent) setIsLoading(true);
       try {
           if (hook) {
               const res = await fetch(hook.url + '?action=get_ota_orders');
@@ -564,17 +570,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       });
 
                   setOtaOrders(validOrders);
-                  notify('success', `Đã đồng bộ ${validOrders.length} đơn hàng.`);
+                  if (!silent) notify('success', `Đã đồng bộ ${validOrders.length} đơn hàng.`);
               }
           } else {
-              setOtaOrders([]);
-              notify('info', 'Chưa cấu hình webhook OTA. Đang dùng dữ liệu trống.');
+              if (!silent) {
+                  setOtaOrders([]);
+                  notify('info', 'Chưa cấu hình webhook OTA. Đang dùng dữ liệu trống.');
+              }
           }
       } catch (err: any) {
           console.error("Sync OTA Error:", err);
-          notify('error', `Lỗi đồng bộ: ${err.message}`);
+          if (!silent) notify('error', `Lỗi đồng bộ: ${err.message}`);
       } finally {
-          setIsLoading(false);
+          if (!silent) setIsLoading(false);
       }
   };
 
