@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { Booking, Settings, BankAccount } from '../types';
 import { Printer, Check, CreditCard, AlertTriangle, ChevronDown } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { useAppContext } from '../context/AppContext';
 
 interface BillPreviewModalProps {
@@ -66,6 +66,9 @@ export const BillPreviewModal: React.FC<BillPreviewModalProps> = ({
       window.print();
   };
 
+  const checkin = parseISO(booking.checkinDate);
+  const checkout = parseISO(booking.checkoutDate);
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Xem Hóa Đơn & Thanh Toán QR" size="lg">
         {/* 
@@ -96,11 +99,11 @@ export const BillPreviewModal: React.FC<BillPreviewModalProps> = ({
                         </div>
                         <div>
                             <span className="block text-[10px] uppercase font-bold text-slate-400">Check-in</span>
-                            <span>{format(parseISO(booking.checkinDate), 'dd/MM/yyyy HH:mm')}</span>
+                            <span>{isValid(checkin) ? format(checkin, 'dd/MM/yyyy HH:mm') : 'N/A'}</span>
                         </div>
                         <div>
                             <span className="block text-[10px] uppercase font-bold text-slate-400">Check-out</span>
-                            <span>{format(parseISO(booking.checkoutDate), 'dd/MM/yyyy HH:mm')}</span>
+                            <span>{isValid(checkout) ? format(checkout, 'dd/MM/yyyy HH:mm') : 'N/A'}</span>
                         </div>
                     </div>
 

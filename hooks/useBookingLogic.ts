@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { addDays, format, parseISO, isSameDay, endOfDay, isWeekend, addMonths, endOfMonth, eachDayOfInterval, eachHourOfInterval } from 'date-fns';
+import { addDays, format, parseISO, isSameDay, endOfDay, isWeekend, addMonths, endOfMonth, eachDayOfInterval, eachHourOfInterval, isValid } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { Booking, Room, Guest, HousekeepingTask } from '../types';
 
@@ -97,6 +98,7 @@ export const useBookingLogic = () => {
                   if (b.status === 'Confirmed') {
                       const checkin = parseISO(b.checkinDate);
                       const checkout = parseISO(b.checkoutDate);
+                      if (!isValid(checkin) || !isValid(checkout)) return false;
                       return isSameDay(checkin, now) || (checkin <= now && checkout >= now);
                   }
                   return false;
@@ -104,8 +106,16 @@ export const useBookingLogic = () => {
 
               // 2. Find pending booking (Next arrival)
               const nextBooking = !activeBooking ? bookings
-                  .filter(b => b.facilityName === fac.facilityName && b.roomCode === room.name && b.status === 'Confirmed' && parseISO(b.checkinDate) > now)
-                  .sort((a,b) => parseISO(a.checkinDate).getTime() - parseISO(b.checkinDate).getTime())[0] : null;
+                  .filter(b => {
+                      if (b.facilityName !== fac.facilityName || b.roomCode !== room.name || b.status !== 'Confirmed') return false;
+                      const checkin = parseISO(b.checkinDate);
+                      return isValid(checkin) && checkin > now;
+                  })
+                  .sort((a,b) => {
+                      const da = parseISO(a.checkinDate);
+                      const db = parseISO(b.checkinDate);
+                      return (isValid(da) ? da.getTime() : 0) - (isValid(db) ? db.getTime() : 0);
+                  })[0] : null;
 
               // 3. Find active housekeeping task
               const activeTask = housekeepingTasks.find(t => 
@@ -120,7 +130,8 @@ export const useBookingLogic = () => {
               if (activeBooking) {
                   if (activeBooking.status === 'CheckedIn') {
                       status = 'Occupied';
-                      if (now > parseISO(activeBooking.checkoutDate)) {
+                      const checkout = parseISO(activeBooking.checkoutDate);
+                      if (isValid(checkout) && now > checkout) {
                           status = 'Overdue';
                       }
                   } else {
@@ -162,15 +173,15 @@ export const useBookingLogic = () => {
               
               if (r.booking && r.booking.status === 'CheckedIn') {
                   occupied++;
-                  if (isSameDay(parseISO(r.booking.checkoutDate), now)) {
+                  if (isValid(parseISO(r.booking.checkoutDate)) && isSameDay(parseISO(r.booking.checkoutDate), now)) {
                       outgoing++;
                   }
               }
 
-              if (r.booking && r.booking.status === 'Confirmed' && isSameDay(parseISO(r.booking.checkinDate), now)) {
+              if (r.booking && r.booking.status === 'Confirmed' && isValid(parseISO(r.booking.checkinDate)) && isSameDay(parseISO(r.booking.checkinDate), now)) {
                   incoming++;
               }
-              else if (!r.booking && r.nextBooking && isSameDay(parseISO(r.nextBooking.checkinDate), now)) {
+              else if (!r.booking && r.nextBooking && isValid(parseISO(r.nextBooking.checkinDate)) && isSameDay(parseISO(r.nextBooking.checkinDate), now)) {
                   incoming++;
               }
 
@@ -304,7 +315,8 @@ export const useBookingLogic = () => {
   
   const getBookingStyle = (b: Booking, isActiveTime: boolean) => {
       const status = b.status || 'Confirmed';
-      const isOverdue = status === 'CheckedIn' && now > parseISO(b.checkoutDate);
+      const checkout = parseISO(b.checkoutDate);
+      const isOverdue = status === 'CheckedIn' && isValid(checkout) && now > checkout;
       
       if (status === 'CheckedOut') {
           return "bg-slate-400 border-slate-500 text-slate-100 opacity-70 grayscale";

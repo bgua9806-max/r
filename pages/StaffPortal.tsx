@@ -7,7 +7,7 @@ import {
   ChevronRight, CheckSquare, Square, 
   ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle
 } from 'lucide-react';
-import { format, parseISO, differenceInMinutes } from 'date-fns';
+import { format, parseISO, differenceInMinutes, isValid } from 'date-fns';
 import { HousekeepingTask, ChecklistItem, RoomRecipeItem, ServiceItem, LendingItem, Booking } from '../types';
 import { storageService } from '../services/storage';
 import { ROOM_RECIPES } from '../constants';
@@ -67,7 +67,7 @@ export const StaffPortal: React.FC = () => {
     housekeepingTasks.forEach(t => {
         if (t.status === 'Done') {
             const key = `${t.facility_id}_${t.room_code}`;
-            const time = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
+            const time = t.completed_at && isValid(parseISO(t.completed_at)) ? parseISO(t.completed_at).getTime() : parseISO(t.created_at).getTime();
             const current = recentDoneMap.get(key) || 0;
             if (time > current) recentDoneMap.set(key, time);
         }
@@ -75,9 +75,12 @@ export const StaffPortal: React.FC = () => {
 
     const dbTasksMap = new Map<string, HousekeepingTask>();
     housekeepingTasks.forEach(t => {
-        const tDate = format(parseISO(t.created_at), 'yyyy-MM-dd');
-        if (t.status !== 'Done' || tDate === todayStr) {
-            dbTasksMap.set(`${t.facility_id}_${t.room_code}`, t);
+        const created = parseISO(t.created_at);
+        if (isValid(created)) {
+            const tDate = format(created, 'yyyy-MM-dd');
+            if (t.status !== 'Done' || tDate === todayStr) {
+                dbTasksMap.set(`${t.facility_id}_${t.room_code}`, t);
+            }
         }
     });
 
@@ -205,7 +208,7 @@ export const StaffPortal: React.FC = () => {
           booking = sortedBookings.find(b => {
               if (b.status !== 'CheckedOut') return false;
               const outDate = b.actualCheckOut ? b.actualCheckOut : b.checkoutDate;
-              return outDate.startsWith(todayStr);
+              return isValid(parseISO(outDate)) && outDate.startsWith(todayStr);
           });
       } else if (activeTask.task_type === 'Stayover' || activeTask.task_type === 'Dirty') {
           booking = sortedBookings.find(b => b.status === 'CheckedIn');

@@ -1,11 +1,10 @@
-
-import { Settings, Facility, Collaborator, Booking, Expense, ServiceItem, Room, RoomRecipe } from './types';
+import { Settings, Facility, Collaborator, Booking, Expense, ServiceItem, Room, RoomRecipe, OtaOrder } from './types';
 
 // --- PERMISSION MATRIX ---
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
-  'Admin': ['/dashboard', '/bookings', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'], 
-  'Quản lý': ['/dashboard', '/bookings', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'],
-  'Nhân viên': ['/dashboard', '/bookings', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal'],
+  'Admin': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'], 
+  'Quản lý': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'],
+  'Nhân viên': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal'],
   'Nhà đầu tư': ['/dashboard'],
   'Buồng phòng': ['/staff-portal']
 };
@@ -367,3 +366,37 @@ const generateBookings = (): Booking[] => {
 };
 
 export const MOCK_BOOKINGS = generateBookings();
+
+export const MOCK_OTA_ORDERS: OtaOrder[] = [
+  {
+    id: 'OTA-001',
+    platform: 'Agoda',
+    bookingCode: 'AG-112233',
+    guestName: 'John Doe',
+    checkIn: new Date().toISOString(),
+    checkOut: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString(),
+    roomType: 'Deluxe Double',
+    roomQuantity: 1,
+    guestCount: 2,
+    totalAmount: 1500000,
+    netAmount: 1200000,
+    paymentStatus: 'Prepaid',
+    status: 'Pending',
+    notes: 'Non-smoking room'
+  },
+  {
+    id: 'OTA-002',
+    platform: 'Booking.com',
+    bookingCode: 'BK-445566',
+    guestName: 'Jane Smith',
+    checkIn: new Date().toISOString(),
+    checkOut: new Date(new Date().setDate(new Date().getDate() + 1)).toISOString(),
+    roomType: 'Standard Single',
+    roomQuantity: 1,
+    guestCount: 1,
+    totalAmount: 500000,
+    netAmount: 450000,
+    paymentStatus: 'Pay at hotel',
+    status: 'Pending'
+  }
+];

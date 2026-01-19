@@ -1,15 +1,22 @@
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
-  Booking, Facility, Room, Collaborator, Expense, ServiceItem, HousekeepingTask, 
-  Settings, WebhookConfig, Shift, ToastMessage, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, ServiceUsage, AppConfig, RoomRecipe, LendingItem, BankAccount
+  Facility, Room, Booking, Collaborator, Expense, ServiceItem, 
+  InventoryTransaction, HousekeepingTask, WebhookConfig, Shift, 
+  ShiftSchedule, AttendanceAdjustment, LeaveRequest, OtaOrder, 
+  Settings, RoomRecipe, BankAccount, ToastMessage, GuestProfile,
+  LendingItem, AppConfig, Guest
 } from '../types';
+import { 
+  MOCK_FACILITIES, MOCK_ROOMS, MOCK_COLLABORATORS, MOCK_BOOKINGS, 
+  MOCK_SERVICES, DEFAULT_SETTINGS, ROOM_RECIPES, ROLE_PERMISSIONS 
+} from '../constants';
 import { storageService } from '../services/storage';
-import { supabase } from '../services/supabaseClient'; 
-import { ROLE_PERMISSIONS, DEFAULT_SETTINGS, ROOM_RECIPES as INITIAL_RECIPES } from '../constants';
-import { format, parseISO, isSameDay } from 'date-fns';
+import { parseISO, areIntervalsOverlapping, isValid, format } from 'date-fns';
 
 interface AppContextType {
+  currentUser: Collaborator | null;
+  setCurrentUser: (user: Collaborator | null) => void;
   facilities: Facility[];
   rooms: Room[];
   bookings: Booking[];
@@ -19,100 +26,92 @@ interface AppContextType {
   inventoryTransactions: InventoryTransaction[];
   housekeepingTasks: HousekeepingTask[];
   webhooks: WebhookConfig[];
+  shifts: Shift[];
   schedules: ShiftSchedule[];
   adjustments: AttendanceAdjustment[];
   leaveRequests: LeaveRequest[];
-  roomRecipes: Record<string, RoomRecipe>; 
-  bankAccounts: BankAccount[]; // New
-  currentShift: Shift | null;
-  currentUser: Collaborator | null;
+  otaOrders: OtaOrder[];
   settings: Settings;
+  roomRecipes: Record<string, RoomRecipe>;
+  bankAccounts: BankAccount[];
   toasts: ToastMessage[];
   isLoading: boolean;
-
-  setCurrentUser: (user: Collaborator | null) => void;
-  refreshData: (silent?: boolean) => Promise<void>;
-  notify: (type: ToastMessage['type'], message: string) => void;
+  currentShift: Shift | null;
+  
+  refreshData: (force?: boolean) => Promise<void>;
+  notify: (type: 'success' | 'error' | 'info', message: string) => void;
   removeToast: (id: number) => void;
   canAccess: (path: string) => boolean;
-
-  addBooking: (b: Booking) => Promise<boolean>;
-  updateBooking: (b: Booking) => Promise<boolean>;
   
-  addFacility: (f: Facility) => Promise<void>;
-  updateFacility: (f: Facility) => Promise<void>;
-  deleteFacility: (id: string, name?: string) => Promise<void>;
-
-  upsertRoom: (r: Room) => Promise<void>;
+  // Actions
+  checkAvailability: (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeBookingId?: string) => boolean;
+  addBooking: (booking: Booking) => Promise<boolean>;
+  updateBooking: (booking: Booking) => Promise<boolean>;
+  
+  addFacility: (item: Facility) => Promise<void>;
+  updateFacility: (item: Facility) => Promise<void>;
+  deleteFacility: (id: string) => Promise<void>;
+  
+  upsertRoom: (item: Room) => Promise<void>;
   deleteRoom: (id: string) => Promise<void>;
-
-  addCollaborator: (c: Collaborator) => Promise<void>;
-  updateCollaborator: (c: Collaborator) => Promise<void>;
-  deleteCollaborator: (id: string) => Promise<void>;
-
-  addExpense: (e: Expense) => Promise<void>;
-  updateExpense: (e: Expense) => Promise<void>;
-  deleteExpense: (id: string) => Promise<void>;
-
-  addService: (s: ServiceItem) => Promise<void>;
-  updateService: (s: ServiceItem) => Promise<void>;
-  deleteService: (id: string) => Promise<void>;
-  addInventoryTransaction: (t: InventoryTransaction) => Promise<void>;
   
-  // Logic Kho Đồ Vải (Linen Logic)
-  handleLinenCheckIn: (booking: Booking) => Promise<void>;
-  handleLinenExchange: (task: HousekeepingTask, dirtyQuantity: number) => Promise<void>;
-  processMinibarUsage: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
-  processLendingUsage: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>;
-  processCheckoutLinenReturn: (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => Promise<void>; 
-  processRoomRestock: (facilityName: string, roomCode: string, items: {itemId: string, dirtyReturnQty: number, cleanRestockQty: number}[]) => Promise<void>;
-
+  addCollaborator: (item: Collaborator) => Promise<void>;
+  updateCollaborator: (item: Collaborator) => Promise<void>;
+  deleteCollaborator: (id: string) => Promise<void>;
+  
+  addExpense: (item: Expense) => Promise<void>;
+  updateExpense: (item: Expense) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
+  
+  addService: (item: ServiceItem) => Promise<void>;
+  updateService: (item: ServiceItem) => Promise<void>;
+  deleteService: (id: string) => Promise<void>;
+  
+  addInventoryTransaction: (item: InventoryTransaction) => Promise<void>;
   syncHousekeepingTasks: (tasks: HousekeepingTask[]) => Promise<void>;
   
-  addWebhook: (w: WebhookConfig) => Promise<void>;
-  updateWebhook: (w: WebhookConfig) => Promise<void>;
+  addWebhook: (item: WebhookConfig) => Promise<void>;
+  updateWebhook: (item: WebhookConfig) => Promise<void>;
   deleteWebhook: (id: string) => Promise<void>;
-  triggerWebhook: (event: string, payload: any) => Promise<void>;
+  triggerWebhook: (eventType: string, payload: any) => Promise<void>;
   
-  // Configs
-  getGeminiApiKey: () => Promise<string | null>;
-  setAppConfig: (cfg: AppConfig) => Promise<void>;
-  
-  addGuestProfile: (p: GuestProfile) => Promise<void>;
-
   openShift: (startCash: number) => Promise<void>;
-  closeShift: (endCash: number, note: string) => Promise<void>;
-
-  upsertSchedule: (s: ShiftSchedule) => Promise<void>;
+  closeShift: (endCashActual: number, note: string) => Promise<void>;
+  upsertSchedule: (item: ShiftSchedule) => Promise<void>;
   deleteSchedule: (id: string) => Promise<void>;
+  upsertAdjustment: (item: AttendanceAdjustment) => Promise<void>;
   
-  upsertAdjustment: (a: AttendanceAdjustment) => Promise<void>;
-  addLeaveRequest: (req: LeaveRequest) => Promise<void>;
-  updateLeaveRequest: (req: LeaveRequest) => Promise<void>;
-
-  updateSettings: (s: Settings) => Promise<void>;
-  updateRoomRecipe: (key: string, recipe: RoomRecipe) => Promise<void>; 
-  deleteRoomRecipe: (key: string) => Promise<void>; 
+  addLeaveRequest: (item: LeaveRequest) => Promise<void>;
+  updateLeaveRequest: (item: LeaveRequest) => Promise<void>;
   
-  // New Bank Methods
-  addBankAccount: (acc: BankAccount) => Promise<void>;
-  updateBankAccount: (acc: BankAccount) => Promise<void>;
+  syncOtaOrders: () => Promise<void>;
+  updateOtaOrder: (id: string, updates: Partial<OtaOrder>) => Promise<void>;
+  
+  updateSettings: (newSettings: Settings) => Promise<void>;
+  updateRoomRecipe: (key: string, recipe: RoomRecipe) => Promise<void>;
+  deleteRoomRecipe: (key: string) => Promise<void>;
+  
+  addBankAccount: (account: BankAccount) => Promise<void>;
+  updateBankAccount: (account: BankAccount) => Promise<void>;
   deleteBankAccount: (id: string) => Promise<void>;
-
-  checkAvailability: (facilityName: string, roomCode: string, checkin: string, checkout: string, excludeId?: string) => boolean;
+  
+  getGeminiApiKey: () => Promise<string | null>;
+  setAppConfig: (config: AppConfig) => Promise<void>;
+  addGuestProfile: (profile: GuestProfile) => Promise<void>;
+  
+  // Specific Logic
+  processMinibarUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
+  processCheckoutLinenReturn: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
+  processRoomRestock: (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => Promise<void>;
+  processLendingUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
+  handleLinenExchange: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-export const useAppContext = () => {
-  const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useAppContext must be used within an AppProvider');
-  }
-  return context;
-};
-
-export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<Collaborator | null>(null);
+  
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -126,565 +125,690 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [schedules, setSchedules] = useState<ShiftSchedule[]>([]);
   const [adjustments, setAdjustments] = useState<AttendanceAdjustment[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [otaOrders, setOtaOrders] = useState<OtaOrder[]>([]);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>(ROOM_RECIPES);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   
-  // Initialize recipes from constants, in a real app this would come from DB
-  const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>(INITIAL_RECIPES);
-
-  // Lazy initialize user from storage to safely handle access
-  const [currentUser, setCurrentUser] = useState<Collaborator | null>(() => {
-      try {
-          return storageService.getUser();
-      } catch (e) {
-          console.error("Failed to load user", e);
-          return null;
-      }
-  });
-  
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const bookingsRef = useRef<Booking[]>([]);
-
-  const currentShift = shifts.find(s => s.staff_id === currentUser?.id && s.status === 'Open') || null;
-
   useEffect(() => {
-      bookingsRef.current = bookings;
-  }, [bookings]);
-
-  // Helper function to dynamically calculate "In Circulation"
-  const calculateInCirculation = (
-      service: ServiceItem, 
-      currentRooms: Room[], 
-      currentBookings: Booking[], 
-      currentRecipes: Record<string, RoomRecipe>
-  ): number => {
-      if (service.category !== 'Linen' && service.category !== 'Asset') {
-          return service.in_circulation || 0; // Return existing for non-linen/asset if any
-      }
-
-      let total = 0;
-
-      // Part A: Base Par Stock (From Room Recipes)
-      // Iterate over all rooms to see what should be in them
-      currentRooms.forEach(room => {
-          const type = room.type; 
-          if (type && currentRecipes[type]) {
-              const recipe = currentRecipes[type];
-              const itemInRecipe = recipe.items.find(i => i.itemId === service.id || i.itemId === service.name);
-              if (itemInRecipe) {
-                  total += itemInRecipe.quantity;
-              }
-          }
-      });
-
-      // Part B: Active Lending (From CheckedIn Bookings)
-      const activeBookings = currentBookings.filter(b => b.status === 'CheckedIn');
-      activeBookings.forEach(b => {
-          try {
-              const lends: LendingItem[] = JSON.parse(b.lendingJson || '[]');
-              const lentItem = lends.find(l => l.item_id === service.id && !l.returned);
-              if (lentItem) {
-                  total += lentItem.quantity;
-              }
-          } catch (e) {
-              // Ignore parse errors
-          }
-      });
-
-      return total;
-  };
-
-  const refreshData = async (silent = false) => {
-    if (!silent) setIsLoading(true);
-    try {
-      const [f, r, b, c, e, s, t, h, w, sh, sch, adj, lr, st, rr, ba] = await Promise.all([
-        storageService.getFacilities(),
-        storageService.getRooms(),
-        storageService.getBookings(),
-        storageService.getCollaborators(),
-        storageService.getExpenses(),
-        storageService.getServices(),
-        storageService.getInventoryTransactions(),
-        storageService.getHousekeepingTasks(),
-        storageService.getWebhooks(),
-        storageService.getShifts(),
-        storageService.getSchedules(),
-        storageService.getAdjustments(),
-        storageService.getLeaveRequests(),
-        storageService.getSettings(),
-        storageService.getRoomRecipes(),
-        storageService.getBankAccounts()
-      ]);
-      
-      setFacilities(f);
-      setRooms(r);
-      setBookings(b);
-      setCollaborators(c);
-      setExpenses(e);
-      
-      // DYNAMIC IN CIRCULATION CALCULATION
-      const calculatedServices = s.map(service => {
-          const dynamicInCirculation = calculateInCirculation(service, r, b, rr);
-          return { ...service, in_circulation: dynamicInCirculation };
-      });
-      setServices(calculatedServices);
-
-      setInventoryTransactions(t);
-      setHousekeepingTasks(h);
-      setWebhooks(w);
-      setShifts(sh);
-      setSchedules(sch);
-      setAdjustments(adj);
-      setLeaveRequests(lr);
-      setSettings(st);
-      setRoomRecipes(rr);
-      setBankAccounts(ba);
-    } catch (err) {
-      console.warn('Refresh Data error:', err);
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    refreshData();
-
-    // OPTIMISTIC REALTIME UPDATE
-    // Thay vì refreshData(true) (tải lại toàn bộ), ta dùng handleRealtimeUpdate để merge dữ liệu.
-    // Điều này giúp giao diện phản hồi tức thì.
-    const channels = supabase.channel('custom-all-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, (payload) => handleRealtimeUpdate('rooms', payload))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'housekeeping_tasks' }, (payload) => handleRealtimeUpdate('housekeeping_tasks', payload))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => handleRealtimeUpdate('bookings', payload))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_items' }, (payload) => handleRealtimeUpdate('service_items', payload))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, (payload) => handleRealtimeUpdate('leave_requests', payload))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => refreshData(true)) 
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_recipes' }, () => refreshData(true)) 
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bank_accounts' }, () => refreshData(true)) 
-      .subscribe();
-
-    const interval = setInterval(() => { refreshData(true); }, 60000); // Vẫn giữ polling để đảm bảo tính toàn vẹn lâu dài
-    return () => { supabase.removeChannel(channels); clearInterval(interval); };
+      const storedUser = storageService.getUser();
+      if (storedUser) setCurrentUser(storedUser);
+      refreshData();
   }, []);
 
-  const handleRealtimeUpdate = (table: string, payload: any) => {
-      // Đối với Bookings, nếu có thay đổi vẫn nên refresh nhẹ để tính toán lại Inventory
-      if (table === 'bookings') {
-          // Optimistic update cho Booking list trước
-          updateStateList(setBookings, payload);
-          // Sau đó refresh ngầm để tính toán lại tồn kho/doanh thu phức tạp
-          // setTimeout(() => refreshData(true), 1000); 
-          return;
-      }
-
-      // Đối với Rooms và Tasks, dùng Optimistic Update hoàn toàn
-      if (table === 'rooms') updateStateList(setRooms, payload);
-      if (table === 'housekeeping_tasks') updateStateList(setHousekeepingTasks, payload);
-      if (table === 'service_items') updateStateList(setServices, payload);
-      if (table === 'leave_requests') updateStateList(setLeaveRequests, payload);
+  const notify = (type: 'success' | 'error' | 'info', message: string) => {
+      const id = Date.now();
+      setToasts(prev => [...prev, { id, type, message }]);
+      setTimeout(() => removeToast(id), 3000);
   };
 
-  // Helper xử lý Merge dữ liệu Realtime
-  const updateStateList = (setter: React.Dispatch<React.SetStateAction<any[]>>, payload: any, idField = 'id') => {
-      const { eventType, new: newRecord, old: oldRecord } = payload;
+  const removeToast = (id: number) => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const canAccess = (path: string): boolean => {
+      if (!currentUser) return false;
+      const allowedRoutes = ROLE_PERMISSIONS[currentUser.role] || [];
+      // Simple path matching
+      return allowedRoutes.some(route => path.startsWith(route) || path === route);
+  };
+
+  const refreshData = async (force = false) => {
+      if (isLoading && !force) return;
+      setIsLoading(true);
+      try {
+          // Check connection first
+          const isConnected = await storageService.checkConnection();
+          if (!isConnected) {
+              notify('error', 'Không thể kết nối Database. Đang dùng chế độ Offline/Mock.');
+          }
+
+          const [
+              f, r, b, c, e, s, it, hk, wh, sh, sch, adj, lr, sett, rec, ba
+          ] = await Promise.all([
+              storageService.getFacilities(),
+              storageService.getRooms(),
+              storageService.getBookings(),
+              storageService.getCollaborators(),
+              storageService.getExpenses(),
+              storageService.getServices(),
+              storageService.getInventoryTransactions(),
+              storageService.getHousekeepingTasks(),
+              storageService.getWebhooks(),
+              storageService.getShifts(),
+              storageService.getSchedules(),
+              storageService.getAdjustments(),
+              storageService.getLeaveRequests(),
+              storageService.getSettings(),
+              storageService.getRoomRecipes(),
+              storageService.getBankAccounts()
+          ]);
+
+          setFacilities(f);
+          setRooms(r);
+          setBookings(b);
+          setCollaborators(c);
+          setExpenses(e);
+          setServices(s);
+          setInventoryTransactions(it);
+          setHousekeepingTasks(hk);
+          setWebhooks(wh);
+          setShifts(sh);
+          setSchedules(sch);
+          setAdjustments(adj);
+          setLeaveRequests(lr);
+          setSettings(sett);
+          setRoomRecipes(rec);
+          setBankAccounts(ba);
+
+      } catch (err) {
+          console.error("Refresh Error", err);
+          notify('error', 'Lỗi tải dữ liệu.');
+      } finally {
+          setIsLoading(false);
+      }
+  };
+
+  const checkAvailability = (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeBookingId?: string) => {
+      const start = parseISO(checkIn);
+      const end = parseISO(checkOut);
       
-      setter(prev => {
-          if (eventType === 'INSERT') {
-              // Chống trùng lặp
-              if (prev.some(item => item[idField] === newRecord[idField])) return prev;
-              return [newRecord, ...prev]; 
-          }
-          if (eventType === 'UPDATE') {
-              // Merge thông minh: Giữ lại các trường cũ, ghi đè trường mới
-              return prev.map(item => item[idField] === newRecord[idField] ? { ...item, ...newRecord } : item);
-          }
-          if (eventType === 'DELETE') {
-              return prev.filter(item => item[idField] !== oldRecord[idField]);
-          }
-          return prev;
+      return !bookings.some(b => {
+          if (b.id === excludeBookingId) return false;
+          if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false;
+          if (b.facilityName !== facilityName || b.roomCode !== roomCode) return false;
+          
+          const bStart = parseISO(b.checkinDate);
+          const bEnd = parseISO(b.checkoutDate);
+          
+          return areIntervalsOverlapping({ start, end }, { start: bStart, end: bEnd });
       });
   };
 
-  const notify = (type: ToastMessage['type'], message: string) => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, type, message }]);
-    setTimeout(() => removeToast(id), 5000);
-  };
-  const removeToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
-
-  const canAccess = (path: string) => {
-    if (!currentUser) return false;
-    const allowed = ROLE_PERMISSIONS[currentUser.role] || [];
-    return allowed.some(p => path === p || path.startsWith(p + '/'));
+  // --- CRUD WRAPPERS ---
+  const addBooking = async (booking: Booking) => {
+      await storageService.addBooking(booking);
+      setBookings(prev => [...prev, booking]);
+      return true;
   };
 
-  // --- INVENTORY LOGIC ---
-  const handleLinenCheckIn = async (booking: Booking) => {
-      // Logic cũ
+  const updateBooking = async (booking: Booking) => {
+      await storageService.updateBooking(booking);
+      setBookings(prev => prev.map(b => b.id === booking.id ? booking : b));
+      return true;
   };
 
-  const handleLinenExchange = async (task: HousekeepingTask, dirtyQuantity: number) => {
-      if (dirtyQuantity <= 0) return;
+  const addFacility = async (item: Facility) => {
+      await storageService.addFacility(item);
+      setFacilities(prev => [...prev, item]);
   };
 
-  // CORE LOGIC: MINIBAR PROCESSING (CONSUMABLES) - Logic unchanged
-  const processMinibarUsage = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
-      if (items.length === 0) return;
-
-      const activeBooking = bookingsRef.current.find(b => 
-          b.facilityName === facilityName && 
-          b.roomCode === roomCode && 
-          (b.status === 'CheckedIn' || b.status === 'Confirmed')
-      );
-
-      for (const item of items) {
-          const serviceDef = services.find(s => s.id === item.itemId);
-          if (!serviceDef) continue;
-
-          // Minibar/Amenity is consumable, so we deduct stock.
-          const newStock = Math.max(0, (serviceDef.stock || 0) - item.qty);
-          await storageService.updateService({ ...serviceDef, stock: newStock });
-
-          const trans: InventoryTransaction = {
-              id: `TR-MB-${Date.now()}-${Math.random()}`,
-              created_at: new Date().toISOString(),
-              staff_id: currentUser?.id || 'SYSTEM',
-              staff_name: currentUser?.collaboratorName || 'Buồng phòng',
-              item_id: serviceDef.id,
-              item_name: serviceDef.name,
-              type: serviceDef.price > 0 ? 'MINIBAR_SOLD' : 'AMENITY_USED',
-              quantity: item.qty,
-              price: serviceDef.costPrice || 0,
-              total: (serviceDef.costPrice || 0) * item.qty,
-              facility_name: facilityName,
-              note: activeBooking ? `Khách dùng (Booking ${activeBooking.id})` : 'Khách dùng (Không tìm thấy Booking)'
-          };
-          await storageService.addInventoryTransaction(trans);
-
-          if (activeBooking && serviceDef.price > 0) {
-              const currentServices: ServiceUsage[] = activeBooking.servicesJson ? JSON.parse(activeBooking.servicesJson) : [];
-              const existingIndex = currentServices.findIndex(s => s.serviceId === serviceDef.id);
-              if (existingIndex >= 0) {
-                  currentServices[existingIndex].quantity += item.qty;
-                  currentServices[existingIndex].total = currentServices[existingIndex].quantity * currentServices[existingIndex].price;
-              } else {
-                  currentServices.push({
-                      serviceId: serviceDef.id,
-                      name: serviceDef.name,
-                      price: serviceDef.price,
-                      quantity: item.qty,
-                      total: serviceDef.price * item.qty,
-                      time: new Date().toISOString()
-                  });
-              }
-              const serviceTotal = currentServices.reduce((sum, s) => sum + s.total, 0);
-              const totalRevenue = activeBooking.price + activeBooking.extraFee + serviceTotal;
-              
-              const updatedBooking = {
-                  ...activeBooking,
-                  servicesJson: JSON.stringify(currentServices),
-                  totalRevenue: totalRevenue,
-                  remainingAmount: totalRevenue - (activeBooking.totalRevenue - activeBooking.remainingAmount)
-              };
-              
-              setBookings(prev => prev.map(b => b.id === updatedBooking.id ? updatedBooking : b));
-              await storageService.updateBooking(updatedBooking);
-          }
-      }
-      refreshData(true);
+  const updateFacility = async (item: Facility) => {
+      await storageService.updateFacility(item);
+      setFacilities(prev => prev.map(f => f.id === item.id ? item : f));
   };
 
-  // CORE LOGIC: LENDING PROCESSING (Assets/Linen OUT)
-  // MODIFIED: Do NOT touch in_circulation manually. Just decrement stock.
-  // In_circulation is updated automatically because Booking lendingJson is updated via UI/Form.
-  const processLendingUsage = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
-      if (items.length === 0) return;
-
-      for (const item of items) {
-          const serviceDef = services.find(s => s.id === item.itemId);
-          if (!serviceDef) continue;
-
-          // Logic Mượn đồ: Trừ kho sạch.
-          // Không cộng In Circulation thủ công nữa -> Đã được tính dynamic từ Booking Lending.
-          const newStock = Math.max(0, (serviceDef.stock || 0) - item.qty);
-          
-          await storageService.updateService({ 
-              ...serviceDef, 
-              stock: newStock
-          });
-
-          // Lưu Transaction (Type OUT - Xuất dùng/Mượn)
-          const trans: InventoryTransaction = {
-              id: `TR-LEND-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              created_at: new Date().toISOString(),
-              staff_id: currentUser?.id || 'SYSTEM',
-              staff_name: currentUser?.collaboratorName || 'Lễ tân',
-              item_id: serviceDef.id,
-              item_name: serviceDef.name,
-              type: 'OUT', // Xuất dùng/mượn
-              quantity: item.qty,
-              price: 0,
-              total: 0,
-              facility_name: facilityName,
-              note: `Khách mượn tại phòng ${roomCode}`
-          };
-          await storageService.addInventoryTransaction(trans);
-      }
-      refreshData(true);
+  const deleteFacility = async (id: string) => {
+      const f = facilities.find(fac => fac.id === id);
+      await storageService.deleteFacility(id, f?.facilityName);
+      setFacilities(prev => prev.filter(f => f.id !== id));
   };
 
-  // CORE LOGIC: CHECKOUT RETURN (Legacy - Now mostly handled by processRoomRestock)
-  // Used if only lending items are returned without full restock
-  const processCheckoutLinenReturn = async (facilityName: string, roomCode: string, items: {itemId: string, qty: number}[]) => {
-      if (items.length === 0) return;
-
-      for (const item of items) {
-          const serviceDef = services.find(s => s.id === item.itemId || s.name === item.itemId);
-          if (!serviceDef) continue;
-
-          // Logic Checkout Lending Return: Tăng "Kho Bẩn".
-          const newLaundry = (serviceDef.laundryStock || 0) + item.qty;
-          
-          await storageService.updateService({ 
-              ...serviceDef, 
-              laundryStock: newLaundry
-          });
-      }
-      refreshData(true);
+  const upsertRoom = async (item: Room) => {
+      await storageService.upsertRoom(item);
+      setRooms(prev => {
+          const exists = prev.some(r => r.id === item.id);
+          if (exists) return prev.map(r => r.id === item.id ? item : r);
+          return [...prev, item];
+      });
   };
 
-  // CORE LOGIC: ONE-CLICK RESTOCK (Standard + Lending Logic)
-  // Refactored to separate Dirty Return and Clean Replenish
-  const processRoomRestock = async (
-      facilityName: string, 
-      roomCode: string, 
-      items: {itemId: string, dirtyReturnQty: number, cleanRestockQty: number}[]
-  ) => {
-      if (items.length === 0) return;
-
-      for (const item of items) {
-          // Find service by ID or Name
-          const serviceDef = services.find(s => s.id === item.itemId || s.name === item.itemId);
-          if (!serviceDef) continue;
-
-          // Logic: 
-          // 1. Calculate Dirty Return (Recipe + Lending) -> Laundry Stock increases (+dirtyReturnQty)
-          // 2. Calculate Clean Replenish (Recipe Only) -> Clean Stock decreases (-cleanRestockQty)
-          
-          const newLaundry = (serviceDef.laundryStock || 0) + item.dirtyReturnQty;
-          const newStock = (serviceDef.stock || 0) - item.cleanRestockQty;
-          
-          if (newStock < 0) console.warn(`[Stock Warning] Item ${item.itemId} went negative during restock.`);
-
-          // IMPORTANT: Do NOT update in_circulation manually.
-          await storageService.updateService({ 
-              ...serviceDef, 
-              stock: newStock,
-              laundryStock: newLaundry
-          });
-
-          // Transaction Log
-          const trans: InventoryTransaction = {
-              id: `TR-RESTOCK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              created_at: new Date().toISOString(),
-              staff_id: currentUser?.id || 'SYSTEM',
-              staff_name: currentUser?.collaboratorName || 'Buồng phòng',
-              item_id: serviceDef.id,
-              item_name: serviceDef.name,
-              type: 'EXCHANGE', 
-              quantity: item.dirtyReturnQty, // Log the dirty return count
-              price: 0,
-              total: 0,
-              facility_name: facilityName,
-              note: `Restock P.${roomCode}: Dirty +${item.dirtyReturnQty}, Clean -${item.cleanRestockQty}`
-          };
-          await storageService.addInventoryTransaction(trans);
-      }
-      refreshData(true);
+  const deleteRoom = async (id: string) => {
+      await storageService.deleteRoom(id);
+      setRooms(prev => prev.filter(r => r.id !== id));
   };
 
-  // APP CONFIGS
-  const getGeminiApiKey = async () => {
-      // Priority 1: Check DB
-      const dbKey = await storageService.getAppConfig('GEMINI_API_KEY');
-      if (dbKey && dbKey.length > 10) return dbKey;
-      
-      // Priority 2: Check Environment
-      if (process.env.API_KEY && process.env.API_KEY.length > 10) return process.env.API_KEY;
-      
-      return null;
+  const addCollaborator = async (item: Collaborator) => {
+      await storageService.addCollaborator(item);
+      setCollaborators(prev => [...prev, item]);
   };
 
-  const setAppConfig = async (cfg: AppConfig) => {
-      await storageService.setAppConfig(cfg);
+  const updateCollaborator = async (item: Collaborator) => {
+      await storageService.updateCollaborator(item);
+      setCollaborators(prev => prev.map(c => c.id === item.id ? item : c));
   };
 
-  const addBooking = async (b: Booking): Promise<boolean> => {
-    const isAvailable = checkAvailability(b.facilityName, b.roomCode, b.checkinDate, b.checkoutDate);
-    if (!isAvailable) { notify('error', 'Phòng vừa bị đặt bởi người khác! Vui lòng làm mới.'); return false; }
-    const tempId = b.id; 
-    setBookings(prev => [...prev, b]);
-    try { await storageService.addBooking(b); return true; } 
-    catch (err) { setBookings(prev => prev.filter(item => item.id !== tempId)); notify('error', 'Lỗi kết nối Server.'); return false; }
-  };
-  
-  const updateBooking = async (b: Booking): Promise<boolean> => {
-    // Optimistic Update: Cập nhật ngay trên UI
-    setBookings(prev => prev.map(item => item.id === b.id ? b : item));
-    try { await storageService.updateBooking(b); return true; } 
-    catch (err) { refreshData(true); notify('error', 'Không thể cập nhật Booking.'); return false; }
+  const deleteCollaborator = async (id: string) => {
+      await storageService.deleteCollaborator(id);
+      setCollaborators(prev => prev.filter(c => c.id !== id));
   };
 
-  const addFacility = async (f: Facility) => { setFacilities(prev => [...prev, f]); await storageService.addFacility(f); notify('success', 'Đã thêm cơ sở'); };
-  const updateFacility = async (f: Facility) => { setFacilities(prev => prev.map(item => item.id === f.id ? f : item)); await storageService.updateFacility(f); };
-  const deleteFacility = async (id: string, facilityName?: string) => { 
-      const { error } = await storageService.deleteFacility(id, facilityName); 
-      if (!error) { setFacilities(prev => prev.filter(item => item.id !== id)); setRooms(prev => prev.filter(r => r.facility_id !== id)); notify('info', 'Đã xóa cơ sở'); }
+  const addExpense = async (item: Expense) => {
+      await storageService.addExpense(item);
+      setExpenses(prev => [item, ...prev]);
   };
 
-  const upsertRoom = async (r: Room) => {
-    // Optimistic Update: Cập nhật UI ngay lập tức
-    setRooms(prev => { 
-        const exists = prev.some(item => item.id === r.id); 
-        if (exists) return prev.map(item => item.id === r.id ? r : item); 
-        return [...prev, r]; 
-    });
-    try { await storageService.upsertRoom(r); } catch (err) { refreshData(true); }
+  const updateExpense = async (item: Expense) => {
+      await storageService.updateExpense(item);
+      setExpenses(prev => prev.map(e => e.id === item.id ? item : e));
   };
-  const deleteRoom = async (id: string) => { const oldRooms = [...rooms]; setRooms(prev => prev.filter(item => item.id !== id)); const { error } = await storageService.deleteRoom(id); if (error) setRooms(oldRooms); };
 
-  const addCollaborator = async (c: Collaborator) => { setCollaborators(prev => [...prev, c]); await storageService.addCollaborator(c); };
-  const updateCollaborator = async (c: Collaborator) => { setCollaborators(prev => prev.map(item => item.id === c.id ? c : item)); await storageService.updateCollaborator(c); };
-  const deleteCollaborator = async (id: string) => { setCollaborators(prev => prev.filter(item => item.id !== id)); await storageService.deleteCollaborator(id); };
+  const deleteExpense = async (id: string) => {
+      await storageService.deleteExpense(id);
+      setExpenses(prev => prev.filter(e => e.id !== id));
+  };
 
-  const addExpense = async (e: Expense) => { setExpenses(prev => [...prev, e]); await storageService.addExpense(e); };
-  const updateExpense = async (e: Expense) => { setExpenses(prev => prev.map(item => item.id === e.id ? e : item)); await storageService.updateExpense(e); };
-  const deleteExpense = async (id: string) => { setExpenses(prev => prev.filter(item => item.id !== id)); await storageService.deleteExpense(id); };
+  const addService = async (item: ServiceItem) => {
+      await storageService.addService(item);
+      setServices(prev => [...prev, item]);
+  };
 
-  const addService = async (s: ServiceItem) => { setServices(prev => [...prev, s]); await storageService.addService(s); };
-  const updateService = async (s: ServiceItem) => { setServices(prev => prev.map(item => item.id === s.id ? s : item)); await storageService.updateService(s); };
-  const deleteService = async (id: string) => { setServices(prev => prev.filter(item => item.id !== id)); await storageService.deleteService(id); };
-  const addInventoryTransaction = async (t: InventoryTransaction) => { setInventoryTransactions(prev => [t, ...prev]); await storageService.addInventoryTransaction(t); };
+  const updateService = async (item: ServiceItem) => {
+      await storageService.updateService(item);
+      setServices(prev => prev.map(s => s.id === item.id ? item : s));
+  };
+
+  const deleteService = async (id: string) => {
+      await storageService.deleteService(id);
+      setServices(prev => prev.filter(s => s.id !== id));
+  };
+
+  const addInventoryTransaction = async (item: InventoryTransaction) => {
+      await storageService.addInventoryTransaction(item);
+      setInventoryTransactions(prev => [item, ...prev]);
+  };
 
   const syncHousekeepingTasks = async (tasks: HousekeepingTask[]) => {
-      // Optimistic Update cho Task
-      setHousekeepingTasks(prev => {
-          const newMap = new Map(prev.map(t => [t.id, t]));
-          tasks.forEach(t => newMap.set(t.id, t));
-          return Array.from(newMap.values());
-      });
       await storageService.syncHousekeepingTasks(tasks);
+      setHousekeepingTasks(prev => {
+          const map = new Map(prev.map(t => [t.id, t]));
+          tasks.forEach(t => map.set(t.id, t));
+          return Array.from(map.values());
+      });
   };
 
-  const addWebhook = async (w: WebhookConfig) => { setWebhooks(prev => [...prev, w]); await storageService.addWebhook(w); };
-  const updateWebhook = async (w: WebhookConfig) => { setWebhooks(prev => prev.map(item => item.id === w.id ? w : item)); await storageService.updateWebhook(w); };
-  const deleteWebhook = async (id: string) => { setWebhooks(prev => prev.filter(item => item.id !== id)); await storageService.deleteWebhook(id); };
-  const triggerWebhook = async (event: string, payload: any) => {
-      const activeHooks = webhooks.filter(w => w.is_active && w.event_type === event);
-      activeHooks.forEach(async (hook) => { try { await fetch(hook.url, { method: 'POST', body: JSON.stringify(payload) }); } catch (err) {} });
+  const addWebhook = async (item: WebhookConfig) => {
+      await storageService.addWebhook(item);
+      setWebhooks(prev => [...prev, item]);
   };
-  
-  const addGuestProfile = async (p: GuestProfile) => { await storageService.addGuestProfile(p); };
+
+  const updateWebhook = async (item: WebhookConfig) => {
+      await storageService.updateWebhook(item);
+      setWebhooks(prev => prev.map(w => w.id === item.id ? item : w));
+  };
+
+  const deleteWebhook = async (id: string) => {
+      await storageService.deleteWebhook(id);
+      setWebhooks(prev => prev.filter(w => w.id !== id));
+  };
+
+  const triggerWebhook = async (eventType: string, payload: any) => {
+      const hook = webhooks.find(w => w.event_type === eventType && w.is_active);
+      if (hook) {
+          try {
+              fetch(hook.url, {
+                  method: 'POST',
+                  mode: 'no-cors',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload)
+              }).catch(e => console.error("Webhook trigger failed", e));
+          } catch(e) { console.error(e); }
+      }
+  };
+
+  // SHIFTS
+  const currentShift = React.useMemo(() => {
+      return shifts.find(s => s.status === 'Open') || null;
+  }, [shifts]);
 
   const openShift = async (startCash: number) => {
       if (!currentUser) return;
-      const shift: Shift = { id: `SH${Date.now()}`, staff_id: currentUser.id, staff_name: currentUser.collaboratorName, start_time: new Date().toISOString(), start_cash: startCash, total_revenue_cash: 0, total_expense_cash: 0, end_cash_expected: 0, status: 'Open' };
-      setShifts(prev => [...prev, shift]); await storageService.addShift(shift);
+      // Close any existing open shifts first (just in case)
+      if (currentShift) await closeShift(currentShift.end_cash_expected || 0, 'Auto close due to new shift');
+
+      const newShift: Shift = {
+          id: `SH-${Date.now()}`,
+          staff_id: currentUser.id,
+          staff_name: currentUser.collaboratorName,
+          start_time: new Date().toISOString(),
+          start_cash: startCash,
+          total_revenue_cash: 0,
+          total_expense_cash: 0,
+          end_cash_expected: startCash,
+          status: 'Open'
+      };
+      await storageService.addShift(newShift);
+      setShifts(prev => [newShift, ...prev]);
+      notify('success', 'Đã mở ca làm việc');
   };
-  const closeShift = async (endCash: number, note: string) => {
+
+  const closeShift = async (endCashActual: number, note: string) => {
       if (!currentShift) return;
-      const updatedShift: Shift = { ...currentShift, end_time: new Date().toISOString(), end_cash_actual: endCash, note, status: 'Closed' };
-      setShifts(prev => prev.map(s => s.id === currentShift.id ? updatedShift : s)); await storageService.updateShift(updatedShift);
+      const updatedShift: Shift = {
+          ...currentShift,
+          end_time: new Date().toISOString(),
+          end_cash_actual: endCashActual,
+          difference: endCashActual - currentShift.end_cash_expected,
+          note: note,
+          status: 'Closed'
+      };
+      await storageService.updateShift(updatedShift);
+      setShifts(prev => prev.map(s => s.id === updatedShift.id ? updatedShift : s));
+      notify('success', 'Đã chốt ca làm việc');
   };
 
-  const upsertSchedule = async (s: ShiftSchedule) => { setSchedules(prev => { const exists = prev.some(item => item.id === s.id); if (exists) return prev.map(item => item.id === s.id ? s : item); return [...prev, s]; }); await storageService.upsertSchedule(s); };
-  const deleteSchedule = async (id: string) => { setSchedules(prev => prev.filter(item => item.id !== id)); await storageService.deleteSchedule(id); };
-  const upsertAdjustment = async (a: AttendanceAdjustment) => { setAdjustments(prev => { const index = prev.findIndex(item => item.staff_id === a.staff_id && item.month === a.month); if (index > -1) return prev.map((item, i) => i === index ? a : item); return [...prev, a]; }); await storageService.upsertAdjustment(a); };
-
-  const addLeaveRequest = async (req: LeaveRequest) => { setLeaveRequests(prev => [req, ...prev]); await storageService.addLeaveRequest(req); };
-  const updateLeaveRequest = async (req: LeaveRequest) => { setLeaveRequests(prev => prev.map(r => r.id === req.id ? req : r)); await storageService.updateLeaveRequest(req); };
-
-  // --- NEW PERSISTENCE METHODS ---
-  const updateSettings = async (s: Settings) => { 
-      setSettings(s);
-      await storageService.saveSettings(s);
-  };
-  
-  const updateRoomRecipe = async (key: string, recipe: RoomRecipe) => {
-      setRoomRecipes(prev => ({ ...prev, [key]: recipe }));
-      await storageService.upsertRoomRecipe(recipe);
-  };
-  
-  const deleteRoomRecipe = async (key: string) => {
-      setRoomRecipes(prev => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
+  const upsertSchedule = async (item: ShiftSchedule) => {
+      await storageService.upsertSchedule(item);
+      setSchedules(prev => {
+          const exists = prev.some(s => s.id === item.id);
+          if (exists) return prev.map(s => s.id === item.id ? item : s);
+          return [...prev, item];
       });
+  };
+
+  const deleteSchedule = async (id: string) => {
+      await storageService.deleteSchedule(id);
+      setSchedules(prev => prev.filter(s => s.id !== id));
+  };
+
+  const upsertAdjustment = async (item: AttendanceAdjustment) => {
+      await storageService.upsertAdjustment(item);
+      setAdjustments(prev => {
+          const exists = prev.some(a => a.staff_id === item.staff_id && a.month === item.month);
+          if (exists) return prev.map(a => a.staff_id === item.staff_id && a.month === item.month ? item : a);
+          return [...prev, item];
+      });
+  };
+
+  const addLeaveRequest = async (item: LeaveRequest) => {
+      await storageService.addLeaveRequest(item);
+      setLeaveRequests(prev => [item, ...prev]);
+  };
+
+  const updateLeaveRequest = async (item: LeaveRequest) => {
+      await storageService.updateLeaveRequest(item);
+      setLeaveRequests(prev => prev.map(r => r.id === item.id ? item : r));
+  };
+
+  // OTA ORDERS
+  const detectPaymentStatus = (raw: string): 'Prepaid' | 'Pay at hotel' => {
+      const r = (raw || '').toLowerCase();
+      if (r.includes('prepaid') || r.includes('đã thanh toán') || r.includes('thanh toán ngay') || r.includes('chuyển khoản')) return 'Prepaid';
+      return 'Pay at hotel';
+  };
+
+  const syncOtaOrders = async () => {
+      const hook = webhooks.find(w => w.event_type === 'ota_import' && w.is_active);
+      setIsLoading(true);
+      try {
+          if (hook) {
+              const res = await fetch(hook.url + '?action=get_ota_orders');
+              const data = await res.json();
+              
+              let ordersArray = data;
+              if (data && typeof data === 'object' && data.data && Array.isArray(data.data)) {
+                  ordersArray = data.data;
+              } else if (data && typeof data === 'object' && !Array.isArray(data)) {
+                  ordersArray = Object.values(data);
+              }
+
+              if (Array.isArray(ordersArray)) {
+                  const parseSheetDate = (raw: any): string => {
+                      if (!raw) return new Date().toISOString();
+                      
+                      // Case 1: Excel Serial Number (e.g., 45000)
+                      if (typeof raw === 'number') {
+                          // Excel base date is Dec 30, 1899
+                          const date = new Date(Math.round((raw - 25569) * 86400 * 1000));
+                          return !isNaN(date.getTime()) ? date.toISOString() : new Date().toISOString();
+                      }
+
+                      // Case 2: String
+                      if (typeof raw === 'string') {
+                          const s = raw.trim();
+                          
+                          // Handle DD/MM/YYYY (Vietnamese format) explicitly to avoid invalid date or month/day swap
+                          // Regex matches D/M/YYYY or DD/MM/YYYY
+                          const vnDateRegex = /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/;
+                          const match = s.match(vnDateRegex);
+                          
+                          if (match) {
+                              const day = parseInt(match[1], 10);
+                              const month = parseInt(match[2], 10) - 1; // Month is 0-indexed in JS
+                              const year = parseInt(match[3], 10);
+                              const d = new Date(year, month, day, 12, 0, 0); // Set to noon to avoid timezone shift issues
+                              if (!isNaN(d.getTime())) return d.toISOString();
+                          }
+                          
+                          // Fallback to standard parsing
+                          const d = new Date(s);
+                          if (!isNaN(d.getTime())) return d.toISOString();
+                      }
+
+                      return new Date().toISOString(); // Fallback
+                  };
+
+                  const realOrders: OtaOrder[] = ordersArray.map((item: any) => {
+                      const normalizedItem: any = {};
+                      Object.keys(item).forEach(k => {
+                          const cleanKey = k.toLowerCase().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+                          normalizedItem[cleanKey] = item[k];
+                      });
+
+                      const getVal = (targets: string[]) => {
+                          for (const t of targets) {
+                              const cleanT = t.toLowerCase();
+                              if (normalizedItem[cleanT] !== undefined && normalizedItem[cleanT] !== null && normalizedItem[cleanT] !== "") return normalizedItem[cleanT];
+                          }
+                          return undefined;
+                      };
+
+                      const guestNameRaw = getVal(['tên khách', 'tên khách hàng', 'guest name', 'customer name', 'tên khách sạn', 'hotel name']) || 'No Name';
+                      const roomTypeRaw = getVal(['loại phòng', 'hạng phòng', 'room type', 'room name']) || 'Standard';
+                      const bookingCodeRaw = getVal(['mã booking', 'mã đặt phòng', 'booking id', 'id', 'mã bk']) || '';
+                      const paymentRaw = getVal(['thanh toán', 'trạng thái thanh toán', 'payment', 'payment status']) || '';
+                      const notesRaw = getVal(['yêu cầu đặc biệt', 'ghi chú', 'notes', 'special requests']) || '';
+                      const assignedRoomRaw = getVal(['xếp phòng', 'số phòng', 'room assigned', 'assigned', 'phòng']) || '';
+                      const checkInRaw = getVal(['ngày đến', 'check-in', 'check in', 'arrival']);
+                      const checkOutRaw = getVal(['ngày đi', 'check-out', 'check out', 'departure']);
+                      const emailDateRaw = getVal(['ngày email', 'email date', 'ngày', 'date', 'ngày đặt']); 
+                      const roomQtyRaw = getVal(['sl phòng', 'số lượng phòng', 'room qty', 'rooms']);
+                      const guestQtyRaw = getVal(['sl khách', 'số lượng khách', 'guest qty', 'guests']);
+                      
+                      const totalRaw = getVal(['tổng tiền (gross)', 'tổng tiền', 'total amount', 'gross', 'doanh thu', 'thành tiền']);
+                      const netRaw = getVal(['thực nhận (net)', 'thực nhận', 'net amount', 'net']);
+                      const sheetStatusRaw = getVal(['trạng thái', 'tình trạng', 'status']) || '';
+                      const platformRaw = getVal(['kênh', 'nguồn', 'platform', 'source']) || 'Other';
+
+                      let appStatus: OtaOrder['status'] = assignedRoomRaw ? 'Assigned' : 'Pending';
+                      if (sheetStatusRaw === 'Cancelled' || sheetStatusRaw === 'Hủy' || sheetStatusRaw === 'Đã hủy') appStatus = 'Cancelled';
+
+                      const parseMoney = (val: any) => {
+                          if (typeof val === 'number') return val;
+                          if (typeof val === 'string') return Number(val.replace(/\./g, '').replace(/,/g, '').replace(/\s/g, '').replace('₫', '').replace('đ', '')) || 0;
+                          return 0;
+                      };
+
+                      return {
+                          id: item.id || `OTA-${bookingCodeRaw}-${Math.random().toString(36).substr(2, 5)}`,
+                          platform: platformRaw,
+                          bookingCode: String(bookingCodeRaw).trim(), 
+                          guestName: guestNameRaw,
+                          guestPhone: '',
+                          checkIn: parseSheetDate(checkInRaw), 
+                          checkOut: parseSheetDate(checkOutRaw),
+                          emailDate: parseSheetDate(emailDateRaw),
+                          roomType: roomTypeRaw,
+                          roomQuantity: Number(roomQtyRaw) || 1,
+                          guestCount: Number(guestQtyRaw) || 1,
+                          totalAmount: parseMoney(totalRaw),
+                          netAmount: parseMoney(netRaw),
+                          paymentStatus: detectPaymentStatus(paymentRaw),
+                          status: appStatus,
+                          assignedRoom: assignedRoomRaw ? String(assignedRoomRaw).trim() : undefined,
+                          notes: notesRaw,
+                          rawJson: JSON.stringify(item)
+                      };
+                  });
+
+                  // Filter and Sort (Newest email date first)
+                  const validOrders = realOrders
+                      .filter(o => o.bookingCode && o.bookingCode !== '#N/A' && o.bookingCode !== 'Mã Booking')
+                      .sort((a, b) => {
+                          const dateA = new Date(a.emailDate || 0).getTime();
+                          const dateB = new Date(b.emailDate || 0).getTime();
+                          return dateB - dateA;
+                      });
+
+                  setOtaOrders(validOrders);
+                  notify('success', `Đã đồng bộ ${validOrders.length} đơn hàng.`);
+              }
+          } else {
+              setOtaOrders([]);
+              notify('info', 'Chưa cấu hình webhook OTA. Đang dùng dữ liệu trống.');
+          }
+      } catch (err: any) {
+          console.error("Sync OTA Error:", err);
+          notify('error', `Lỗi đồng bộ: ${err.message}`);
+      } finally {
+          setIsLoading(false);
+      }
+  };
+
+  const updateOtaOrder = async (id: string, updates: Partial<OtaOrder>) => {
+      setOtaOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
+  };
+
+  const updateSettings = async (newSettings: Settings) => {
+      await storageService.saveSettings(newSettings);
+      setSettings(newSettings);
+  };
+
+  const updateRoomRecipe = async (key: string, recipe: RoomRecipe) => {
+      await storageService.upsertRoomRecipe(recipe);
+      setRoomRecipes(prev => ({ ...prev, [key]: recipe }));
+  };
+
+  const deleteRoomRecipe = async (key: string) => {
       await storageService.deleteRoomRecipe(key);
+      const copy = { ...roomRecipes };
+      delete copy[key];
+      setRoomRecipes(copy);
   };
 
-  // --- Bank Account CRUD ---
-  const addBankAccount = async (acc: BankAccount) => {
-      if (acc.is_default) {
-          setBankAccounts(prev => prev.map(b => ({ ...b, is_default: false })));
-      }
-      setBankAccounts(prev => [...prev, acc]);
-      await storageService.addBankAccount(acc);
-      refreshData(true);
+  const addBankAccount = async (account: BankAccount) => {
+      await storageService.addBankAccount(account);
+      setBankAccounts(prev => [...prev, account]);
+      if(account.is_default) refreshData();
   };
 
-  const updateBankAccount = async (acc: BankAccount) => {
-      if (acc.is_default) {
-          setBankAccounts(prev => prev.map(b => ({ ...b, is_default: false })));
-      }
-      setBankAccounts(prev => prev.map(b => b.id === acc.id ? acc : b));
-      await storageService.updateBankAccount(acc);
-      refreshData(true);
+  const updateBankAccount = async (account: BankAccount) => {
+      await storageService.updateBankAccount(account);
+      setBankAccounts(prev => prev.map(b => b.id === account.id ? account : b));
+      if(account.is_default) refreshData();
   };
 
   const deleteBankAccount = async (id: string) => {
-      setBankAccounts(prev => prev.filter(b => b.id !== id));
       await storageService.deleteBankAccount(id);
+      setBankAccounts(prev => prev.filter(b => b.id !== id));
   };
 
-  const checkAvailability = (facilityName: string, roomCode: string, checkin: string, checkout: string, excludeId?: string) => {
-      const inDate = new Date(checkin).getTime();
-      const outDate = new Date(checkout).getTime();
-      return !bookingsRef.current.some(b => {
-          if (b.id === excludeId || b.status === 'Cancelled' || b.status === 'CheckedOut') return false;
-          if (b.facilityName !== facilityName || b.roomCode !== roomCode) return false;
-          const bIn = new Date(b.checkinDate).getTime();
-          const bOut = new Date(b.checkoutDate).getTime();
-          return (inDate < bOut && outDate > bIn);
-      });
+  const getGeminiApiKey = async () => {
+      return storageService.getAppConfig('GEMINI_API_KEY');
   };
 
-  return (
-    <AppContext.Provider value={{
-       facilities, rooms, bookings, collaborators, expenses, services, inventoryTransactions, housekeepingTasks, webhooks, schedules, adjustments, leaveRequests, roomRecipes, bankAccounts, currentShift, currentUser, settings, toasts, isLoading,
-       setCurrentUser, refreshData, notify, removeToast, canAccess,
-       addBooking, updateBooking, 
-       addFacility, updateFacility, deleteFacility,
-       upsertRoom, deleteRoom,
-       addCollaborator, updateCollaborator, deleteCollaborator,
-       addExpense, updateExpense, deleteExpense,
-       addService, updateService, deleteService, addInventoryTransaction,
-       handleLinenCheckIn, handleLinenExchange, processMinibarUsage, processLendingUsage, processCheckoutLinenReturn, processRoomRestock,
-       syncHousekeepingTasks, 
-       addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
-       getGeminiApiKey, setAppConfig,
-       addGuestProfile,
-       openShift, closeShift,
-       upsertSchedule, deleteSchedule, upsertAdjustment,
-       addLeaveRequest, updateLeaveRequest,
-       updateSettings, updateRoomRecipe, deleteRoomRecipe, 
-       addBankAccount, updateBankAccount, deleteBankAccount,
-       checkAvailability
-    }}>
-      {children}
-    </AppContext.Provider>
-  );
+  const setAppConfig = async (config: AppConfig) => {
+      await storageService.setAppConfig(config);
+  };
+
+  const addGuestProfile = async (profile: GuestProfile) => {
+      await storageService.addGuestProfile(profile);
+  };
+
+  // --- SPECIFIC OPERATIONAL LOGIC ---
+  const processMinibarUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId || s.name === item.itemId);
+          if (service) {
+              const newStock = (service.stock || 0) - item.qty;
+              await updateService({ ...service, stock: newStock });
+              await addInventoryTransaction({
+                  id: `TR-${Date.now()}-${Math.random()}`,
+                  created_at: new Date().toISOString(),
+                  staff_id: currentUser?.id || 'STAFF',
+                  staff_name: currentUser?.collaboratorName || 'Housekeeping',
+                  item_id: service.id,
+                  item_name: service.name,
+                  type: service.price > 0 ? 'MINIBAR_SOLD' : 'AMENITY_USED',
+                  quantity: item.qty,
+                  price: service.costPrice || 0,
+                  total: (service.costPrice || 0) * item.qty,
+                  facility_name: facilityName,
+                  note: `HK Báo dùng tại ${roomCode}`
+              });
+          }
+      }
+
+      const booking = bookings.find(b => b.facilityName === facilityName && b.roomCode === roomCode && b.status === 'CheckedIn');
+      if (booking) {
+          const currentServices = booking.servicesJson ? JSON.parse(booking.servicesJson) : [];
+          items.forEach(newItem => {
+              const service = services.find(s => s.id === newItem.itemId || s.name === newItem.itemId);
+              if (service) {
+                  const existing = currentServices.find((s: any) => s.serviceId === service.id);
+                  if (existing) {
+                      existing.quantity += newItem.qty;
+                      existing.total = existing.quantity * existing.price;
+                  } else {
+                      currentServices.push({
+                          serviceId: service.id,
+                          name: service.name,
+                          price: service.price,
+                          quantity: newItem.qty,
+                          total: service.price * newItem.qty,
+                          time: new Date().toISOString()
+                      });
+                  }
+              }
+          });
+          
+          const newTotal = booking.totalRevenue + items.reduce((sum, i) => {
+                  const s = services.find(srv => srv.id === i.itemId || srv.name === i.itemId);
+                  return sum + (s ? s.price * i.qty : 0);
+          }, 0);
+
+          await updateBooking({
+              ...booking,
+              servicesJson: JSON.stringify(currentServices),
+              remainingAmount: booking.remainingAmount + (newTotal - booking.totalRevenue),
+              totalRevenue: newTotal
+          });
+      }
+  };
+
+  const processCheckoutLinenReturn = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId);
+          if (service) {
+              const newLaundry = (service.laundryStock || 0) + item.qty;
+              const newInCirculation = Math.max(0, (service.in_circulation || 0) - item.qty);
+              await updateService({ ...service, laundryStock: newLaundry, in_circulation: newInCirculation });
+              
+              await addInventoryTransaction({
+                  id: `TR-${Date.now()}-${Math.random()}`,
+                  created_at: new Date().toISOString(),
+                  staff_id: currentUser?.id || 'SYSTEM',
+                  staff_name: currentUser?.collaboratorName || 'Housekeeping',
+                  item_id: service.id,
+                  item_name: service.name,
+                  type: 'LAUNDRY_SEND',
+                  quantity: item.qty,
+                  price: 0,
+                  total: 0,
+                  facility_name: facilityName,
+                  note: `Thu hồi bẩn từ phòng ${roomCode}`
+              });
+          }
+      }
+  };
+
+  const processRoomRestock = async (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => {
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId);
+          if (service) {
+              let laundry = (service.laundryStock || 0) + item.dirtyReturnQty;
+              let inCirculation = Math.max(0, (service.in_circulation || 0) - item.dirtyReturnQty);
+              
+              let stock = (service.stock || 0) - item.cleanRestockQty;
+              inCirculation += item.cleanRestockQty;
+
+              await updateService({ ...service, stock, laundryStock: laundry, in_circulation: inCirculation });
+              
+              if (item.cleanRestockQty > 0 || item.dirtyReturnQty > 0) {
+                  await addInventoryTransaction({
+                      id: `TR-${Date.now()}-${Math.random()}`,
+                      created_at: new Date().toISOString(),
+                      staff_id: currentUser?.id || 'SYSTEM',
+                      staff_name: currentUser?.collaboratorName || 'Housekeeping',
+                      item_id: service.id,
+                      item_name: service.name,
+                      type: 'EXCHANGE',
+                      quantity: Math.max(item.cleanRestockQty, item.dirtyReturnQty),
+                      price: 0,
+                      total: 0,
+                      facility_name: facilityName,
+                      note: `Phòng ${roomCode}: Thu ${item.dirtyReturnQty} Bẩn / Bù ${item.cleanRestockQty} Sạch`
+                  });
+              }
+          }
+      }
+  };
+
+  const processLendingUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId);
+          if (service) {
+              const newStock = Math.max(0, (service.stock || 0) - item.qty);
+              const newInCirculation = (service.in_circulation || 0) + item.qty;
+              await updateService({ ...service, stock: newStock, in_circulation: newInCirculation });
+              
+              await addInventoryTransaction({
+                  id: `TR-${Date.now()}-${Math.random()}`,
+                  created_at: new Date().toISOString(),
+                  staff_id: currentUser?.id || 'SYSTEM',
+                  staff_name: currentUser?.collaboratorName || 'Housekeeping',
+                  item_id: service.id,
+                  item_name: service.name,
+                  type: 'OUT',
+                  quantity: item.qty,
+                  price: 0,
+                  total: 0,
+                  facility_name: facilityName,
+                  note: `Cho mượn tại ${roomCode}`
+              });
+          }
+      }
+  };
+
+  const handleLinenExchange = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
+      const payload = items.map(i => ({ itemId: i.itemId, dirtyReturnQty: i.qty, cleanRestockQty: i.qty }));
+      await processRoomRestock(facilityName, roomCode, payload);
+  };
+
+  const value = {
+    currentUser, setCurrentUser,
+    facilities, rooms, bookings, collaborators, expenses, services,
+    inventoryTransactions, housekeepingTasks, webhooks, shifts,
+    schedules, adjustments, leaveRequests, otaOrders, settings, roomRecipes, bankAccounts,
+    toasts, isLoading, currentShift,
+    refreshData, notify, removeToast, canAccess,
+    checkAvailability, addBooking, updateBooking,
+    addFacility, updateFacility, deleteFacility,
+    upsertRoom, deleteRoom,
+    addCollaborator, updateCollaborator, deleteCollaborator,
+    addExpense, updateExpense, deleteExpense,
+    addService, updateService, deleteService,
+    addInventoryTransaction, syncHousekeepingTasks,
+    addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
+    openShift, closeShift, upsertSchedule, deleteSchedule, upsertAdjustment,
+    addLeaveRequest, updateLeaveRequest,
+    syncOtaOrders, updateOtaOrder,
+    updateSettings, updateRoomRecipe, deleteRoomRecipe,
+    addBankAccount, updateBankAccount, deleteBankAccount,
+    getGeminiApiKey, setAppConfig, addGuestProfile,
+    processMinibarUsage, processCheckoutLinenReturn, processRoomRestock, processLendingUsage, handleLinenExchange
+  };
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+};
+
+export const useAppContext = () => {
+  const context = useContext(AppContext);
+  if (context === undefined) {
+    throw new Error('useAppContext must be used within an AppProvider');
+  }
+  return context;
 };

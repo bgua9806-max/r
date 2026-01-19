@@ -1010,7 +1010,7 @@ If a field is not visible, return empty string "".`;
         }
     } else {
         if (!formData.facilityName || !formData.roomCode || !formData.checkinDate || !formData.checkoutDate) {
-            notify('error', 'Vui lòng điền đầy đủ thông tin bắt buộc');
+            notify('error', 'Vui lòng điền đủ thông tin bắt buộc');
             return;
         }
     }
@@ -1110,7 +1110,7 @@ If a field is not visible, return empty string "".`;
                         action: 'update_room',
                         rowIndex: selectedSheetRow.rowIndex,
                         room: finalData.roomCode,
-                        bookingCode: selectedSheetRow.bookingCode,
+                        bookingCode: String(selectedSheetRow.bookingCode).trim(), // Force Trim
                         status: 'Đã xếp phòng'
                     });
                     notify('info', 'Đã gửi cập nhật số phòng lên Sheet.');

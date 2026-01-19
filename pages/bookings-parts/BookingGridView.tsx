@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { ArrowRightLeft, Brush, CheckCircle, LogOut, ShieldCheck, ShoppingCart, Sparkles, Users, XCircle, BedDouble } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { Booking, Guest, Room } from '../../types';
 
 interface BookingGridViewProps {
@@ -68,7 +68,14 @@ export const BookingGridView: React.FC<BookingGridViewProps> = ({
                            }
 
                            const b = room.booking;
-                           const percentTime = b ? Math.min(100, Math.max(0, (now.getTime() - parseISO(b.checkinDate).getTime()) / (parseISO(b.checkoutDate).getTime() - parseISO(b.checkinDate).getTime()) * 100)) : 0;
+                           let percentTime = 0;
+                           if (b) {
+                               const start = parseISO(b.checkinDate);
+                               const end = parseISO(b.checkoutDate);
+                               if (isValid(start) && isValid(end)) {
+                                   percentTime = Math.min(100, Math.max(0, (now.getTime() - start.getTime()) / (end.getTime() - start.getTime()) * 100));
+                               }
+                           }
 
                            // Logic tính số lượng khách
                            let guestStats = { total: 0, male: 0, female: 0, other: 0 };
@@ -146,9 +153,9 @@ export const BookingGridView: React.FC<BookingGridViewProps> = ({
                                                    )}
 
                                                    <div className="flex justify-between items-center text-[9px] md:text-[10px] text-slate-500 font-medium mt-1">
-                                                       <span>{format(parseISO(b.checkinDate), 'dd/MM')}</span>
+                                                       <span>{isValid(parseISO(b.checkinDate)) ? format(parseISO(b.checkinDate), 'dd/MM') : '--/--'}</span>
                                                        <span className="text-slate-300">➜</span>
-                                                       <span>{format(parseISO(b.checkoutDate), 'dd/MM')}</span>
+                                                       <span>{isValid(parseISO(b.checkoutDate)) ? format(parseISO(b.checkoutDate), 'dd/MM') : '--/--'}</span>
                                                    </div>
                                                </div>
                                                

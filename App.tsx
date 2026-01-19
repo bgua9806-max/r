@@ -14,6 +14,7 @@ import { Housekeeping } from './pages/Housekeeping';
 import { Customers } from './pages/Customers';
 import { Inventory } from './pages/Inventory';
 import { StaffPortal } from './pages/StaffPortal';
+import { OtaOrders } from './pages/OtaOrders'; // New Import
 import { ToastContainer } from './components/ToastContainer';
 import { Menu, Bell, Search, AlertOctagon, AlertTriangle, Copy, Check } from 'lucide-react';
 import { storageService } from './services/storage';
@@ -150,6 +151,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
       case '/': return 'Tổng Quan';
       case '/dashboard': return 'Dashboard';
       case '/bookings': return 'Lịch Đặt Phòng';
+      case '/ota-orders': return 'Đơn Hàng OTA';
       case '/rooms': return 'Quản Lý Phòng';
       case '/housekeeping': return 'Buồng Phòng';
       case '/customers': return 'Khách Hàng (CRM)';
@@ -289,6 +291,8 @@ export const App = () => {
           <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
           
           <Route path="/bookings" element={<ProtectedRoute><Layout><Bookings /></Layout></ProtectedRoute>} />
+          
+          <Route path="/ota-orders" element={<ProtectedRoute><Layout><OtaOrders /></Layout></ProtectedRoute>} />
           
           <Route path="/rooms" element={<ProtectedRoute><Layout><Rooms /></Layout></ProtectedRoute>} />
           

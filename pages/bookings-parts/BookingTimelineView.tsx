@@ -1,6 +1,6 @@
 
 import React, { LegacyRef } from 'react';
-import { format, isSameDay, isWeekend, endOfDay, parseISO } from 'date-fns';
+import { format, isSameDay, isWeekend, endOfDay, parseISO, isValid } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { AlertCircle, LogIn, LogOut, ShieldCheck } from 'lucide-react';
 import { Booking } from '../../types';
@@ -139,6 +139,10 @@ export const BookingTimelineView: React.FC<BookingTimelineViewProps> = ({
                    {getBookingsForRow(row.facility, row.code).map(booking => {
                         const bookingStart = parseISO(booking.checkinDate);
                         const bookingEnd = parseISO(booking.checkoutDate);
+                        
+                        // FIX: Safety check for invalid dates
+                        if (!isValid(bookingStart) || !isValid(bookingEnd)) return null;
+
                         const isOverdue = booking.status === 'CheckedIn' && now > bookingEnd;
                         
                         let leftPercent = 0;

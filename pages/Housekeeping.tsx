@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { format, parseISO, differenceInMinutes } from 'date-fns';
+import { format, parseISO, differenceInMinutes, isValid } from 'date-fns';
 import { 
   Brush, CheckCircle, Calculator, Copy, User, Filter, 
   CheckSquare, Square, LogOut, BedDouble, AlertCircle, X, Zap, RotateCcw, BarChart3, Clock, RefreshCw, AlertTriangle, Flame, Star, HelpCircle, ThumbsUp, ThumbsDown, Calendar
@@ -63,7 +63,7 @@ export const Housekeeping: React.FC = () => {
     housekeepingTasks.forEach(t => {
         if (t.status === 'Done') {
             const key = `${t.facility_id}_${t.room_code}`;
-            const time = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
+            const time = t.completed_at && isValid(parseISO(t.completed_at)) ? parseISO(t.completed_at).getTime() : parseISO(t.created_at).getTime();
             const current = recentCompletedMap.get(key) || 0;
             if (time > current) recentCompletedMap.set(key, time);
         }
@@ -76,8 +76,11 @@ export const Housekeeping: React.FC = () => {
     );
 
     sortedTasks.forEach(t => {
+        const created = parseISO(t.created_at);
+        if (!isValid(created)) return;
+
         const key = `${t.facility_id}_${t.room_code}`;
-        const taskDateStr = format(parseISO(t.created_at), 'yyyy-MM-dd');
+        const taskDateStr = format(created, 'yyyy-MM-dd');
         const isDateMatch = taskDateStr === selectedDate;
         const isBacklog = isViewingToday && t.status !== 'Done' && taskDateStr < selectedDate;
 
@@ -118,24 +121,27 @@ export const Housekeeping: React.FC = () => {
            if (activeBooking) {
                const checkInDate = parseISO(activeBooking.checkinDate);
                const checkoutDate = parseISO(activeBooking.checkoutDate);
-               const isStayover = format(checkInDate, 'yyyy-MM-dd') < todayStr && format(checkoutDate, 'yyyy-MM-dd') > todayStr;
+               
+               if (isValid(checkInDate) && isValid(checkoutDate)) {
+                   const isStayover = format(checkInDate, 'yyyy-MM-dd') < todayStr && format(checkoutDate, 'yyyy-MM-dd') > todayStr;
 
-               if (isStayover) {
-                   inquiryTask = {
-                       id: `INQUIRY_${uniqueKey}`,
-                       facility_id: f.id,
-                       room_code: r.name,
-                       task_type: 'Stayover',
-                       status: 'Pending',
-                       assignee: null,
-                       priority: 'Normal',
-                       created_at: new Date().toISOString(),
-                       note: 'Khách đang ở - Cần hỏi dọn phòng?',
-                       facilityName: f.facilityName,
-                       availableStaff: validFacilityStaff,
-                       points: 1,
-                       isInquiry: true
-                   } as ExtendedTask;
+                   if (isStayover) {
+                       inquiryTask = {
+                           id: `INQUIRY_${uniqueKey}`,
+                           facility_id: f.id,
+                           room_code: r.name,
+                           task_type: 'Stayover',
+                           status: 'Pending',
+                           assignee: null,
+                           priority: 'Normal',
+                           created_at: new Date().toISOString(),
+                           note: 'Khách đang ở - Cần hỏi dọn phòng?',
+                           facilityName: f.facilityName,
+                           availableStaff: validFacilityStaff,
+                           points: 1,
+                           isInquiry: true
+                       } as ExtendedTask;
+                   }
                }
            }
       }
@@ -187,36 +193,42 @@ export const Housekeeping: React.FC = () => {
           const activeBooking = bookings.find(b => {
               if (b.facilityName !== f.facilityName || b.roomCode !== r.name) return false;
               if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false;
-              const checkinStr = format(parseISO(b.checkinDate), 'yyyy-MM-dd');
-              const checkoutStr = format(parseISO(b.checkoutDate), 'yyyy-MM-dd');
+              const checkin = parseISO(b.checkinDate);
+              const checkout = parseISO(b.checkoutDate);
+              if (!isValid(checkin) || !isValid(checkout)) return false;
+              const checkinStr = format(checkin, 'yyyy-MM-dd');
+              const checkoutStr = format(checkout, 'yyyy-MM-dd');
               return (selectedDate >= checkinStr && selectedDate <= checkoutStr);
           });
 
           if (activeBooking) {
-              const checkoutDay = format(parseISO(activeBooking.checkoutDate), 'yyyy-MM-dd');
-              let type: HousekeepingTask['task_type'] = 'Stayover';
-              let note = 'Dọn phòng khách đang ở';
-              
-              if (checkoutDay === selectedDate) {
-                  type = 'Checkout';
-                  note = `Khách sẽ trả phòng lúc ${format(parseISO(activeBooking.checkoutDate), 'HH:mm')}`;
-              }
+              const checkoutDate = parseISO(activeBooking.checkoutDate);
+              if (isValid(checkoutDate)) {
+                  const checkoutDay = format(checkoutDate, 'yyyy-MM-dd');
+                  let type: HousekeepingTask['task_type'] = 'Stayover';
+                  let note = 'Dọn phòng khách đang ở';
+                  
+                  if (checkoutDay === selectedDate) {
+                      type = 'Checkout';
+                      note = `Khách sẽ trả phòng lúc ${format(checkoutDate, 'HH:mm')}`;
+                  }
 
-              if (r.status !== 'Sửa chữa') {
-                  taskList.push({
-                      id: `PREDICT_${uniqueKey}`,
-                      facility_id: f.id,
-                      room_code: r.name,
-                      task_type: type,
-                      status: 'Pending',
-                      assignee: null,
-                      priority: type === 'Checkout' ? 'High' : 'Normal',
-                      created_at: new Date().toISOString(),
-                      note: note,
-                      facilityName: f.facilityName,
-                      availableStaff: validFacilityStaff,
-                      points: WORKLOAD_POINTS[type]
-                  });
+                  if (r.status !== 'Sửa chữa') {
+                      taskList.push({
+                          id: `PREDICT_${uniqueKey}`,
+                          facility_id: f.id,
+                          room_code: r.name,
+                          task_type: type,
+                          status: 'Pending',
+                          assignee: null,
+                          priority: type === 'Checkout' ? 'High' : 'Normal',
+                          created_at: new Date().toISOString(),
+                          note: note,
+                          facilityName: f.facilityName,
+                          availableStaff: validFacilityStaff,
+                          points: WORKLOAD_POINTS[type]
+                      });
+                  }
               }
           }
       }

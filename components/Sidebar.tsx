@@ -3,17 +3,20 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, CalendarCheck, DoorOpen, Users, 
-  Wallet, Settings, LogOut, Brush, ChevronRight, Contact, Package, Clock, X, Smartphone
+  Wallet, Settings, LogOut, Brush, ChevronRight, Contact, Package, Clock, X, Smartphone, CloudLightning
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { storageService } from '../services/storage';
 import { ShiftModal } from './ShiftModal';
 
 export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isOpen, toggle }) => {
-  const { currentUser, setCurrentUser, canAccess, currentShift } = useAppContext();
+  const { currentUser, setCurrentUser, canAccess, currentShift, otaOrders } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [isShiftModalOpen, setShiftModalOpen] = useState(false);
+
+  // Calculate pending OTA orders count
+  const pendingOtaCount = otaOrders.filter(o => o.status === 'Pending').length;
 
   const handleLogout = () => {
     // Thực hiện đăng xuất ngay lập tức
@@ -24,6 +27,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
 
   const menuItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Tổng quan' },
+    { to: '/ota-orders', icon: CloudLightning, label: 'Đơn hàng', badge: pendingOtaCount },
     { to: '/bookings', icon: CalendarCheck, label: 'Lịch đặt phòng' },
     { to: '/rooms', icon: DoorOpen, label: 'Phòng & Cơ sở' },
     { to: '/housekeeping', icon: Brush, label: 'Buồng phòng' },
@@ -88,10 +92,20 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
                   : 'hover:bg-slate-800/80 hover:text-white text-slate-400'}
               `}
             >
-              <item.icon size={20} className={`shrink-0 transition-colors ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+              <div className="relative shrink-0">
+                  <item.icon size={20} className={`transition-colors ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}`} />
+                  {/* Fix: Check for > 0 explicitly to avoid rendering '0' text */}
+                  {(item.badge || 0) > 0 && !isOpen && window.innerWidth >= 768 && (
+                      <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0f172a]"></div>
+                  )}
+              </div>
               
-              <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 text-sm ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
+              <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 text-sm flex-1 flex items-center justify-between ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
                 {item.label}
+                {/* Fix: Check for > 0 explicitly to avoid rendering '0' text */}
+                {(item.badge || 0) > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{item.badge}</span>
+                )}
               </span>
 
               {(!isOpen && window.innerWidth >= 768) && (
@@ -101,7 +115,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
               )}
               
               {isActive && (isOpen || window.innerWidth < 768) && (
-                  <ChevronRight size={14} className="ml-auto opacity-50" />
+                  <ChevronRight size={14} className="opacity-50" />
               )}
             </Link>
           );

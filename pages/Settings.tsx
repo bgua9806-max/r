@@ -28,7 +28,7 @@ export const Settings: React.FC = () => {
 
   // State for adding Webhook
   const [isAddingWebhook, setIsAddingWebhook] = useState(false);
-  const [newWebhook, setNewWebhook] = useState<Partial<WebhookConfig>>({ url: '', event_type: 'residence_declaration', description: '', is_active: true });
+  const [newWebhook, setNewWebhook] = useState<Partial<WebhookConfig>>({ url: '', event_type: 'ota_import', description: '', is_active: true });
 
   // State for Recipes
   const [isRecipeModalOpen, setRecipeModalOpen] = useState(false);
@@ -101,7 +101,6 @@ export const Settings: React.FC = () => {
       }
   };
 
-  // ... (Service Logic Omitted, same as before) ...
   const handleAddService = () => {
      if (newService.name && newService.price !== undefined) {
         const item: ServiceItem = {
@@ -120,20 +119,19 @@ export const Settings: React.FC = () => {
      }
   };
 
-  // ... (Webhook Logic Omitted, same as before) ...
   const handleAddWebhook = () => {
       if (newWebhook.url) {
           const item: WebhookConfig = {
               id: `WH${Date.now()}`,
               url: newWebhook.url,
-              event_type: newWebhook.event_type || 'residence_declaration',
+              event_type: newWebhook.event_type || 'ota_import',
               description: newWebhook.description || '',
               is_active: newWebhook.is_active ?? true,
               created_at: new Date().toISOString()
           };
           addWebhook(item);
           setIsAddingWebhook(false);
-          setNewWebhook({ url: '', event_type: 'residence_declaration', description: '', is_active: true });
+          setNewWebhook({ url: '', event_type: 'ota_import', description: '', is_active: true });
       }
   };
 
@@ -189,7 +187,7 @@ export const Settings: React.FC = () => {
   };
 
   const handleTestWebhook = (wh: WebhookConfig) => {
-      const mockPayload = {
+      let mockPayload: any = {
           message: "Đây là tín hiệu kiểm tra (Test Signal)",
           test_id: Date.now(),
           event: wh.event_type,
@@ -204,8 +202,19 @@ export const Settings: React.FC = () => {
               timestamp: new Date().toISOString()
           }
       };
+
+      // TÙY CHỈNH PAYLOAD CHO GOOGLE APPS SCRIPT (OTA)
+      if (wh.event_type === 'ota_import') {
+          mockPayload = {
+              action: 'update_room',
+              bookingCode: 'TEST-CONNECT-01',
+              room: 'ADMIN_TEST',
+              status: 'Connection Verified'
+          };
+      }
       
       triggerWebhook(wh.event_type, mockPayload);
+      notify('info', `Đã gửi tín hiệu test đến ${wh.event_type}`);
   };
 
   const handleResetMenu = async () => {
@@ -472,8 +481,8 @@ export const Settings: React.FC = () => {
                        <div className="flex gap-2 mb-2 flex-wrap">
                           <input className="flex-[3] min-w-[200px] border rounded p-2 text-sm bg-white text-slate-900" placeholder="https://script.google.com/..." value={newWebhook.url} onChange={e => setNewWebhook({...newWebhook, url: e.target.value})} />
                           <select className="flex-1 min-w-[120px] border rounded p-2 text-sm bg-white text-slate-900 font-bold" value={newWebhook.event_type} onChange={e => setNewWebhook({...newWebhook, event_type: e.target.value as any})}>
+                             <option value="ota_import">Đồng bộ Booking OTA (Google Sheet)</option>
                              <option value="residence_declaration">Khai báo lưu trú (Google Sheet)</option>
-                             <option value="ota_import">Đồng bộ Booking (Google Sheet)</option>
                              <option value="checkout">Checkout</option>
                              <option value="housekeeping_assign">Housekeeping Assign</option>
                              <option value="leave_update">Cập nhật nghỉ phép (Zalo)</option>

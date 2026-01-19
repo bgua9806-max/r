@@ -8,18 +8,18 @@ import {
 import { 
   TrendingUp, Calendar, Wallet, TrendingDown, Clock, LogIn, LogOut, BedDouble, 
   CreditCard, Brush, Package, CheckCircle2, ChevronRight, Zap, Star, DollarSign,
-  UserX, ShieldAlert
+  UserX, ShieldAlert, CloudLightning
 } from 'lucide-react';
 import { 
   format, endOfDay, endOfMonth, endOfYear, 
-  eachDayOfInterval, isWithinInterval, isSameDay, parseISO, differenceInHours
+  eachDayOfInterval, isWithinInterval, isSameDay, parseISO, differenceInHours, isValid
 } from 'date-fns';
 import { vi } from 'date-fns/locale';
 
 type TimeFilter = 'day' | 'month' | 'year';
 
 export const Dashboard: React.FC = () => {
-  const { bookings, rooms, expenses, services, leaveRequests } = useAppContext();
+  const { bookings, rooms, expenses, services, leaveRequests, otaOrders } = useAppContext();
   const [filter, setFilter] = useState<TimeFilter>('day');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const navigate = useNavigate();
@@ -55,7 +55,7 @@ export const Dashboard: React.FC = () => {
       const payments = JSON.parse(b.paymentsJson || '[]');
       payments.forEach((p: any) => {
         const pDate = new Date(p.ngayThanhToan);
-        if (isWithinInterval(pDate, { start, end })) {
+        if (isValid(pDate) && isWithinInterval(pDate, { start, end })) {
           const amount = Number(p.soTien);
           totalRevenue += amount;
           const isCash = p.method === 'Cash' || (!p.method && !(p.ghiChu || '').toLowerCase().match(/ck|chuyển|transfer|thẻ/));
@@ -65,14 +65,14 @@ export const Dashboard: React.FC = () => {
       });
       
       const bDate = b.actualCheckIn ? new Date(b.actualCheckIn) : new Date(b.checkinDate);
-      if (isWithinInterval(bDate, { start, end }) && b.status !== 'Cancelled') {
+      if (isValid(bDate) && isWithinInterval(bDate, { start, end }) && b.status !== 'Cancelled') {
         totalBookingValue += b.totalRevenue;
       }
     });
 
     expenses.forEach(e => {
       const eDate = new Date(e.expenseDate);
-      if (isWithinInterval(eDate, { start, end })) totalExpense += e.amount;
+      if (isValid(eDate) && isWithinInterval(eDate, { start, end })) totalExpense += e.amount;
     });
 
     // 2. OPERATIONAL KPI
@@ -93,6 +93,9 @@ export const Dashboard: React.FC = () => {
             ? parseISO(b.actualCheckOut) 
             : parseISO(b.checkoutDate);
        
+       // FIX: Skip invalid dates
+       if (!isValid(bIn) || !isValid(bOut)) return;
+
        // Tính KPI Checkin/Checkout
        if (isSameDay(bIn, selectedDate)) checkinsToday++;
        if (isSameDay(bOut, selectedDate)) checkoutsToday++;
@@ -127,10 +130,12 @@ export const Dashboard: React.FC = () => {
           bookings.forEach(b => {
              const payments = JSON.parse(b.paymentsJson || '[]');
              payments.forEach((p: any) => {
-                if(isSameDay(new Date(p.ngayThanhToan), day)) rev += Number(p.soTien);
+                const pd = new Date(p.ngayThanhToan);
+                if(isValid(pd) && isSameDay(pd, day)) rev += Number(p.soTien);
              });
              // Forecast: Dự báo doanh thu dựa trên ngày Check-in của các đơn Confirmed/CheckedIn
-             if(isSameDay(parseISO(b.checkinDate), day) && (b.status === 'Confirmed' || b.status === 'CheckedIn')) {
+             const checkin = parseISO(b.checkinDate);
+             if(isValid(checkin) && isSameDay(checkin, day) && (b.status === 'Confirmed' || b.status === 'CheckedIn')) {
                 forecast += b.totalRevenue;
              }
           });
@@ -144,9 +149,13 @@ export const Dashboard: React.FC = () => {
 
     // 5. TODAY'S OPS (ALERTS)
     const alerts = {
+        pendingOtaOrders: otaOrders.filter(o => o.status === 'Pending'),
         pendingLeaves, 
         leavesToday,   
-        upcomingCheckouts: bookings.filter(b => b.status === 'CheckedIn' && isSameDay(parseISO(b.checkoutDate), today) && differenceInHours(parseISO(b.checkoutDate), today) <= 2),
+        upcomingCheckouts: bookings.filter(b => {
+            const checkout = parseISO(b.checkoutDate);
+            return b.status === 'CheckedIn' && isValid(checkout) && isSameDay(checkout, today) && differenceInHours(checkout, today) <= 2;
+        }),
         dirtyRooms: rooms.filter(r => r.status === 'Bẩn'),
         unpaidBookings: bookings.filter(b => b.status === 'CheckedIn' && b.remainingAmount > 0),
         lowStock: services.filter(s => (s.stock || 0) <= (s.minStock || 0))
@@ -158,7 +167,7 @@ export const Dashboard: React.FC = () => {
        checkinsToday, checkoutsToday, occupancyRate,
        alerts, chartData
     };
-  }, [bookings, expenses, rooms, services, leaveRequests, filter, selectedDate]);
+  }, [bookings, expenses, rooms, services, leaveRequests, otaOrders, filter, selectedDate]);
 
   // --- SUB-COMPONENTS ---
   const KPICard = ({ title, value, sub, icon: Icon, colorClass, trend, isMain, onClick }: any) => (
@@ -293,7 +302,21 @@ export const Dashboard: React.FC = () => {
             </div>
             
             <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
-                {/* PRIORITY ALERTS: HR */}
+                {/* PRIORITY ALERTS */}
+                
+                {/* 1. OTA ORDERS (NEW) */}
+                {dashboardData.alerts.pendingOtaOrders.length > 0 && (
+                    <AlertItem 
+                        icon={CloudLightning} 
+                        color="bg-sky-500" 
+                        title="Đơn OTA mới" 
+                        desc={`${dashboardData.alerts.pendingOtaOrders.length} đơn hàng chưa xếp phòng`} 
+                        actionLabel="Xếp ngay" 
+                        onClick={() => navigate('/ota-orders')}
+                    />
+                )}
+
+                {/* 2. HR */}
                 {dashboardData.alerts.pendingLeaves.length > 0 && (
                     <AlertItem 
                         icon={ShieldAlert} 
@@ -305,7 +328,7 @@ export const Dashboard: React.FC = () => {
                     />
                 )}
 
-                {/* OPERATIONAL ALERTS */}
+                {/* 3. OPERATIONAL ALERTS */}
                 {dashboardData.alerts.upcomingCheckouts.length > 0 && (
                     <AlertItem 
                         icon={Clock} 
