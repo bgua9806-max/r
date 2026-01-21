@@ -336,6 +336,7 @@ export interface OtaOrder {
   status: 'Pending' | 'Assigned' | 'Cancelled';
   assignedRoom?: string; // Room assigned from Sheet (Column T)
   cancellationDate?: string; // ADDED: Ngày hủy
+  appConfirmStatus?: string; // ADDED: Cột V (Xác nhận từ App)
   notes?: string;
   rawJson?: string; // Lưu dữ liệu gốc từ Sheet
 }

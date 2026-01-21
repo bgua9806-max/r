@@ -87,6 +87,7 @@ interface AppContextType {
   syncOtaOrders: (overrideWebhooks?: WebhookConfig[], silent?: boolean) => Promise<void>;
   updateOtaOrder: (id: string, updates: Partial<OtaOrder>) => Promise<void>;
   deleteOtaOrder: (id: string) => Promise<void>;
+  confirmOtaCancellation: (order: OtaOrder) => Promise<void>;
   
   updateSettings: (newSettings: Settings) => Promise<void>;
   updateRoomRecipe: (key: string, recipe: RoomRecipe) => Promise<void>;
@@ -530,6 +531,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       const sheetStatusRaw = getVal(['trạng thái', 'tình trạng', 'status']) || '';
                       const platformRaw = getVal(['kênh', 'nguồn', 'platform', 'source']) || 'Other';
                       const cancellationDateRaw = getVal(['date cancelled', 'ngày hủy', 'cancelled date', 'cancellation date', 'ngày huỷ']);
+                      const appConfirmRaw = getVal(['xác nhận app', 'app confirm', 'confirm status', 'xác nhận hủy']) || '';
 
                       let appStatus: OtaOrder['status'] = assignedRoomRaw ? 'Assigned' : 'Pending';
                       const statusString = String(sheetStatusRaw).toUpperCase();
@@ -562,6 +564,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           status: appStatus,
                           assignedRoom: assignedRoomRaw ? String(assignedRoomRaw).trim() : undefined,
                           cancellationDate: cancellationDateRaw ? parseSheetDate(cancellationDateRaw) : undefined,
+                          appConfirmStatus: appConfirmRaw ? String(appConfirmRaw).trim().toUpperCase() : undefined,
                           notes: notesRaw,
                           rawJson: JSON.stringify(item)
                       };
@@ -599,6 +602,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteOtaOrder = async (id: string) => {
       setOtaOrders(prev => prev.filter(o => o.id !== id));
+  };
+
+  const confirmOtaCancellation = async (order: OtaOrder) => {
+      // 1. Optimistic Update Local
+      setOtaOrders(prev => prev.map(o => o.id === order.id ? {...o, appConfirmStatus: 'CONFIRMED'} : o));
+      
+      // 2. Trigger Webhook
+      const hook = webhooks.find(w => w.event_type === 'ota_import' && w.is_active);
+      if (hook) {
+          try {
+              // Sending multiple key variations to maximize compatibility with the existing Google Script
+              const payload = {
+                  action: 'confirm_cancellation',
+                  bookingCode: String(order.bookingCode).trim(), // Strict string handling
+                  status: 'CONFIRMED',
+                  app_confirm: 'CONFIRMED', // Matches column header concept
+                  appConfirmStatus: 'CONFIRMED', // Matches local type
+                  value: 'CONFIRMED' // Generic value
+              };
+              
+              await fetch(hook.url, {
+                  method: 'POST',
+                  mode: 'no-cors',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload)
+              });
+              notify('success', 'Đã gửi xác nhận hủy lên Sheet.');
+          } catch (e) {
+              console.error(e);
+              notify('error', 'Lỗi gửi tín hiệu xác nhận hủy.');
+          }
+      } else {
+          notify('info', 'Đã xác nhận (Local). Chưa cấu hình Webhook để đồng bộ.');
+      }
   };
 
   const updateSettings = async (newSettings: Settings) => {
@@ -814,7 +851,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
     openShift, closeShift, upsertSchedule, deleteSchedule, upsertAdjustment,
     addLeaveRequest, updateLeaveRequest,
-    syncOtaOrders, updateOtaOrder, deleteOtaOrder,
+    syncOtaOrders, updateOtaOrder, deleteOtaOrder, confirmOtaCancellation,
     updateSettings, updateRoomRecipe, deleteRoomRecipe,
     addBankAccount, updateBankAccount, deleteBankAccount,
     getGeminiApiKey, setAppConfig, addGuestProfile,

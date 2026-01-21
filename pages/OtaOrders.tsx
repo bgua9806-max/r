@@ -3,15 +3,15 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays } from 'date-fns';
 import { OtaOrder } from '../types';
 import { OtaAssignModal } from '../components/OtaAssignModal';
 
 export const OtaOrders: React.FC = () => {
-  const { otaOrders, syncOtaOrders, isLoading, deleteOtaOrder, bookings, updateBooking, notify } = useAppContext();
-  const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed'>('Pending');
+  const { otaOrders, syncOtaOrders, isLoading, deleteOtaOrder, bookings, updateBooking, notify, confirmOtaCancellation } = useAppContext();
+  const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed' | 'Cancelled'>('Pending');
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
@@ -29,9 +29,12 @@ export const OtaOrders: React.FC = () => {
       return otaOrders.filter(o => {
           // 1. Tab Filter
           let matchesTab = true;
+          const isCancelledStatus = o.status === 'Cancelled';
+          const isConfirmedApp = o.appConfirmStatus === 'CONFIRMED';
+
           if (activeTab === 'Pending') {
-              // Pending or Cancelled (Unassigned or needing attention)
-              matchesTab = o.status === 'Pending' || o.status === 'Cancelled';
+              // Pending or (Cancelled AND Not Confirmed yet)
+              matchesTab = o.status === 'Pending' || (isCancelledStatus && !isConfirmedApp);
           }
           else if (activeTab === 'Processed') {
               matchesTab = o.status === 'Assigned';
@@ -40,6 +43,10 @@ export const OtaOrders: React.FC = () => {
               // Check-in Today
               const checkin = parseISO(o.checkIn);
               matchesTab = isValid(checkin) && isSameDay(checkin, today);
+          }
+          else if (activeTab === 'Cancelled') {
+              // Cancelled AND Confirmed
+              matchesTab = isCancelledStatus && isConfirmedApp;
           }
 
           if (!matchesTab) return false;
@@ -71,10 +78,10 @@ export const OtaOrders: React.FC = () => {
       setAssignModalOpen(true);
   };
 
-  const handleDeleteOrder = async (orderId: string) => {
-      if(confirm('Bạn có chắc chắn muốn xóa đơn này khỏi danh sách?')) {
-          await deleteOtaOrder(orderId);
-          notify('success', 'Đã xóa đơn hàng.');
+  // Nút: Xác nhận Hủy (Gửi tín hiệu lên Sheet)
+  const handleConfirmCancel = async (order: OtaOrder) => {
+      if(confirm(`Xác nhận đơn ${order.bookingCode} đã hủy? Hành động này sẽ cập nhật lên Sheet và chuyển vào lưu trữ.`)) {
+          await confirmOtaCancellation(order);
       }
   };
 
@@ -94,11 +101,12 @@ export const OtaOrders: React.FC = () => {
               note: booking.note + `\n[AUTO] Cancelled via OTA Sync on ${new Date().toLocaleDateString()}` 
           });
       } else {
-          notify('info', 'Không tìm thấy Booking tương ứng trong hệ thống. Chỉ xóa đơn OTA.');
+          notify('info', 'Không tìm thấy Booking tương ứng trong hệ thống. Chỉ xử lý đơn OTA.');
       }
       
-      await deleteOtaOrder(order.id);
-      notify('success', 'Đã xử lý hủy thành công');
+      // Sau khi giải quyết xung đột, coi như đã xác nhận hủy
+      await confirmOtaCancellation(order);
+      notify('success', 'Đã giải phóng phòng và lưu vết hủy.');
   };
 
   const todayDateStr = format(new Date(), 'yyyy-MM-dd'); // Local date (VN)
@@ -141,13 +149,16 @@ export const OtaOrders: React.FC = () => {
         <div className="flex bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto no-scrollbar">
             <button onClick={() => setActiveTab('Pending')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Pending' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Clock size={16}/> Cần xử lý
-                {otaOrders.filter(o => o.status === 'Pending' || o.status === 'Cancelled').length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => o.status === 'Pending' || o.status === 'Cancelled').length}</span>}
+                {otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length}</span>}
             </button>
             <button onClick={() => setActiveTab('Today')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Today' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Calendar size={16}/> Check-in Hôm nay
             </button>
             <button onClick={() => setActiveTab('Processed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Processed' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <CheckCircle size={16}/> Đã xếp phòng
+            </button>
+            <button onClick={() => setActiveTab('Cancelled')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Cancelled' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                <Archive size={16}/> Lịch sử Hủy
             </button>
         </div>
 
@@ -288,20 +299,24 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 6: ACTIONS (STICKY) */}
                                         <td className="p-4 align-top text-center sticky right-0 bg-white group-hover:bg-white transition-colors z-10 border-l border-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.02)]">
                                             {isCancelled ? (
-                                                order.assignedRoom ? (
+                                                activeTab === 'Cancelled' ? (
+                                                    <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full bg-slate-100 text-slate-500 border-slate-200">
+                                                        Đã lưu
+                                                    </span>
+                                                ) : order.assignedRoom ? (
                                                     <button 
                                                         onClick={() => handleResolveConflict(order)}
                                                         className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5"
                                                     >
                                                         <span>HỦY PHÒNG</span>
-                                                        <span className="opacity-80">& XÓA ĐƠN</span>
+                                                        <span className="opacity-80">& XÁC NHẬN</span>
                                                     </button>
                                                 ) : (
                                                     <button 
-                                                        onClick={() => handleDeleteOrder(order.id)}
+                                                        onClick={() => handleConfirmCancel(order)}
                                                         className="w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
                                                     >
-                                                        <Trash2 size={14}/> Xóa đơn hủy
+                                                        <Trash2 size={14}/> Xác nhận Hủy
                                                     </button>
                                                 )
                                             ) : order.status === 'Pending' ? (
@@ -426,7 +441,11 @@ export const OtaOrders: React.FC = () => {
                                 </div>
 
                                 {isCancelled ? (
-                                    order.assignedRoom ? (
+                                    activeTab === 'Cancelled' ? (
+                                        <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-slate-100 text-slate-500 border-slate-200">
+                                            Đã lưu
+                                        </span>
+                                    ) : order.assignedRoom ? (
                                         <button 
                                             onClick={() => handleResolveConflict(order)}
                                             className="bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-700 transition-colors"
@@ -435,10 +454,10 @@ export const OtaOrders: React.FC = () => {
                                         </button>
                                     ) : (
                                         <button 
-                                            onClick={() => handleDeleteOrder(order.id)}
+                                            onClick={() => handleConfirmCancel(order)}
                                             className="bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-50 transition-colors"
                                         >
-                                            Xóa đơn
+                                            Xác nhận Hủy
                                         </button>
                                     )
                                 ) : order.status === 'Pending' ? (
