@@ -222,6 +222,12 @@ export const Collaborators: React.FC = () => {
   };
 
   const handleApproveLeave = async (req: LeaveRequest, isApproved: boolean) => {
+      // SECURITY GUARD: Only Admin or Manager can approve
+      if (currentUser?.role !== 'Admin' && currentUser?.role !== 'Quản lý') {
+          notify('error', 'Bạn không có quyền duyệt đơn này.');
+          return;
+      }
+
       // One-click action: No blocking confirm dialog
       setProcessingLeaveId(req.id);
       try {
@@ -893,7 +899,9 @@ export const Collaborators: React.FC = () => {
               {/* SECTION: HISTORY (EVERYONE) */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                   <div className="p-4 bg-slate-50 border-b border-slate-200">
-                      <h3 className="font-bold text-slate-700 text-sm">Lịch sử nghỉ phép</h3>
+                      <h3 className="font-bold text-slate-700 text-sm">
+                          {currentUser?.role === 'Admin' || currentUser?.role === 'Quản lý' ? 'Lịch sử nghỉ phép (Toàn bộ)' : 'Lịch sử nghỉ phép (Của bạn)'}
+                      </h3>
                   </div>
                   <div className="divide-y divide-slate-50 max-h-[400px] overflow-y-auto">
                       {leaveRequests
