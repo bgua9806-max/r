@@ -1045,7 +1045,7 @@ export const Collaborators: React.FC = () => {
                             <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Ca Sáng (GPS)</th>
                             <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Ca Tối (GPS)</th>
                             <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">
-                                Đi Muộn <span className="text-red-500 font-bold">(&gt;15p)</span>
+                                Đi Muộn <span className="text-red-500 font-bold">(>15p)</span>
                             </th>
                             <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công thực tế</th>
                         </>

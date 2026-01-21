@@ -565,7 +565,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       const checkOutRaw = getVal(['ngày đi', 'check-out', 'check out', 'departure']);
                       const emailDateRaw = getVal(['ngày email', 'email date', 'ngày', 'date', 'ngày đặt']); 
                       const roomQtyRaw = getVal(['sl phòng', 'số lượng phòng', 'room qty', 'rooms']);
-                      const guestQtyRaw = getVal(['sl khách', 'số lượng khách', 'guest qty', 'guests', 'details', 'khách', 'chi tiết khách']);
+                      const guestQtyRaw = getVal(['sl khách', 'số lượng khách', 'guest qty', 'guests', 'details', 'khách', 'chi tiết khách', 'số khách']);
                       
                       // NEW: Breakfast Mapping
                       const breakfastRaw = getVal(['ăn sáng', 'breakfast', 'meals', 'chế độ ăn', 'bữa sáng', 'breakfast included', 'bữa ăn']);
@@ -589,6 +589,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           return 0;
                       };
 
+                      // Helper to extract first number from guest string (e.g. "2 adults..." -> 2)
+                      const extractNumber = (val: any) => {
+                          if (typeof val === 'number') return val;
+                          if (typeof val === 'string') {
+                              const match = val.match(/\d+/);
+                              return match ? parseInt(match[0], 10) : 1;
+                          }
+                          return 1;
+                      };
+
                       return {
                           id: item.id || `OTA-${bookingCodeRaw}-${Math.random().toString(36).substr(2, 5)}`,
                           platform: platformRaw,
@@ -600,8 +610,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           emailDate: parseSheetDate(emailDateRaw),
                           roomType: roomTypeRaw,
                           roomQuantity: Number(roomQtyRaw) || 1,
-                          guestCount: Number(guestQtyRaw) || 1,
-                          guestDetails: guestQtyRaw ? String(guestQtyRaw) : undefined, // Keep raw text
+                          guestCount: extractNumber(guestQtyRaw),
+                          guestDetails: guestQtyRaw ? String(guestQtyRaw).trim() : undefined, // Keep raw text
                           breakfastStatus: breakfastRaw ? String(breakfastRaw) : undefined, // Keep raw text
                           totalAmount: parseMoney(totalRaw),
                           netAmount: parseMoney(netRaw),

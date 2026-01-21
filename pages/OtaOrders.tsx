@@ -243,17 +243,16 @@ export const OtaOrders: React.FC = () => {
                                                 <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
-                                                {/* GUEST DETAILS */}
-                                                {order.guestDetails ? (
-                                                    <div className="flex items-center gap-1 mt-1 text-xs text-slate-500 font-medium">
-                                                        <Users size={12} className="shrink-0"/>
-                                                        <span className="truncate max-w-[180px]" title={order.guestDetails}>{order.guestDetails}</span>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
-                                                        <User size={12}/> {order.guestCount} Khách
-                                                    </div>
-                                                )}
+                                                {/* GUEST DETAILS - Updated to show full text on hover */}
+                                                <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 font-medium group/guest">
+                                                    <Users size={12} className="shrink-0 text-slate-400"/>
+                                                    <span 
+                                                        className="truncate max-w-[150px] cursor-help" 
+                                                        title={order.guestDetails || `${order.guestCount} Khách`}
+                                                    >
+                                                        {order.guestDetails || `${order.guestCount} Khách`}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </td>
 
@@ -428,14 +427,12 @@ export const OtaOrders: React.FC = () => {
                             <div className="space-y-3">
                                 <div>
                                     <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
-                                    {/* GUEST DETAILS MOBILE */}
+                                    {/* GUEST DETAILS MOBILE - Update to prioritize detail string */}
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
-                                        {order.guestDetails ? (
-                                            <span className="flex items-center gap-1 truncate"><Users size={12}/> {order.guestDetails}</span>
-                                        ) : (
-                                            <span className="flex items-center gap-1"><User size={12}/> {order.guestCount}</span>
-                                        )}
-                                        <span className="flex items-center gap-1"><BedDouble size={12}/> {order.roomQuantity}</span>
+                                        <span className="flex items-center gap-1 truncate max-w-[200px]" title={order.guestDetails || `${order.guestCount} Khách`}>
+                                            <Users size={12}/> {order.guestDetails || order.guestCount}
+                                        </span>
+                                        <span className="flex items-center gap-1 text-slate-400 border-l border-slate-200 pl-2"><BedDouble size={12}/> {order.roomQuantity}</span>
                                     </div>
                                     {isCancelled && order.assignedRoom && (
                                         <div className="mt-2 text-xs font-bold text-red-600 bg-red-50 p-2 rounded border border-red-100 flex items-center gap-2">
