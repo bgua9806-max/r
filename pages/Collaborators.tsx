@@ -50,6 +50,9 @@ export const Collaborators: React.FC = () => {
   // Loading state for approval actions
   const [processingLeaveId, setProcessingLeaveId] = useState<string | null>(null);
 
+  // Permission Check Helper
+  const isRestricted = currentUser?.role === 'Nhân viên';
+
   const weekDays = useMemo(() => {
     const start = new Date(currentDate);
     const day = start.getDay();
@@ -272,7 +275,9 @@ export const Collaborators: React.FC = () => {
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">Quản Lý Nhân Sự</h1>
           <p className="text-slate-500 text-sm mt-1">Hệ thống quản lý chấm công & nghỉ phép tập trung.</p>
         </div>
-        {activeTab === 'employees' && (
+        
+        {/* HIDE ADD BUTTON FOR STAFF */}
+        {!isRestricted && activeTab === 'employees' && (
             <button 
             onClick={handleAdd} 
             className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-brand-700 transition-all shadow-md font-bold active:scale-95"
@@ -329,16 +334,19 @@ export const Collaborators: React.FC = () => {
                       </div>
                   </div>
 
-                  <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-5 rounded-2xl shadow-lg flex flex-col justify-between h-32 text-white relative overflow-hidden">
-                      <div className="absolute right-0 top-0 p-4 opacity-10"><Wallet size={64}/></div>
-                      <div className="flex justify-between items-start relative z-10">
-                          <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm"><Wallet size={20}/></div>
+                  {/* Hide Financial Card for Staff */}
+                  {!isRestricted && (
+                      <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-5 rounded-2xl shadow-lg flex flex-col justify-between h-32 text-white relative overflow-hidden">
+                          <div className="absolute right-0 top-0 p-4 opacity-10"><Wallet size={64}/></div>
+                          <div className="flex justify-between items-start relative z-10">
+                              <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm"><Wallet size={20}/></div>
+                          </div>
+                          <div className="relative z-10">
+                              <div className="text-2xl font-black">{overviewStats.totalSalaryEstimate.toLocaleString()} ₫</div>
+                              <div className="text-xs text-emerald-100 font-bold uppercase tracking-wider mt-1">Lương dự tính T{format(currentDate, 'MM')}</div>
+                          </div>
                       </div>
-                      <div className="relative z-10">
-                          <div className="text-2xl font-black">{overviewStats.totalSalaryEstimate.toLocaleString()} ₫</div>
-                          <div className="text-xs text-emerald-100 font-bold uppercase tracking-wider mt-1">Lương dự tính T{format(currentDate, 'MM')}</div>
-                      </div>
-                  </div>
+                  )}
               </div>
 
               {/* MAIN CONTENT GRID (3 COLUMNS) */}
@@ -507,10 +515,15 @@ export const Collaborators: React.FC = () => {
                                   <div className="p-1.5 rounded-lg bg-blue-200 text-blue-700 group-hover:bg-blue-600 group-hover:text-white transition-colors"><CalendarDays size={16}/></div> 
                                   <span>Xem lịch phân ca</span>
                               </button>
-                              <button onClick={() => { setActiveTab('timesheet'); }} className="w-full text-left px-4 py-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all text-xs font-bold text-slate-700 flex items-center gap-3 border border-emerald-100 hover:border-emerald-200 group">
-                                  <div className="p-1.5 rounded-lg bg-emerald-200 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><ClipboardList size={16}/></div> 
-                                  <span>Bảng công & Lương</span>
-                              </button>
+                              
+                              {/* HIDE SENSITIVE ACTIONS FOR STAFF */}
+                              {!isRestricted && (
+                                  <button onClick={() => { setActiveTab('timesheet'); }} className="w-full text-left px-4 py-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all text-xs font-bold text-slate-700 flex items-center gap-3 border border-emerald-100 hover:border-emerald-200 group">
+                                      <div className="p-1.5 rounded-lg bg-emerald-200 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><ClipboardList size={16}/></div> 
+                                      <span>Bảng công & Lương</span>
+                                  </button>
+                              )}
+
                               <button onClick={() => { setLeaveModalOpen(true); }} className="w-full text-left px-4 py-3 rounded-xl bg-purple-50 hover:bg-purple-100 transition-all text-xs font-bold text-slate-700 flex items-center gap-3 border border-purple-100 hover:border-purple-200 group">
                                   <div className="p-1.5 rounded-lg bg-purple-200 text-purple-700 group-hover:bg-purple-600 group-hover:text-white transition-colors"><Palmtree size={16}/></div> 
                                   <span>Tạo đơn nghỉ phép</span>
@@ -522,8 +535,8 @@ export const Collaborators: React.FC = () => {
           </div>
       )}
 
-      {/* --- TAB 2: EMPLOYEE LIST --- */}
-      {activeTab === 'employees' && (
+      {/* --- TAB 2: EMPLOYEE LIST (RESTRICTED FOR STAFF) --- */}
+      {activeTab === 'employees' && !isRestricted && (
         <div className="animate-in fade-in">
           <ListFilter 
             searchTerm={searchTerm}
@@ -688,7 +701,7 @@ export const Collaborators: React.FC = () => {
                           <td 
                             key={day.toISOString()} 
                             className={`p-2 border-r border-slate-100 text-center relative group/cell hover:bg-brand-50/30 transition-all cursor-pointer min-h-[80px]`}
-                            onClick={() => openScheduleSlot(staff, day)}
+                            onClick={() => !isRestricted && openScheduleSlot(staff, day)}
                           >
                             {schedule ? (
                               <div className={`
@@ -698,11 +711,13 @@ export const Collaborators: React.FC = () => {
                                 <span>{schedule.shift_type}</span>
                               </div>
                             ) : (
-                              <div className="opacity-0 group-hover/cell:opacity-100 transition-opacity p-2 flex items-center justify-center">
-                                <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-200 text-slate-300 flex items-center justify-center hover:border-brand-400 hover:text-brand-500">
-                                   <Plus size={16} />
+                              !isRestricted && (
+                                <div className="opacity-0 group-hover/cell:opacity-100 transition-opacity p-2 flex items-center justify-center">
+                                    <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-200 text-slate-300 flex items-center justify-center hover:border-brand-400 hover:text-brand-500">
+                                    <Plus size={16} />
+                                    </div>
                                 </div>
-                              </div>
+                              )
                             )}
                           </td>
                         );
@@ -757,7 +772,7 @@ export const Collaborators: React.FC = () => {
                               const s = schedules.find(sch => sch.staff_id === c.id && sch.date === format(mobileSelectedDate, 'yyyy-MM-dd'));
                               return s?.shift_type === 'Sáng' || s?.shift_type === 'Chiều'; // Handle legacy 'Chiều'
                           }).map(c => (
-                              <div key={c.id} onClick={() => openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-3 rounded-xl border border-amber-200 shadow-sm flex items-center gap-3">
+                              <div key={c.id} onClick={() => !isRestricted && openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-3 rounded-xl border border-amber-200 shadow-sm flex items-center gap-3">
                                   <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-md" style={{ backgroundColor: c.color }}>{c.collaboratorName.charAt(0)}</div>
                                   <div>
                                       <div className="font-bold text-slate-800">{c.collaboratorName}</div>
@@ -765,7 +780,6 @@ export const Collaborators: React.FC = () => {
                                   </div>
                               </div>
                           ))}
-                          {/* Add Button Logic? No, list remaining staff in separate block */}
                       </div>
                   </div>
 
@@ -779,7 +793,7 @@ export const Collaborators: React.FC = () => {
                               const s = schedules.find(sch => sch.staff_id === c.id && sch.date === format(mobileSelectedDate, 'yyyy-MM-dd'));
                               return s?.shift_type === 'Tối';
                           }).map(c => (
-                              <div key={c.id} onClick={() => openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-3 rounded-xl border border-indigo-200 shadow-sm flex items-center gap-3">
+                              <div key={c.id} onClick={() => !isRestricted && openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-3 rounded-xl border border-indigo-200 shadow-sm flex items-center gap-3">
                                   <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-md" style={{ backgroundColor: c.color }}>{c.collaboratorName.charAt(0)}</div>
                                   <div>
                                       <div className="font-bold text-slate-800">{c.collaboratorName}</div>
@@ -800,7 +814,7 @@ export const Collaborators: React.FC = () => {
                               const s = schedules.find(sch => sch.staff_id === c.id && sch.date === format(mobileSelectedDate, 'yyyy-MM-dd'));
                               return !s || s.shift_type === 'OFF';
                           }).map(c => (
-                              <div key={c.id} onClick={() => openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity">
+                              <div key={c.id} onClick={() => !isRestricted && openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity">
                                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: c.color }}>{c.collaboratorName.charAt(0)}</div>
                                   <div className="truncate text-xs font-bold text-slate-600">{c.collaboratorName}</div>
                               </div>
@@ -911,8 +925,8 @@ export const Collaborators: React.FC = () => {
           </div>
       )}
 
-      {/* --- TAB 5: TIMESHEET --- */}
-      {activeTab === 'timesheet' && (
+      {/* --- TAB 5: TIMESHEET (RESTRICTED FOR STAFF) --- */}
+      {activeTab === 'timesheet' && !isRestricted && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col md:flex-row justify-between items-center bg-white p-5 rounded-2xl border border-slate-100 shadow-soft gap-4">
              <div className="flex items-center gap-4">

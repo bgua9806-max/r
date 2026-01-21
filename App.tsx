@@ -16,7 +16,7 @@ import { Inventory } from './pages/Inventory';
 import { StaffPortal } from './pages/StaffPortal';
 import { OtaOrders } from './pages/OtaOrders'; // New Import
 import { ToastContainer } from './components/ToastContainer';
-import { Menu, Bell, Search, AlertOctagon, AlertTriangle, Copy, Check } from 'lucide-react';
+import { Menu, Bell, AlertOctagon, AlertTriangle, Copy, Check } from 'lucide-react';
 import { storageService } from './services/storage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -200,15 +200,6 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
            </div>
 
            <div className="flex items-center gap-2 md:gap-4">
-             <div className="hidden lg:flex items-center bg-slate-100 rounded-lg px-3 py-1.5 border border-transparent focus-within:border-brand-500 focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-500/10 transition-all w-72 group">
-                <Search size={16} className="text-slate-400 group-focus-within:text-brand-500 transition-colors mr-2" />
-                <input 
-                  type="text" 
-                  placeholder="Tìm kiếm..." 
-                  className="bg-transparent border-none outline-none text-sm text-slate-700 w-full placeholder:text-slate-400"
-                />
-             </div>
-
              <button className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-brand-600 transition-colors">
                 <Bell size={20} />
                 <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>

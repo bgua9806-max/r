@@ -1,10 +1,11 @@
+
 import { Settings, Facility, Collaborator, Booking, Expense, ServiceItem, Room, RoomRecipe, OtaOrder } from './types';
 
 // --- PERMISSION MATRIX ---
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
   'Admin': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'], 
   'Quản lý': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'],
-  'Nhân viên': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal'],
+  'Nhân viên': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal', '/collaborators'],
   'Nhà đầu tư': ['/dashboard'],
   'Buồng phòng': ['/staff-portal']
 };

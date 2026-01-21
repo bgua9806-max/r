@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Users, CalendarDays, ClipboardList, LayoutDashboard, Palmtree } from 'lucide-react';
+import { useAppContext } from '../context/AppContext';
 
 export type HRTabType = 'overview' | 'employees' | 'shifts' | 'timesheet' | 'leave';
 
@@ -10,7 +11,10 @@ interface HRTabsProps {
 }
 
 export const HRTabs: React.FC<HRTabsProps> = ({ activeTab, onTabChange }) => {
-  const tabs = [
+  const { currentUser } = useAppContext();
+
+  // Define full list of tabs
+  const allTabs = [
     { id: 'overview' as HRTabType, label: 'Tổng Quan', icon: LayoutDashboard },
     { id: 'employees' as HRTabType, label: 'Nhân Sự', icon: Users },
     { id: 'shifts' as HRTabType, label: 'Lịch Ca', icon: CalendarDays },
@@ -18,9 +22,19 @@ export const HRTabs: React.FC<HRTabsProps> = ({ activeTab, onTabChange }) => {
     { id: 'timesheet' as HRTabType, label: 'Công & Lương', icon: ClipboardList },
   ];
 
+  // Filter tabs based on Role
+  const visibleTabs = allTabs.filter(tab => {
+      // If user is 'Nhân viên', hide sensitive tabs
+      if (currentUser?.role === 'Nhân viên') {
+          return tab.id !== 'employees' && tab.id !== 'timesheet';
+      }
+      // Other roles (Admin, Quản lý) see everything
+      return true;
+  });
+
   return (
     <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-fit mb-6 overflow-x-auto no-scrollbar">
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const isActive = activeTab === tab.id;
         const Icon = tab.icon;
         

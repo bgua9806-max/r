@@ -90,6 +90,9 @@ export const Login: React.FC = () => {
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Tài khoản</label>
             <input 
               type="text" 
+              name="username"
+              id="username"
+              autoComplete="username"
               required
               className="w-full bg-slate-50 text-slate-800 border border-slate-200 rounded-xl p-3.5 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:bg-white outline-none transition-all font-medium"
               value={username}
@@ -102,6 +105,9 @@ export const Login: React.FC = () => {
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Mật khẩu</label>
             <input 
               type="password" 
+              name="password"
+              id="password"
+              autoComplete="current-password"
               required
               className="w-full bg-slate-50 text-slate-800 border border-slate-200 rounded-xl p-3.5 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 focus:bg-white outline-none transition-all font-medium"
               value={password}
