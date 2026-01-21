@@ -329,6 +329,7 @@ export interface OtaOrder {
   roomType: string; // Tên loại phòng trên OTA (VD: Deluxe Double)
   roomQuantity: number;
   guestCount: number;
+  guestDetails?: string; // ADDED: Raw guest string from sheet (e.g. "2 Adults, 1 Child")
   totalAmount: number;
   netAmount: number; // Thực nhận
   paymentStatus: 'Prepaid' | 'Pay at hotel';

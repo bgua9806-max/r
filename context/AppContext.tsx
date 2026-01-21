@@ -550,6 +550,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           roomType: roomTypeRaw,
                           roomQuantity: Number(roomQtyRaw) || 1,
                           guestCount: Number(guestQtyRaw) || 1,
+                          guestDetails: guestQtyRaw ? String(guestQtyRaw) : undefined,
                           totalAmount: parseMoney(totalRaw),
                           netAmount: parseMoney(netRaw),
                           paymentStatus: detectPaymentStatus(paymentRaw),

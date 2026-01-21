@@ -184,7 +184,7 @@ export const OtaOrders: React.FC = () => {
                                                     {order.guestName}
                                                 </div>
                                                 <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
-                                                    <User size={12}/> {order.guestCount} Khách
+                                                    <User size={12}/> {order.guestDetails || `${order.guestCount} Khách`}
                                                 </div>
                                             </div>
                                         </td>
@@ -312,7 +312,7 @@ export const OtaOrders: React.FC = () => {
                                 <div>
                                     <h3 className="font-black text-slate-800 text-base leading-tight line-clamp-2" title={order.guestName}>{order.guestName}</h3>
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
-                                        <span className="flex items-center gap-1"><User size={12}/> {order.guestCount}</span>
+                                        <span className="flex items-center gap-1"><User size={12}/> {order.guestDetails || order.guestCount}</span>
                                         <span className="flex items-center gap-1"><BedDouble size={12}/> {order.roomQuantity}</span>
                                     </div>
                                 </div>
