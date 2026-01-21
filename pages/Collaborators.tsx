@@ -1,23 +1,23 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Collaborator, ShiftSchedule, AttendanceAdjustment, LeaveRequest } from '../types';
+import { Collaborator, ShiftSchedule, AttendanceAdjustment, LeaveRequest, TimeLog } from '../types';
 import { CollaboratorModal } from '../components/CollaboratorModal';
 import { 
   Pencil, Trash2, Plus, Search, ClipboardList,
   ChevronLeft, ChevronRight, Calendar, Edit2, FileDown, Wallet, DollarSign, Sun, Moon, 
-  CheckCircle, AlertCircle, Send, User, Cake, HeartPulse, ShieldCheck, CalendarDays, Palmtree, UserCheck, Loader2, X, Check, Clock
+  CheckCircle, AlertCircle, Send, User, Cake, HeartPulse, ShieldCheck, CalendarDays, Palmtree, UserCheck, Loader2, X, Check, Clock, MapPin, ToggleLeft, ToggleRight, List
 } from 'lucide-react';
 import { HRTabs, HRTabType } from '../components/HRTabs';
 import { ListFilter, FilterOption } from '../components/ListFilter';
 import { ShiftScheduleModal } from '../components/ShiftScheduleModal';
 import { AttendanceAdjustmentModal } from '../components/AttendanceAdjustmentModal';
-import { format, addDays, isSameDay, isWithinInterval, parseISO, startOfWeek } from 'date-fns';
+import { format, addDays, isSameDay, isWithinInterval, parseISO, startOfWeek, isSameMonth } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { Modal } from '../components/Modal';
 
 export const Collaborators: React.FC = () => {
-  const { collaborators, deleteCollaborator, schedules, adjustments, notify, currentUser, leaveRequests, addLeaveRequest, updateLeaveRequest, triggerWebhook } = useAppContext();
+  const { collaborators, deleteCollaborator, schedules, adjustments, notify, currentUser, leaveRequests, addLeaveRequest, updateLeaveRequest, triggerWebhook, timeLogs } = useAppContext();
   const [activeTab, setActiveTab] = useState<HRTabType>('overview'); // Default is Overview
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingCollab, setEditingCollab] = useState<Collaborator | null>(null);
@@ -26,6 +26,9 @@ export const Collaborators: React.FC = () => {
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const selectedMonthStr = format(currentDate, 'yyyy-MM');
+
+  // NEW: View Mode for Timesheet (Schedule vs GPS)
+  const [timesheetMode, setTimesheetMode] = useState<'schedule' | 'realtime'>('schedule');
 
   // NEW: Mobile specific state for Shift Agenda
   const [mobileSelectedDate, setMobileSelectedDate] = useState(new Date());
@@ -80,24 +83,70 @@ export const Collaborators: React.FC = () => {
      end.setHours(23, 59, 59, 999);
      
      return collaborators.filter(c => c.role !== 'Nhà đầu tư').map(staff => {
-        const monthlySchedules = schedules.filter(s => 
-           s.staff_id === staff.id && 
-           isWithinInterval(new Date(s.date), { start, end })
-        );
-
         let standardDays = 0;
         let nightShifts = 0;
         let dayShifts = 0;
+        let lateCount = 0;
+        let totalLateMinutes = 0;
 
-        monthlySchedules.forEach(s => {
-           if (s.shift_type === 'Sáng' || s.shift_type === 'Chiều' as any) {
-               standardDays += 1;
-               dayShifts += 1;
-           } else if (s.shift_type === 'Tối') {
-               standardDays += 1.2; // Ca tối tính hệ số 1.2
-               nightShifts += 1;
-           }
-        });
+        if (timesheetMode === 'schedule') {
+            // MODE 1: SCHEDULE BASED
+            const monthlySchedules = schedules.filter(s => 
+               s.staff_id === staff.id && 
+               isWithinInterval(new Date(s.date), { start, end })
+            );
+
+            monthlySchedules.forEach(s => {
+               if (s.shift_type === 'Sáng' || s.shift_type === 'Chiều' as any) {
+                   standardDays += 1;
+                   dayShifts += 1;
+               } else if (s.shift_type === 'Tối') {
+                   standardDays += 1.2; // Ca tối tính hệ số 1.2
+                   nightShifts += 1;
+               }
+            });
+        } else {
+            // MODE 2: GPS REAL-TIME BASED
+            const validLogs = timeLogs.filter(l => 
+                l.staff_id === staff.id && 
+                isSameMonth(parseISO(l.check_in_time), currentDate) &&
+                (l.status === 'Valid' || l.status === 'Pending') // Count Pending as well for now
+            );
+
+            validLogs.forEach(log => {
+                const checkIn = parseISO(log.check_in_time);
+                const hour = checkIn.getHours();
+                const minutes = checkIn.getMinutes();
+                
+                // Determine Shift based on Check-in Time
+                // Morning: 05:00 - 14:00 (Start ~06:00)
+                // Night: 14:00 - 23:00 (Start ~18:00)
+                let isNight = false;
+                
+                if (hour >= 14) {
+                    // Night Shift
+                    isNight = true;
+                    nightShifts += 1;
+                    standardDays += 1.2;
+                    
+                    // Late Check: After 18:15
+                    if (hour > 18 || (hour === 18 && minutes > 15)) {
+                        lateCount++;
+                        totalLateMinutes += ((hour - 18) * 60 + (minutes - 0)); // Approximate relative to 18:00
+                    }
+                } else {
+                    // Morning Shift
+                    dayShifts += 1;
+                    standardDays += 1;
+
+                    // Late Check: After 06:15
+                    if (hour > 6 || (hour === 6 && minutes > 15)) {
+                        lateCount++;
+                        totalLateMinutes += ((hour - 6) * 60 + (minutes - 0)); // Approximate relative to 06:00
+                    }
+                }
+            });
+        }
 
         const adj = adjustments.find(a => a.staff_id === staff.id && a.month === selectedMonthStr);
         if (adj) {
@@ -113,11 +162,13 @@ export const Collaborators: React.FC = () => {
            standardDays,
            dayShifts,
            nightShifts,
+           lateCount,
+           totalLateMinutes,
            calculatedSalary,
            adjustment: adj
         };
      });
-  }, [collaborators, schedules, adjustments, currentDate, selectedMonthStr]);
+  }, [collaborators, schedules, adjustments, currentDate, selectedMonthStr, timesheetMode, timeLogs]);
 
   const roleOptions: FilterOption[] = useMemo(() => {
     const counts = collaborators.reduce((acc, c) => {
@@ -945,7 +996,23 @@ export const Collaborators: React.FC = () => {
                 </div>
              </div>
 
-             <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
+             <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                 {/* NEW TOGGLE SWITCH */}
+                 <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                     <button 
+                        onClick={() => setTimesheetMode('schedule')}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${timesheetMode === 'schedule' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}
+                     >
+                         <Calendar size={14}/> Theo Lịch
+                     </button>
+                     <button 
+                        onClick={() => setTimesheetMode('realtime')}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${timesheetMode === 'realtime' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500'}`}
+                     >
+                         <MapPin size={14}/> Theo GPS (Thực tế)
+                     </button>
+                 </div>
+
                  <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 shadow-inner">
                     <button onClick={() => setCurrentDate(addDays(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1), 0))} className="p-1 hover:text-brand-600 text-slate-400 transition-colors"><ChevronLeft size={18}/></button>
                     <span className="px-4 py-1 text-sm font-black text-slate-700 min-w-[120px] text-center uppercase tracking-widest">
@@ -953,6 +1020,7 @@ export const Collaborators: React.FC = () => {
                     </span>
                     <button onClick={() => setCurrentDate(addDays(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1), 0))} className="p-1 hover:text-brand-600 text-slate-400 transition-colors"><ChevronRight size={18}/></button>
                  </div>
+                 
                  <button className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 text-white rounded-xl font-bold text-sm shadow-lg hover:bg-brand-700 active:scale-95 transition-all">
                     <FileDown size={18}/> <span className="hidden sm:inline">Xuất Excel</span>
                  </button>
@@ -966,9 +1034,22 @@ export const Collaborators: React.FC = () => {
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
                     <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest">Họ tên nhân viên</th>
-                    <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Lượt ca Sáng</th>
-                    <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Lượt ca Tối</th>
-                    <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công thực tế</th>
+                    {timesheetMode === 'schedule' ? (
+                        <>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Lượt ca Sáng</th>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Lượt ca Tối</th>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công quy đổi</th>
+                        </>
+                    ) : (
+                        <>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Ca Sáng (GPS)</th>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Ca Tối (GPS)</th>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">
+                                Đi Muộn <span className="text-red-500 font-bold">(>15p)</span>
+                            </th>
+                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công thực tế</th>
+                        </>
+                    )}
                     <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-right">Lương tạm tính</th>
                     <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Thao tác</th>
                   </tr>
@@ -995,9 +1076,23 @@ export const Collaborators: React.FC = () => {
                              {row.nightShifts} buổi
                          </span>
                       </td>
+                      
+                      {timesheetMode === 'realtime' && (
+                          <td className="p-4 text-center">
+                              {row.lateCount > 0 ? (
+                                  <div className="flex flex-col items-center">
+                                      <span className="text-red-600 font-black">{row.lateCount} lần</span>
+                                      <span className="text-[9px] text-red-400">({row.totalLateMinutes} phút)</span>
+                                  </div>
+                              ) : (
+                                  <span className="text-emerald-500 font-bold text-xs">--</span>
+                              )}
+                          </td>
+                      )}
+
                       <td className="p-4 text-center">
                          <div className="text-lg font-black text-brand-700 underline decoration-brand-200 underline-offset-4">{row.standardDays.toFixed(1)}</div>
-                         <div className="text-[9px] text-slate-400 font-bold uppercase">Công quy đổi</div>
+                         <div className="text-[9px] text-slate-400 font-bold uppercase">{timesheetMode === 'schedule' ? 'Công kế hoạch' : 'Công thực tế'}</div>
                       </td>
                       <td className="p-4 text-right">
                          <div className="text-base font-black text-slate-900 flex items-center justify-end gap-1">
@@ -1035,8 +1130,16 @@ export const Collaborators: React.FC = () => {
                      </div>
                      
                      <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                         {timesheetMode === 'realtime' && (
+                             <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-200">
+                                 <span className="text-[10px] font-bold text-slate-500 uppercase">Đi muộn</span>
+                                 <span className={`text-xs font-black ${row.lateCount > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                     {row.lateCount > 0 ? `${row.lateCount} lần (${row.totalLateMinutes}p)` : 'Không'}
+                                 </span>
+                             </div>
+                         )}
                          <div className="flex justify-between items-end mb-2">
-                             <span className="text-xs font-bold text-slate-500 uppercase">Tổng công</span>
+                             <span className="text-xs font-bold text-slate-500 uppercase">{timesheetMode === 'schedule' ? 'Tổng công' : 'Công thực tế'}</span>
                              <span className="text-xl font-black text-slate-800">{row.standardDays.toFixed(1)} <span className="text-xs font-medium text-slate-400">ngày</span></span>
                          </div>
                          {/* Progress Bar Visual */}

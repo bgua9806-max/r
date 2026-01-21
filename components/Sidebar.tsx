@@ -3,20 +3,25 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, CalendarCheck, DoorOpen, Users, 
-  Wallet, Settings, LogOut, Brush, ChevronRight, Contact, Package, Clock, X, Smartphone, CloudLightning
+  Wallet, Settings, LogOut, Brush, ChevronRight, Contact, Package, Clock, X, Smartphone, CloudLightning, Fingerprint
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { storageService } from '../services/storage';
 import { ShiftModal } from './ShiftModal';
+import { TimekeepingModal } from './TimekeepingModal';
 
 export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isOpen, toggle }) => {
-  const { currentUser, setCurrentUser, canAccess, currentShift, otaOrders } = useAppContext();
+  const { currentUser, setCurrentUser, canAccess, currentShift, otaOrders, timeLogs } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [isShiftModalOpen, setShiftModalOpen] = useState(false);
+  const [isTimekeepingOpen, setTimekeepingOpen] = useState(false);
 
   // Calculate pending OTA orders count
   const pendingOtaCount = otaOrders.filter(o => o.status === 'Pending').length;
+
+  // Check if currently clocked in
+  const activeLog = currentUser ? timeLogs.find(l => l.staff_id === currentUser.id && !l.check_out_time) : null;
 
   const handleLogout = () => {
     // Thực hiện đăng xuất ngay lập tức
@@ -61,16 +66,37 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
         </button>
       </div>
 
-      <div className="p-3">
+      <div className="p-3 space-y-2">
+          {/* TIMEKEEPING BUTTON */}
+          <button 
+             onClick={() => setTimekeepingOpen(true)}
+             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg group relative overflow-hidden
+                ${activeLog 
+                    ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-600/30 hover:bg-emerald-600/20' 
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'}
+             `}
+          >
+              <div className={`shrink-0 ${activeLog ? 'animate-pulse' : ''}`}>
+                  <Fingerprint size={18} />
+              </div>
+              <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 flex-1 text-left ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
+                  {activeLog ? 'Đang làm việc' : 'Chấm công GPS'}
+              </span>
+              {activeLog && (isOpen || window.innerWidth < 768) && (
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_#10b981]"></div>
+              )}
+          </button>
+
+          {/* SHIFT BUTTON */}
           <button 
              onClick={() => setShiftModalOpen(true)}
-             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all mb-2 shadow-lg
-                ${currentShift ? 'bg-green-600/10 text-green-400 border border-green-600/20 hover:bg-green-600/20' : 'bg-blue-600 text-white hover:bg-blue-500'}
+             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg
+                ${currentShift ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 hover:bg-blue-600/20' : 'bg-brand-600 text-white hover:bg-brand-500'}
              `}
           >
               <Clock size={18} className="shrink-0"/>
               <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
-                  {currentShift ? 'Đang Giao Ca' : 'Mở Ca Mới'}
+                  {currentShift ? 'Giao Ca / Quỹ' : 'Mở Ca Mới'}
               </span>
           </button>
       </div>
@@ -136,6 +162,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
     </aside>
 
     <ShiftModal isOpen={isShiftModalOpen} onClose={() => setShiftModalOpen(false)} />
+    <TimekeepingModal isOpen={isTimekeepingOpen} onClose={() => setTimekeepingOpen(false)} />
     </>
   );
 };

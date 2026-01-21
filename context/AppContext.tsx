@@ -5,7 +5,7 @@ import {
   InventoryTransaction, HousekeepingTask, WebhookConfig, Shift, 
   ShiftSchedule, AttendanceAdjustment, LeaveRequest, OtaOrder, 
   Settings, RoomRecipe, BankAccount, ToastMessage, GuestProfile,
-  LendingItem, AppConfig, Guest
+  LendingItem, AppConfig, Guest, TimeLog
 } from '../types';
 import { 
   MOCK_FACILITIES, MOCK_ROOMS, MOCK_COLLABORATORS, MOCK_BOOKINGS, 
@@ -34,6 +34,7 @@ interface AppContextType {
   settings: Settings;
   roomRecipes: Record<string, RoomRecipe>;
   bankAccounts: BankAccount[];
+  timeLogs: TimeLog[];
   toasts: ToastMessage[];
   isLoading: boolean;
   currentShift: Shift | null;
@@ -101,6 +102,11 @@ interface AppContextType {
   setAppConfig: (config: AppConfig) => Promise<void>;
   addGuestProfile: (profile: GuestProfile) => Promise<void>;
   
+  // GPS Timekeeping Actions
+  clockIn: (facilityId: string, lat: number, lng: number, photo?: string) => Promise<{ success: boolean, message: string }>;
+  clockOut: () => Promise<{ success: boolean, message: string }>;
+  refreshTimeLogs: () => Promise<void>;
+
   // Specific Logic
   processMinibarUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
   processCheckoutLinenReturn: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
@@ -131,6 +137,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>(ROOM_RECIPES);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
   
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -169,7 +176,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
 
           const [
-              f, r, b, c, e, s, it, hk, wh, sh, sch, adj, lr, sett, rec, ba
+              f, r, b, c, e, s, it, hk, wh, sh, sch, adj, lr, sett, rec, ba, tl
           ] = await Promise.all([
               storageService.getFacilities(),
               storageService.getRooms(),
@@ -186,7 +193,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               storageService.getLeaveRequests(),
               storageService.getSettings(),
               storageService.getRoomRecipes(),
-              storageService.getBankAccounts()
+              storageService.getBankAccounts(),
+              storageService.getTimeLogs()
           ]);
 
           setFacilities(f);
@@ -205,6 +213,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setSettings(sett);
           setRoomRecipes(rec);
           setBankAccounts(ba);
+          setTimeLogs(tl);
 
           // Trigger OTA Sync immediately in background (Silent Mode)
           // Pass 'wh' directly because state setWebhooks(wh) might not be ready yet
@@ -216,6 +225,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } finally {
           setIsLoading(false);
       }
+  };
+
+  const refreshTimeLogs = async () => {
+      const logs = await storageService.getTimeLogs();
+      setTimeLogs(logs);
+  };
+
+  const clockIn = async (facilityId: string, lat: number, lng: number, photo?: string) => {
+      if (!currentUser) return { success: false, message: 'Chưa đăng nhập' };
+      const res = await storageService.clockIn(currentUser.id, facilityId, lat, lng, photo);
+      if (res.success && res.data) {
+          setTimeLogs(prev => [res.data!, ...prev]);
+          notify('success', res.message);
+      } else {
+          notify('error', res.message);
+      }
+      return res;
+  };
+
+  const clockOut = async () => {
+      if (!currentUser) return { success: false, message: 'Chưa đăng nhập' };
+      const res = await storageService.clockOut(currentUser.id);
+      if (res.success) {
+          await refreshTimeLogs();
+          notify('success', res.message);
+      } else {
+          notify('error', res.message);
+      }
+      return res;
   };
 
   const checkAvailability = (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeBookingId?: string) => {
@@ -842,7 +880,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentUser, setCurrentUser,
     facilities, rooms, bookings, collaborators, expenses, services,
     inventoryTransactions, housekeepingTasks, webhooks, shifts,
-    schedules, adjustments, leaveRequests, otaOrders, settings, roomRecipes, bankAccounts,
+    schedules, adjustments, leaveRequests, otaOrders, settings, roomRecipes, bankAccounts, timeLogs,
     toasts, isLoading, currentShift,
     refreshData, notify, removeToast, canAccess,
     checkAvailability, addBooking, updateBooking,
@@ -859,6 +897,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateSettings, updateRoomRecipe, deleteRoomRecipe,
     addBankAccount, updateBankAccount, deleteBankAccount,
     getGeminiApiKey, setAppConfig, addGuestProfile,
+    clockIn, clockOut, refreshTimeLogs,
     processMinibarUsage, processCheckoutLinenReturn, processRoomRestock, processLendingUsage, handleLinenExchange
   };
 

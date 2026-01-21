@@ -1,5 +1,5 @@
 
-import { Settings, Facility, Collaborator, Booking, Expense, ServiceItem, Room, RoomRecipe, OtaOrder } from './types';
+import { Settings, Facility, Collaborator, Booking, Expense, ServiceItem, Room, RoomRecipe, OtaOrder, TimeLog } from './types';
 
 // --- PERMISSION MATRIX ---
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
@@ -185,6 +185,14 @@ const FACILITY_NAMES = [
   'Airport Transit Hotel (Tân Bình)'
 ];
 
+const FACILITY_COORDS = [
+    { lat: 10.7769, lng: 106.7009 }, // Grand Hotel
+    { lat: 10.3460, lng: 107.0843 }, // Vung Tau
+    { lat: 11.9404, lng: 108.4583 }, // Da Lat
+    { lat: 10.8045, lng: 106.7329 }, // Thao Dien
+    { lat: 10.8142, lng: 106.6661 }  // Tan Binh
+];
+
 const STAFF_NAMES = [
     ['Cô Lan', 'Chị Mai'], 
     ['Cô Cúc', 'Anh Nam'], 
@@ -203,6 +211,7 @@ const generateMockData = () => {
         const facilityId = `F00${index + 1}`;
         const basePrice = 400000 + (index * 100000);
         const facilityRooms: any[] = []; 
+        const coords = FACILITY_COORDS[index] || { lat: 10.7769, lng: 106.7009 };
 
         const floor = index + 1;
         for (let i = 1; i <= 20; i++) {
@@ -246,7 +255,10 @@ const generateMockData = () => {
             facilityPrice: basePrice,
             note: `Cơ sở đạt chuẩn 4 sao tại khu vực ${area}`,
             staff: STAFF_NAMES[index],
-            roomsJson: JSON.stringify(facilityRooms)
+            roomsJson: JSON.stringify(facilityRooms),
+            latitude: coords.lat,
+            longitude: coords.lng,
+            allowed_radius: 100
         });
     });
 
@@ -302,6 +314,30 @@ export const MOCK_COLLABORATORS: Collaborator[] = [
     commissionRate: 0,
     baseSalary: 6000000
   }
+];
+
+// Mock Time Logs
+export const MOCK_TIME_LOGS: TimeLog[] = [
+    {
+        id: 'TL001',
+        staff_id: 'C002', // Lễ tân sáng
+        facility_id: 'F001', // Grand Hotel
+        check_in_time: new Date(new Date().setHours(6, 0, 0, 0)).toISOString(),
+        status: 'Valid',
+        location_lat: 10.7769,
+        location_lng: 106.7009,
+        distance: 5
+    },
+    {
+        id: 'TL002',
+        staff_id: 'C005', // Tạp vụ
+        facility_id: 'F001',
+        check_in_time: new Date(new Date().setHours(7, 30, 0, 0)).toISOString(),
+        status: 'Valid',
+        location_lat: 10.7770,
+        location_lng: 106.7010,
+        distance: 20
+    }
 ];
 
 const generateBookings = (): Booking[] => {

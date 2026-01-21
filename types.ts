@@ -24,6 +24,10 @@ export interface Facility {
   roomsJson?: string;
   note: string;
   staff?: string[]; 
+  // GPS Config
+  latitude?: number;
+  longitude?: number;
+  allowed_radius?: number; // meters
 }
 
 export interface Collaborator {
@@ -37,6 +41,20 @@ export interface Collaborator {
   commissionRate: number;
   baseSalary: number;
   commission?: number;
+}
+
+export interface TimeLog {
+  id: string;
+  staff_id: string;
+  facility_id: string;
+  check_in_time: string; // ISO string
+  check_out_time?: string; // ISO string
+  status: 'Valid' | 'Invalid' | 'Pending';
+  location_lat?: number;
+  location_lng?: number;
+  distance?: number; // meters from facility center
+  check_in_img?: string;
+  note?: string;
 }
 
 export interface InventoryTransaction {
