@@ -330,6 +330,7 @@ export interface OtaOrder {
   roomQuantity: number;
   guestCount: number;
   guestDetails?: string; // ADDED: Raw guest string from sheet (e.g. "2 Adults, 1 Child")
+  breakfastStatus?: string; // ADDED: Breakfast status (e.g., "Included", "Không")
   totalAmount: number;
   netAmount: number; // Thực nhận
   paymentStatus: 'Prepaid' | 'Pay at hotel';

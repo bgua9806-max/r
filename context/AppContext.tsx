@@ -524,8 +524,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       const checkOutRaw = getVal(['ngày đi', 'check-out', 'check out', 'departure']);
                       const emailDateRaw = getVal(['ngày email', 'email date', 'ngày', 'date', 'ngày đặt']); 
                       const roomQtyRaw = getVal(['sl phòng', 'số lượng phòng', 'room qty', 'rooms']);
-                      const guestQtyRaw = getVal(['sl khách', 'số lượng khách', 'guest qty', 'guests']);
+                      const guestQtyRaw = getVal(['sl khách', 'số lượng khách', 'guest qty', 'guests', 'details', 'khách', 'chi tiết khách']);
                       
+                      // NEW: Breakfast Mapping
+                      const breakfastRaw = getVal(['ăn sáng', 'breakfast', 'meals', 'chế độ ăn', 'bữa sáng', 'breakfast included', 'bữa ăn']);
+
                       const totalRaw = getVal(['tổng tiền (gross)', 'tổng tiền', 'total amount', 'gross', 'doanh thu', 'thành tiền']);
                       const netRaw = getVal(['thực nhận (net)', 'thực nhận', 'net amount', 'net']);
                       const sheetStatusRaw = getVal(['trạng thái', 'tình trạng', 'status']) || '';
@@ -557,7 +560,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           roomType: roomTypeRaw,
                           roomQuantity: Number(roomQtyRaw) || 1,
                           guestCount: Number(guestQtyRaw) || 1,
-                          guestDetails: guestQtyRaw ? String(guestQtyRaw) : undefined,
+                          guestDetails: guestQtyRaw ? String(guestQtyRaw) : undefined, // Keep raw text
+                          breakfastStatus: breakfastRaw ? String(breakfastRaw) : undefined, // Keep raw text
                           totalAmount: parseMoney(totalRaw),
                           netAmount: parseMoney(netRaw),
                           paymentStatus: detectPaymentStatus(paymentRaw),

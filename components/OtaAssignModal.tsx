@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Modal } from './Modal';
 import { OtaOrder, Room, Booking } from '../types';
 import { useAppContext } from '../context/AppContext';
-import { User, Calendar, Check, AlertTriangle, ArrowRight, DollarSign, BedDouble } from 'lucide-react';
+import { User, Calendar, Check, AlertTriangle, ArrowRight, DollarSign, BedDouble, Users, Coffee } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 
 interface Props {
@@ -127,6 +127,12 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
   const checkOutDate = parseISO(order.checkOut);
   const validDates = isValid(checkInDate) && isValid(checkOutDate);
 
+  const hasBreakfast = (order: OtaOrder) => {
+      if (!order.breakfastStatus) return false;
+      const s = order.breakfastStatus.toLowerCase();
+      return s !== '' && s !== 'no' && s !== 'không' && s !== 'none';
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Xếp Phòng Cho Đơn OTA" size="lg">
         <div className="flex flex-col h-[70vh] md:h-auto">
@@ -152,6 +158,33 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* CRITICAL INFO ALERT BOX */}
+            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col md:flex-row gap-3 shadow-sm">
+                <div className="flex-1">
+                    <div className="flex items-center gap-2 text-blue-800 font-bold text-xs uppercase mb-1">
+                        <Users size={14}/> Chi tiết khách
+                    </div>
+                    <div className="text-sm font-bold text-slate-700">
+                        {order.guestDetails || `${order.guestCount} Khách`}
+                    </div>
+                </div>
+                
+                {hasBreakfast(order) ? (
+                    <div className="flex-1 border-t md:border-t-0 md:border-l border-blue-200 pt-2 md:pt-0 md:pl-3">
+                        <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase mb-1">
+                            <Coffee size={14}/> Chế độ ăn uống
+                        </div>
+                        <div className="text-sm font-black text-amber-600 bg-amber-100 w-fit px-2 py-0.5 rounded border border-amber-200">
+                            {order.breakfastStatus || 'Có ăn sáng'}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 border-t md:border-t-0 md:border-l border-blue-200 pt-2 md:pt-0 md:pl-3 flex items-center text-slate-400 text-xs italic">
+                        Không có chế độ ăn
+                    </div>
+                )}
             </div>
 
             {/* Body: Room Selection Grid */}

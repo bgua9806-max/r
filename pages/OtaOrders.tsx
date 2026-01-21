@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays } from 'date-fns';
 import { OtaOrder } from '../types';
@@ -109,6 +109,12 @@ export const OtaOrders: React.FC = () => {
       notify('success', 'Đã giải phóng phòng và lưu vết hủy.');
   };
 
+  const hasBreakfast = (order: OtaOrder) => {
+      if (!order.breakfastStatus) return false;
+      const s = order.breakfastStatus.toLowerCase();
+      return s !== '' && s !== 'no' && s !== 'không' && s !== 'none';
+  };
+
   const todayDateStr = format(new Date(), 'yyyy-MM-dd'); // Local date (VN)
 
   return (
@@ -170,7 +176,7 @@ export const OtaOrders: React.FC = () => {
                         <tr>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[140px]">Nguồn / Mã</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[200px]">Khách hàng</th>
-                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider min-w-[200px]">Loại phòng</th>
+                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider min-w-[200px]">Loại phòng & Chế độ</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center w-[150px]">Thời gian</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-right w-[150px]">Tài chính</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center sticky right-0 bg-slate-50 z-20 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.05)] w-[160px]">Thao tác</th>
@@ -197,6 +203,7 @@ export const OtaOrders: React.FC = () => {
                                 const orderEmailDate = parseISO(order.emailDate || '');
                                 const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
                                 const isCancelled = order.status === 'Cancelled';
+                                const isBreakfastIncluded = hasBreakfast(order);
 
                                 return (
                                     <tr key={order.id} className={`group transition-colors ${isCancelled ? 'bg-red-50 hover:bg-red-100/50' : isToday ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-slate-50'}`}>
@@ -236,24 +243,43 @@ export const OtaOrders: React.FC = () => {
                                                 <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
-                                                <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
-                                                    <User size={12}/> {order.guestDetails || `${order.guestCount} Khách`}
-                                                </div>
+                                                {/* GUEST DETAILS */}
+                                                {order.guestDetails ? (
+                                                    <div className="flex items-center gap-1 mt-1 text-xs text-slate-500 font-medium">
+                                                        <Users size={12} className="shrink-0"/>
+                                                        <span className="truncate max-w-[180px]" title={order.guestDetails}>{order.guestDetails}</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
+                                                        <User size={12}/> {order.guestCount} Khách
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
 
-                                        {/* COL 3: ROOM TYPE */}
+                                        {/* COL 3: ROOM TYPE & BREAKFAST */}
                                         <td className="p-4 align-top">
                                             <div className="flex flex-col gap-1">
                                                 {/* Allow text wrap for long room names */}
                                                 <div className="text-sm font-medium text-slate-700 whitespace-normal leading-snug">
                                                     {order.roomType}
                                                 </div>
-                                                {order.roomQuantity > 1 && (
-                                                    <span className="w-fit bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-200">
-                                                        x{order.roomQuantity} Phòng
-                                                    </span>
-                                                )}
+                                                
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {order.roomQuantity > 1 && (
+                                                        <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-200">
+                                                            x{order.roomQuantity} Phòng
+                                                        </span>
+                                                    )}
+                                                    
+                                                    {/* BREAKFAST BADGE */}
+                                                    {isBreakfastIncluded && (
+                                                        <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded w-fit" title={order.breakfastStatus}>
+                                                            <Coffee size={10} /> {order.breakfastStatus || 'Có ăn sáng'}
+                                                        </span>
+                                                    )}
+                                                </div>
+
                                                 {order.assignedRoom && isCancelled && (
                                                     <div className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded w-fit mt-1">
                                                         <AlertOctagon size={12}/> Phòng {order.assignedRoom}
@@ -356,6 +382,7 @@ export const OtaOrders: React.FC = () => {
                     const isToday = isValidDates && isSameDay(checkin, new Date());
                     const styles = getPlatformConfig(order.platform);
                     const isCancelled = order.status === 'Cancelled';
+                    const isBreakfastIncluded = hasBreakfast(order);
                     
                     // FIX: Strict date string comparison
                     const orderEmailDate = parseISO(order.emailDate || '');
@@ -401,8 +428,13 @@ export const OtaOrders: React.FC = () => {
                             <div className="space-y-3">
                                 <div>
                                     <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
+                                    {/* GUEST DETAILS MOBILE */}
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
-                                        <span className="flex items-center gap-1"><User size={12}/> {order.guestDetails || order.guestCount}</span>
+                                        {order.guestDetails ? (
+                                            <span className="flex items-center gap-1 truncate"><Users size={12}/> {order.guestDetails}</span>
+                                        ) : (
+                                            <span className="flex items-center gap-1"><User size={12}/> {order.guestCount}</span>
+                                        )}
                                         <span className="flex items-center gap-1"><BedDouble size={12}/> {order.roomQuantity}</span>
                                     </div>
                                     {isCancelled && order.assignedRoom && (
@@ -413,9 +445,19 @@ export const OtaOrders: React.FC = () => {
                                 </div>
 
                                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">Loại phòng</div>
-                                    <div className="text-sm font-bold text-slate-700 leading-tight whitespace-normal mb-2">
-                                        {order.roomType}
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">Loại phòng</div>
+                                            <div className="text-sm font-bold text-slate-700 leading-tight whitespace-normal">
+                                                {order.roomType}
+                                            </div>
+                                        </div>
+                                        {isBreakfastIncluded && (
+                                            <div className="bg-amber-50 text-amber-600 border border-amber-100 p-1.5 rounded-lg shadow-sm flex flex-col items-center">
+                                                <Coffee size={14} className="mb-0.5"/>
+                                                <span className="text-[8px] font-bold uppercase">Có ăn sáng</span>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2 text-xs border-t border-slate-200 pt-2">
                                         <div className="flex-1 text-center border-r border-slate-200">
