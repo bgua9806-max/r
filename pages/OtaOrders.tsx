@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays } from 'date-fns';
 import { OtaOrder } from '../types';
@@ -12,6 +12,7 @@ import { OtaAssignModal } from '../components/OtaAssignModal';
 export const OtaOrders: React.FC = () => {
   const { otaOrders, syncOtaOrders, isLoading } = useAppContext();
   const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed'>('Pending');
+  const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
   const [isAssignModalOpen, setAssignModalOpen] = useState(false);
@@ -26,16 +27,29 @@ export const OtaOrders: React.FC = () => {
   const displayOrders = useMemo(() => {
       const today = new Date();
       return otaOrders.filter(o => {
-          if (activeTab === 'Pending') return o.status === 'Pending';
-          if (activeTab === 'Processed') return o.status === 'Assigned' || o.status === 'Cancelled';
-          if (activeTab === 'Today') {
+          // 1. Tab Filter
+          let matchesTab = true;
+          if (activeTab === 'Pending') matchesTab = o.status === 'Pending';
+          else if (activeTab === 'Processed') matchesTab = o.status === 'Assigned' || o.status === 'Cancelled';
+          else if (activeTab === 'Today') {
               // Check-in Today
               const checkin = parseISO(o.checkIn);
-              return isValid(checkin) && isSameDay(checkin, today);
+              matchesTab = isValid(checkin) && isSameDay(checkin, today);
           }
+
+          if (!matchesTab) return false;
+
+          // 2. Search Filter (Name or Booking Code)
+          if (searchTerm.trim()) {
+              const term = searchTerm.toLowerCase();
+              const matchesName = (o.guestName || '').toLowerCase().includes(term);
+              const matchesCode = (o.bookingCode || '').toLowerCase().includes(term);
+              if (!matchesName && !matchesCode) return false;
+          }
+
           return true;
       });
-  }, [otaOrders, activeTab]);
+  }, [otaOrders, activeTab, searchTerm]);
 
   const getPlatformConfig = (platform: string) => {
       switch (platform) {
@@ -63,14 +77,28 @@ export const OtaOrders: React.FC = () => {
                 </h1>
                 <p className="text-slate-500 text-sm font-medium">Đồng bộ và xử lý đơn hàng từ Agoda, Booking, Traveloka...</p>
             </div>
-            <button 
-                onClick={() => syncOtaOrders()}
-                disabled={isLoading}
-                className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-50 hover:text-brand-600 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            >
-                <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-                {isLoading ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
-            </button>
+            
+            <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                <div className="relative group w-full md:w-64">
+                    <Search className="absolute left-3 top-2.5 text-slate-400 group-focus-within:text-brand-500" size={16} />
+                    <input 
+                        type="text" 
+                        placeholder="Tìm tên khách, mã OTA..." 
+                        className="pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl w-full text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all bg-white text-slate-900 shadow-sm"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                    />
+                </div>
+
+                <button 
+                    onClick={() => syncOtaOrders()}
+                    disabled={isLoading}
+                    className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-50 hover:text-brand-600 transition-all shadow-sm active:scale-95 disabled:opacity-50 shrink-0"
+                >
+                    <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
+                    {isLoading ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
+                </button>
+            </div>
         </div>
 
         {/* TABS */}
@@ -106,7 +134,7 @@ export const OtaOrders: React.FC = () => {
                             <tr>
                                 <td colSpan={6} className="p-12 text-center text-slate-400">
                                     <CloudLightning size={48} className="mx-auto mb-2 opacity-30"/>
-                                    <p className="text-sm font-medium">Không có đơn hàng nào.</p>
+                                    <p className="text-sm font-medium">Không có đơn hàng nào phù hợp.</p>
                                 </td>
                             </tr>
                         ) : (
@@ -234,7 +262,7 @@ export const OtaOrders: React.FC = () => {
             {displayOrders.length === 0 ? (
                 <div className="text-center py-10 text-slate-400">
                     <CloudLightning size={40} className="mx-auto mb-2 opacity-50"/>
-                    <p className="text-sm font-medium">Không có đơn hàng nào.</p>
+                    <p className="text-sm font-medium">Không có đơn hàng nào phù hợp.</p>
                 </div>
             ) : (
                 displayOrders.map(order => {
