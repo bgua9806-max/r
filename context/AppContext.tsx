@@ -86,6 +86,7 @@ interface AppContextType {
   
   syncOtaOrders: (overrideWebhooks?: WebhookConfig[], silent?: boolean) => Promise<void>;
   updateOtaOrder: (id: string, updates: Partial<OtaOrder>) => Promise<void>;
+  deleteOtaOrder: (id: string) => Promise<void>;
   
   updateSettings: (newSettings: Settings) => Promise<void>;
   updateRoomRecipe: (key: string, recipe: RoomRecipe) => Promise<void>;
@@ -528,9 +529,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       const netRaw = getVal(['thực nhận (net)', 'thực nhận', 'net amount', 'net']);
                       const sheetStatusRaw = getVal(['trạng thái', 'tình trạng', 'status']) || '';
                       const platformRaw = getVal(['kênh', 'nguồn', 'platform', 'source']) || 'Other';
+                      const cancellationDateRaw = getVal(['date cancelled', 'ngày hủy', 'cancelled date', 'cancellation date', 'ngày huỷ']);
 
                       let appStatus: OtaOrder['status'] = assignedRoomRaw ? 'Assigned' : 'Pending';
-                      if (sheetStatusRaw === 'Cancelled' || sheetStatusRaw === 'Hủy' || sheetStatusRaw === 'Đã hủy') appStatus = 'Cancelled';
+                      const statusString = String(sheetStatusRaw).toUpperCase();
+                      if (statusString.includes('CANCEL') || statusString.includes('HỦY') || statusString.includes('HUY')) {
+                          appStatus = 'Cancelled';
+                      }
 
                       const parseMoney = (val: any) => {
                           if (typeof val === 'number') return val;
@@ -556,6 +561,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           paymentStatus: detectPaymentStatus(paymentRaw),
                           status: appStatus,
                           assignedRoom: assignedRoomRaw ? String(assignedRoomRaw).trim() : undefined,
+                          cancellationDate: cancellationDateRaw ? parseSheetDate(cancellationDateRaw) : undefined,
                           notes: notesRaw,
                           rawJson: JSON.stringify(item)
                       };
@@ -589,6 +595,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateOtaOrder = async (id: string, updates: Partial<OtaOrder>) => {
       setOtaOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
+  };
+
+  const deleteOtaOrder = async (id: string) => {
+      setOtaOrders(prev => prev.filter(o => o.id !== id));
   };
 
   const updateSettings = async (newSettings: Settings) => {
@@ -804,7 +814,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
     openShift, closeShift, upsertSchedule, deleteSchedule, upsertAdjustment,
     addLeaveRequest, updateLeaveRequest,
-    syncOtaOrders, updateOtaOrder,
+    syncOtaOrders, updateOtaOrder, deleteOtaOrder,
     updateSettings, updateRoomRecipe, deleteRoomRecipe,
     addBankAccount, updateBankAccount, deleteBankAccount,
     getGeminiApiKey, setAppConfig, addGuestProfile,

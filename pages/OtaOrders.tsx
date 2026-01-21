@@ -3,14 +3,14 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays } from 'date-fns';
 import { OtaOrder } from '../types';
 import { OtaAssignModal } from '../components/OtaAssignModal';
 
 export const OtaOrders: React.FC = () => {
-  const { otaOrders, syncOtaOrders, isLoading } = useAppContext();
+  const { otaOrders, syncOtaOrders, isLoading, deleteOtaOrder, bookings, updateBooking, notify } = useAppContext();
   const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed'>('Pending');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -29,8 +29,13 @@ export const OtaOrders: React.FC = () => {
       return otaOrders.filter(o => {
           // 1. Tab Filter
           let matchesTab = true;
-          if (activeTab === 'Pending') matchesTab = o.status === 'Pending';
-          else if (activeTab === 'Processed') matchesTab = o.status === 'Assigned' || o.status === 'Cancelled';
+          if (activeTab === 'Pending') {
+              // Pending or Cancelled (Unassigned or needing attention)
+              matchesTab = o.status === 'Pending' || o.status === 'Cancelled';
+          }
+          else if (activeTab === 'Processed') {
+              matchesTab = o.status === 'Assigned';
+          }
           else if (activeTab === 'Today') {
               // Check-in Today
               const checkin = parseISO(o.checkIn);
@@ -61,8 +66,39 @@ export const OtaOrders: React.FC = () => {
   };
 
   const handleAssignRoom = (order: OtaOrder) => {
+      if (order.status === 'Cancelled') return;
       setSelectedOrder(order);
       setAssignModalOpen(true);
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+      if(confirm('Bạn có chắc chắn muốn xóa đơn này khỏi danh sách?')) {
+          await deleteOtaOrder(orderId);
+          notify('success', 'Đã xóa đơn hàng.');
+      }
+  };
+
+  const handleResolveConflict = async (order: OtaOrder) => {
+      if(!confirm(`Xác nhận hủy phòng ${order.assignedRoom} và xóa đơn OTA này?`)) return;
+      
+      // Find booking
+      const booking = bookings.find(b => 
+          (b.roomCode === order.assignedRoom && b.status !== 'Cancelled' && b.status !== 'CheckedOut') ||
+          (b.note && b.note.includes(order.bookingCode))
+      );
+
+      if(booking) {
+          await updateBooking({ 
+              ...booking, 
+              status: 'Cancelled',
+              note: booking.note + `\n[AUTO] Cancelled via OTA Sync on ${new Date().toLocaleDateString()}` 
+          });
+      } else {
+          notify('info', 'Không tìm thấy Booking tương ứng trong hệ thống. Chỉ xóa đơn OTA.');
+      }
+      
+      await deleteOtaOrder(order.id);
+      notify('success', 'Đã xử lý hủy thành công');
   };
 
   const todayDateStr = format(new Date(), 'yyyy-MM-dd'); // Local date (VN)
@@ -104,14 +140,14 @@ export const OtaOrders: React.FC = () => {
         {/* TABS */}
         <div className="flex bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto no-scrollbar">
             <button onClick={() => setActiveTab('Pending')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Pending' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                <Clock size={16}/> Cần xếp phòng
-                {otaOrders.filter(o => o.status === 'Pending').length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => o.status === 'Pending').length}</span>}
+                <Clock size={16}/> Cần xử lý
+                {otaOrders.filter(o => o.status === 'Pending' || o.status === 'Cancelled').length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => o.status === 'Pending' || o.status === 'Cancelled').length}</span>}
             </button>
             <button onClick={() => setActiveTab('Today')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Today' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Calendar size={16}/> Check-in Hôm nay
             </button>
             <button onClick={() => setActiveTab('Processed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Processed' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                <CheckCircle size={16}/> Đã xử lý
+                <CheckCircle size={16}/> Đã xếp phòng
             </button>
         </div>
 
@@ -126,7 +162,7 @@ export const OtaOrders: React.FC = () => {
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider min-w-[200px]">Loại phòng</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center w-[150px]">Thời gian</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-right w-[150px]">Tài chính</th>
-                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center sticky right-0 bg-slate-50 z-20 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.05)] w-[140px]">Thao tác</th>
+                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center sticky right-0 bg-slate-50 z-20 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.05)] w-[160px]">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -149,15 +185,21 @@ export const OtaOrders: React.FC = () => {
                                 // LOGIC FIX: Compare Date Strings to ignore time/timezone issues
                                 const orderEmailDate = parseISO(order.emailDate || '');
                                 const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
+                                const isCancelled = order.status === 'Cancelled';
 
                                 return (
-                                    <tr key={order.id} className={`group transition-colors ${isToday ? 'bg-red-50/30 hover:bg-red-50/50' : 'hover:bg-blue-50/30'}`}>
+                                    <tr key={order.id} className={`group transition-colors ${isCancelled ? 'bg-red-50 hover:bg-red-100/50' : isToday ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-slate-50'}`}>
                                         {/* COL 1: SOURCE & CODE */}
                                         <td className="p-4 align-top">
                                             <div className="flex flex-col gap-1.5">
-                                                {isNewToday && (
+                                                {isNewToday && !isCancelled && (
                                                     <span className="flex items-center gap-1 w-fit bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
                                                         <Bell size={10} fill="white"/> MỚI VỀ
+                                                    </span>
+                                                )}
+                                                {isCancelled && (
+                                                    <span className="flex items-center gap-1 w-fit bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
+                                                        <XCircle size={10} fill="white" className="text-red-600"/> ĐÃ HỦY
                                                     </span>
                                                 )}
                                                 <span className={`inline-block w-fit px-2 py-0.5 rounded text-[10px] font-black uppercase border ${styles.bg} ${styles.color} ${styles.border}`}>
@@ -180,7 +222,7 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 2: CUSTOMER */}
                                         <td className="p-4 align-top">
                                             <div>
-                                                <div className="font-bold text-sm text-slate-800 line-clamp-2" title={order.guestName}>
+                                                <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
                                                 <div className="flex items-center gap-1.5 mt-1 text-slate-500 text-xs font-medium">
@@ -201,30 +243,40 @@ export const OtaOrders: React.FC = () => {
                                                         x{order.roomQuantity} Phòng
                                                     </span>
                                                 )}
+                                                {order.assignedRoom && isCancelled && (
+                                                    <div className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded w-fit mt-1">
+                                                        <AlertOctagon size={12}/> Phòng {order.assignedRoom}
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
 
                                         {/* COL 4: TIME */}
                                         <td className="p-4 align-top text-center">
                                             <div className="flex flex-col items-center gap-1">
-                                                {isToday && (
+                                                {isToday && !isCancelled && (
                                                     <span className="text-[9px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded animate-pulse mb-0.5">
                                                         CHECK-IN HÔM NAY
                                                     </span>
                                                 )}
-                                                <div className={`text-xs font-bold ${isToday ? 'text-red-600' : 'text-slate-700'}`}>
+                                                <div className={`text-xs font-bold ${isToday && !isCancelled ? 'text-red-600' : 'text-slate-700'}`}>
                                                     {isValidDates ? format(checkin, 'dd/MM') : '--'} <span className="text-slate-300 mx-1">➜</span> {isValidDates ? format(checkout, 'dd/MM') : '--'}
                                                 </div>
                                                 <div className="text-[10px] text-slate-400 font-medium">
                                                     ({nights} đêm)
                                                 </div>
+                                                {order.cancellationDate && (
+                                                    <div className="text-[9px] font-bold text-red-500 bg-white px-1 rounded border border-red-100 mt-1">
+                                                        Hủy: {format(parseISO(order.cancellationDate), 'dd/MM')}
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
 
                                         {/* COL 5: FINANCIALS */}
                                         <td className="p-4 align-top text-right">
                                             <div className="flex flex-col items-end gap-1">
-                                                <div className="font-black text-sm text-brand-600">
+                                                <div className={`font-black text-sm ${isCancelled ? 'text-slate-400 line-through' : 'text-brand-600'}`}>
                                                     {order.totalAmount.toLocaleString()} ₫
                                                 </div>
                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1 ${order.paymentStatus === 'Prepaid' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-orange-50 text-orange-700 border border-orange-100'}`}>
@@ -234,8 +286,25 @@ export const OtaOrders: React.FC = () => {
                                         </td>
 
                                         {/* COL 6: ACTIONS (STICKY) */}
-                                        <td className="p-4 align-top text-center sticky right-0 bg-white group-hover:bg-blue-50/30 transition-colors z-10 border-l border-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.02)]">
-                                            {order.status === 'Pending' ? (
+                                        <td className="p-4 align-top text-center sticky right-0 bg-white group-hover:bg-white transition-colors z-10 border-l border-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.02)]">
+                                            {isCancelled ? (
+                                                order.assignedRoom ? (
+                                                    <button 
+                                                        onClick={() => handleResolveConflict(order)}
+                                                        className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5"
+                                                    >
+                                                        <span>HỦY PHÒNG</span>
+                                                        <span className="opacity-80">& XÓA ĐƠN</span>
+                                                    </button>
+                                                ) : (
+                                                    <button 
+                                                        onClick={() => handleDeleteOrder(order.id)}
+                                                        className="w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
+                                                    >
+                                                        <Trash2 size={14}/> Xóa đơn hủy
+                                                    </button>
+                                                )
+                                            ) : order.status === 'Pending' ? (
                                                 <button 
                                                     onClick={() => handleAssignRoom(order)}
                                                     className="w-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95"
@@ -244,7 +313,7 @@ export const OtaOrders: React.FC = () => {
                                                 </button>
                                             ) : (
                                                 <span className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full ${order.status === 'Assigned' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                                    {order.status === 'Assigned' ? 'Đã xếp' : 'Đã hủy'}
+                                                    {order.status === 'Assigned' ? 'Đã xếp' : 'Unknown'}
                                                 </span>
                                             )}
                                         </td>
@@ -271,18 +340,19 @@ export const OtaOrders: React.FC = () => {
                     const isValidDates = isValid(checkin) && isValid(checkout);
                     const isToday = isValidDates && isSameDay(checkin, new Date());
                     const styles = getPlatformConfig(order.platform);
+                    const isCancelled = order.status === 'Cancelled';
                     
                     // FIX: Strict date string comparison
                     const orderEmailDate = parseISO(order.emailDate || '');
                     const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
 
                     return (
-                    <div key={order.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
+                    <div key={order.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col relative ${isCancelled ? 'border-red-200 ring-2 ring-red-50' : 'border-slate-200'}`}>
                         {/* Status Strip */}
-                        <div className={`h-1.5 w-full ${order.status === 'Pending' ? 'bg-orange-500' : order.status === 'Assigned' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                        <div className={`h-1.5 w-full ${isCancelled ? 'bg-red-500' : order.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                         
                         {/* Today Banner */}
-                        {isToday && order.status === 'Pending' && (
+                        {isToday && order.status === 'Pending' && !isCancelled && (
                             <div className="bg-red-600 text-white text-[10px] font-black uppercase tracking-widest py-1 px-4 text-center animate-pulse flex items-center justify-center gap-2">
                                 <AlertTriangle size={12} fill="white" /> Khách đến hôm nay
                             </div>
@@ -295,9 +365,14 @@ export const OtaOrders: React.FC = () => {
                                     <div className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${styles.bg} ${styles.color} ${styles.border}`}>
                                         {order.platform}
                                     </div>
-                                    {isNewToday && (
+                                    {isNewToday && !isCancelled && (
                                         <span className="flex items-center gap-1 bg-rose-100 text-rose-600 border border-rose-200 text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
                                             <Bell size={10}/> MỚI
+                                        </span>
+                                    )}
+                                    {isCancelled && (
+                                        <span className="flex items-center gap-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
+                                            ĐÃ HỦY
                                         </span>
                                     )}
                                 </div>
@@ -310,11 +385,16 @@ export const OtaOrders: React.FC = () => {
                             {/* Content */}
                             <div className="space-y-3">
                                 <div>
-                                    <h3 className="font-black text-slate-800 text-base leading-tight line-clamp-2" title={order.guestName}>{order.guestName}</h3>
+                                    <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
                                         <span className="flex items-center gap-1"><User size={12}/> {order.guestDetails || order.guestCount}</span>
                                         <span className="flex items-center gap-1"><BedDouble size={12}/> {order.roomQuantity}</span>
                                     </div>
+                                    {isCancelled && order.assignedRoom && (
+                                        <div className="mt-2 text-xs font-bold text-red-600 bg-red-50 p-2 rounded border border-red-100 flex items-center gap-2">
+                                            <AlertOctagon size={14}/> Cảnh báo: Đã xếp phòng {order.assignedRoom}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
@@ -336,16 +416,32 @@ export const OtaOrders: React.FC = () => {
                             </div>
 
                             {/* Footer */}
-                            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
                                 <div>
-                                    <div className="text-lg font-black text-brand-700">{order.totalAmount.toLocaleString()}</div>
+                                    <div className={`text-lg font-black ${isCancelled ? 'text-slate-400' : 'text-brand-700'}`}>{order.totalAmount.toLocaleString()}</div>
                                     <div className={`text-[9px] font-bold uppercase flex items-center gap-1 ${order.paymentStatus === 'Prepaid' ? 'text-green-600' : 'text-orange-600'}`}>
                                         {order.paymentStatus === 'Prepaid' ? <CheckCircle size={10}/> : <CreditCard size={10}/>}
                                         {order.paymentStatus === 'Prepaid' ? 'Prepaid' : 'Tại KS'}
                                     </div>
                                 </div>
 
-                                {order.status === 'Pending' ? (
+                                {isCancelled ? (
+                                    order.assignedRoom ? (
+                                        <button 
+                                            onClick={() => handleResolveConflict(order)}
+                                            className="bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-700 transition-colors"
+                                        >
+                                            Hủy P & Xóa
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={() => handleDeleteOrder(order.id)}
+                                            className="bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-50 transition-colors"
+                                        >
+                                            Xóa đơn
+                                        </button>
+                                    )
+                                ) : order.status === 'Pending' ? (
                                     <button 
                                         onClick={() => handleAssignRoom(order)}
                                         className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-brand-600 transition-colors"
@@ -353,8 +449,8 @@ export const OtaOrders: React.FC = () => {
                                         Xếp phòng
                                     </button>
                                 ) : (
-                                    <span className={`px-3 py-1 rounded text-[10px] font-black border uppercase ${order.status === 'Assigned' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                        {order.status === 'Assigned' ? 'Đã xếp' : 'Hủy'}
+                                    <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-green-50 text-green-700 border-green-200">
+                                        Đã xếp
                                     </span>
                                 )}
                             </div>

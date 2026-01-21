@@ -335,6 +335,7 @@ export interface OtaOrder {
   paymentStatus: 'Prepaid' | 'Pay at hotel';
   status: 'Pending' | 'Assigned' | 'Cancelled';
   assignedRoom?: string; // Room assigned from Sheet (Column T)
+  cancellationDate?: string; // ADDED: Ngày hủy
   notes?: string;
   rawJson?: string; // Lưu dữ liệu gốc từ Sheet
 }
