@@ -17,6 +17,7 @@ import { parseISO, areIntervalsOverlapping, isValid, format } from 'date-fns';
 interface AppContextType {
   currentUser: Collaborator | null;
   setCurrentUser: (user: Collaborator | null) => void;
+  isInitialized: boolean; // NEW: Flag to check if app has finished loading initial state
   facilities: Facility[];
   rooms: Room[];
   bookings: Booking[];
@@ -119,6 +120,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<Collaborator | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false); // NEW: Init state
   
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -145,6 +147,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
       const storedUser = storageService.getUser();
       if (storedUser) setCurrentUser(storedUser);
+      setIsInitialized(true); // Mark as initialized after checking storage
       refreshData();
   }, []);
 
@@ -878,6 +881,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const value = {
     currentUser, setCurrentUser,
+    isInitialized, // Export the state
     facilities, rooms, bookings, collaborators, expenses, services,
     inventoryTransactions, housekeepingTasks, webhooks, shifts,
     schedules, adjustments, leaveRequests, otaOrders, settings, roomRecipes, bankAccounts, timeLogs,

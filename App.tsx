@@ -20,9 +20,18 @@ import { Menu, Bell, AlertOctagon, AlertTriangle, Copy, Check } from 'lucide-rea
 import { storageService } from './services/storage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { currentUser, canAccess } = useAppContext();
+    const { currentUser, canAccess, isInitialized } = useAppContext();
     const location = useLocation();
   
+    // Wait for initialization before redirecting
+    if (!isInitialized) {
+        return (
+            <div className="h-screen w-full flex items-center justify-center bg-slate-50">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
+            </div>
+        );
+    }
+
     if (!currentUser) {
       return <Navigate to="/login" replace />;
     }
