@@ -352,8 +352,8 @@ export const OtaOrders: React.FC = () => {
                                                     Xếp phòng
                                                 </button>
                                             ) : (
-                                                <span className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full ${order.status === 'Assigned' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                                    {order.status === 'Assigned' ? 'Đã xếp' : 'Unknown'}
+                                                <span className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full truncate max-w-[100px] ${order.status === 'Assigned' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`} title={order.assignedRoom}>
+                                                    {order.status === 'Assigned' ? (order.assignedRoom || 'Đã xếp') : 'Unknown'}
                                                 </span>
                                             )}
                                         </td>

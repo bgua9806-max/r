@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Modal } from './Modal';
 import { OtaOrder, Room, Booking } from '../types';
 import { useAppContext } from '../context/AppContext';
-import { User, Calendar, Check, AlertTriangle, ArrowRight, DollarSign, BedDouble, Users, Coffee } from 'lucide-react';
+import { User, Calendar, Check, AlertTriangle, ArrowRight, DollarSign, BedDouble, Users, Coffee, Layers, Split } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 
 interface Props {
@@ -14,76 +14,135 @@ interface Props {
 
 export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
   const { facilities, rooms, checkAvailability, addBooking, updateOtaOrder, notify, webhooks } = useAppContext();
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  
+  // Changed from single string to array for multi-room support
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // New state for payment strategy
+  const [paymentStrategy, setPaymentStrategy] = useState<'GROUP' | 'SPLIT'>('GROUP');
 
-  const selectedRoom = useMemo(() => {
-      if (!selectedRoomId) return null;
-      return rooms.find(r => r.id === selectedRoomId);
-  }, [selectedRoomId, rooms]);
+  const handleRoomClick = (roomId: string, isAvailable: boolean) => {
+      if (!isAvailable) return;
+
+      if (order.roomQuantity === 1) {
+          // Single room mode: behave like radio button
+          setSelectedRoomIds([roomId]);
+      } else {
+          // Multi room mode: behave like checkbox with limit
+          if (selectedRoomIds.includes(roomId)) {
+              setSelectedRoomIds(prev => prev.filter(id => id !== roomId));
+          } else {
+              if (selectedRoomIds.length < order.roomQuantity) {
+                  setSelectedRoomIds(prev => [...prev, roomId]);
+              } else {
+                  notify('info', `Chỉ được chọn tối đa ${order.roomQuantity} phòng.`);
+              }
+          }
+      }
+  };
 
   const handleConfirm = async () => {
-      if (!selectedRoom || !order) return;
+      if (selectedRoomIds.length !== order.roomQuantity || !order) return;
       setIsSubmitting(true);
 
       try {
-          const facility = facilities.find(f => f.id === selectedRoom.facility_id);
-          
-          // 1. Create Booking Object in Local DB
-          const newBooking: Booking = {
-              id: `BK-${Date.now()}`,
-              createdDate: new Date().toISOString(),
-              facilityName: facility?.facilityName || '',
-              roomCode: selectedRoom.name,
-              customerName: order.guestName,
-              customerPhone: order.guestPhone || '',
-              source: order.platform,
-              collaborator: 'OTA System',
-              paymentMethod: order.paymentStatus === 'Prepaid' ? 'OTA Prepaid' : 'Pay at hotel',
-              checkinDate: order.checkIn,
-              checkoutDate: order.checkOut,
-              status: 'Confirmed',
-              price: order.totalAmount, // Doanh thu ghi nhận
-              extraFee: 0,
-              totalRevenue: order.totalAmount,
-              note: `${order.notes || ''}\nMã OTA: ${order.bookingCode}`,
-              
-              // Handle Payment Logic
-              paymentsJson: order.paymentStatus === 'Prepaid' 
-                  ? JSON.stringify([{
-                      ngayThanhToan: new Date().toISOString(),
-                      soTien: order.totalAmount,
-                      method: 'Transfer',
-                      ghiChu: 'Thanh toán qua OTA (Prepaid)'
-                  }]) 
-                  : '[]',
-              remainingAmount: order.paymentStatus === 'Prepaid' ? 0 : order.totalAmount,
-              
-              cleaningJson: '{}',
-              assignedCleaner: '',
-              servicesJson: '[]',
-              lendingJson: '[]',
-              guestsJson: '[]',
-              isDeclared: false
-          };
+          const selectedRoomsData = rooms.filter(r => selectedRoomIds.includes(r.id));
+          const groupId = `GRP-${Date.now()}`;
+          const facility = facilities.find(f => f.id === selectedRoomsData[0]?.facility_id);
+          const roomNames = selectedRoomsData.map(r => r.name).join(', ');
 
+          // Create Booking Promises
+          const bookingPromises = selectedRoomsData.map((room, index) => {
+              let price = 0;
+              let isLeader = false;
+
+              // Financial Logic
+              if (order.roomQuantity === 1) {
+                  price = order.totalAmount;
+              } else {
+                  if (paymentStrategy === 'GROUP') {
+                      // Room 0 takes all cost
+                      if (index === 0) {
+                          price = order.totalAmount;
+                          isLeader = true;
+                      } else {
+                          price = 0;
+                      }
+                  } else {
+                      // Split cost
+                      const basePrice = Math.floor(order.totalAmount / order.roomQuantity);
+                      const remainder = order.totalAmount % order.roomQuantity;
+                      // Add remainder to first room to match total exactly
+                      price = basePrice + (index === 0 ? remainder : 0);
+                  }
+              }
+
+              // Create Booking Object
+              const newBooking: Booking = {
+                  id: `BK-${Date.now()}-${index}`,
+                  createdDate: new Date().toISOString(),
+                  facilityName: facility?.facilityName || '',
+                  roomCode: room.name,
+                  customerName: (order.roomQuantity > 1 && !isLeader && paymentStrategy === 'GROUP') 
+                      ? `${order.guestName} (Thành viên)` 
+                      : order.guestName,
+                  customerPhone: order.guestPhone || '',
+                  source: order.platform,
+                  collaborator: 'OTA System',
+                  paymentMethod: order.paymentStatus === 'Prepaid' ? 'OTA Prepaid' : 'Pay at hotel',
+                  checkinDate: order.checkIn,
+                  checkoutDate: order.checkOut,
+                  status: 'Confirmed',
+                  price: price, 
+                  extraFee: 0,
+                  totalRevenue: price,
+                  note: `${order.notes || ''}\nMã OTA: ${order.bookingCode}`,
+                  
+                  // Payment Logic: If Prepaid, mark as paid immediately
+                  paymentsJson: order.paymentStatus === 'Prepaid' 
+                      ? JSON.stringify([{
+                          ngayThanhToan: new Date().toISOString(),
+                          soTien: price,
+                          method: 'Transfer',
+                          ghiChu: 'Thanh toán qua OTA (Prepaid)'
+                      }]) 
+                      : '[]',
+                  remainingAmount: order.paymentStatus === 'Prepaid' ? 0 : price,
+                  
+                  cleaningJson: '{}',
+                  assignedCleaner: '',
+                  servicesJson: '[]',
+                  lendingJson: '[]',
+                  guestsJson: '[]',
+                  isDeclared: false,
+                  
+                  // Group Fields
+                  groupId: order.roomQuantity > 1 ? groupId : undefined,
+                  groupName: order.roomQuantity > 1 ? `${order.guestName} (OTA)` : undefined,
+                  isGroupLeader: isLeader
+              };
+
+              return addBooking(newBooking);
+          });
+
+          // 1. Execute DB Inserts
           const updates: Promise<any>[] = [
-              addBooking(newBooking),
-              // Optimistic UI update: Set to Assigned locally
-              updateOtaOrder(order.id, { status: 'Assigned', assignedRoom: selectedRoom.name })
+              ...bookingPromises,
+              // Optimistic UI update
+              updateOtaOrder(order.id, { status: 'Assigned', assignedRoom: roomNames })
           ];
 
           // 2. TRIGGER WEBHOOK (POST) TO UPDATE GOOGLE SHEET
           const hook = webhooks.find(w => w.event_type === 'ota_import' && w.is_active);
           if (hook) {
-              // ENSURE DATA SANITIZATION FOR GOOGLE SCRIPT
               const payload = {
                   action: 'update_room',
-                  bookingCode: String(order.bookingCode).trim(), // Critical Fix: Force String & Trim
-                  room: selectedRoom.name
+                  bookingCode: String(order.bookingCode).trim(),
+                  room: roomNames // Sends "101, 102"
               };
 
-              console.log("Sending Webhook Payload:", payload); // Debug log
+              console.log("Sending Webhook Payload:", payload);
 
               updates.push(
                   fetch(hook.url, {
@@ -98,7 +157,7 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
           // Execute Updates concurrently
           await Promise.all(updates);
 
-          notify('success', `Đã xếp phòng ${selectedRoom.name} cho đơn ${order.bookingCode}. Đang đồng bộ Sheet...`);
+          notify('success', `Đã xếp phòng ${roomNames} cho đơn ${order.bookingCode}.`);
           onClose();
 
       } catch (error) {
@@ -134,8 +193,8 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Xếp Phòng Cho Đơn OTA" size="lg">
-        <div className="flex flex-col h-[70vh] md:h-auto">
+    <Modal isOpen={isOpen} onClose={onClose} title={`Xếp Phòng (${selectedRoomIds.length}/${order.roomQuantity})`} size="lg">
+        <div className="flex flex-col h-[80vh] md:h-auto">
             {/* Header: Order Summary */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 shrink-0">
                 <div className="flex justify-between items-start">
@@ -159,6 +218,48 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Strategy Selection (Only if > 1 room) */}
+            {order.roomQuantity > 1 && (
+                <div className="mb-4 bg-white border-2 border-slate-100 rounded-xl p-3">
+                    <div className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider">Chiến lược thanh toán</div>
+                    <div className="flex gap-4">
+                        <label className={`flex-1 flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${paymentStrategy === 'GROUP' ? 'border-brand-500 bg-brand-50' : 'border-slate-100 hover:bg-slate-50'}`}>
+                            <input 
+                                type="radio" 
+                                name="strategy" 
+                                className="hidden" 
+                                checked={paymentStrategy === 'GROUP'} 
+                                onChange={() => setPaymentStrategy('GROUP')}
+                            />
+                            <div className={`p-2 rounded-full ${paymentStrategy === 'GROUP' ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
+                                <Layers size={18}/>
+                            </div>
+                            <div>
+                                <div className="text-sm font-bold text-slate-800">Gộp bill (Trưởng đoàn)</div>
+                                <div className="text-[10px] text-slate-500">Trưởng đoàn trả hết, các phòng khác 0đ.</div>
+                            </div>
+                        </label>
+
+                        <label className={`flex-1 flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${paymentStrategy === 'SPLIT' ? 'border-brand-500 bg-brand-50' : 'border-slate-100 hover:bg-slate-50'}`}>
+                            <input 
+                                type="radio" 
+                                name="strategy" 
+                                className="hidden" 
+                                checked={paymentStrategy === 'SPLIT'} 
+                                onChange={() => setPaymentStrategy('SPLIT')}
+                            />
+                            <div className={`p-2 rounded-full ${paymentStrategy === 'SPLIT' ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
+                                <Split size={18}/>
+                            </div>
+                            <div>
+                                <div className="text-sm font-bold text-slate-800">Chia đều (Tự trả)</div>
+                                <div className="text-[10px] text-slate-500">Chia đều tiền cho từng phòng.</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            )}
 
             {/* CRITICAL INFO ALERT BOX */}
             <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col md:flex-row gap-3 shadow-sm">
@@ -212,7 +313,7 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
                                     // Logic: Check Status (Dirty/Repair)
                                     const isDirty = room.status === 'Bẩn' || room.status === 'Đang dọn';
                                     const isRepair = room.status === 'Sửa chữa';
-                                    const isSelected = selectedRoomId === room.id;
+                                    const isSelected = selectedRoomIds.includes(room.id);
 
                                     let cardClass = "border-slate-200 bg-white hover:border-brand-300 cursor-pointer";
                                     let statusIcon = null;
@@ -234,7 +335,7 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
                                     return (
                                         <button
                                             key={room.id}
-                                            onClick={() => isAvailable && setSelectedRoomId(room.id)}
+                                            onClick={() => handleRoomClick(room.id, isAvailable)}
                                             disabled={!isAvailable}
                                             className={`
                                                 relative p-3 rounded-xl border-2 text-left transition-all flex flex-col justify-between h-20 group
@@ -264,7 +365,10 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
             </div>
 
             {/* Footer */}
-            <div className="pt-4 mt-2 border-t border-slate-100 flex justify-end gap-3 shrink-0 bg-white">
+            <div className="pt-4 mt-2 border-t border-slate-100 flex justify-end gap-3 shrink-0 bg-white items-center">
+                <div className="mr-auto text-xs text-slate-500">
+                    Đã chọn: <b className={selectedRoomIds.length === order.roomQuantity ? 'text-green-600' : 'text-red-600'}>{selectedRoomIds.length}</b>/{order.roomQuantity} phòng
+                </div>
                 <button 
                     onClick={onClose} 
                     className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors"
@@ -273,10 +377,10 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
                 </button>
                 <button 
                     onClick={handleConfirm}
-                    disabled={!selectedRoomId || isSubmitting}
+                    disabled={selectedRoomIds.length !== order.roomQuantity || isSubmitting}
                     className="px-6 py-2.5 rounded-xl text-sm font-bold bg-brand-600 text-white shadow-lg shadow-brand-200 hover:bg-brand-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                 >
-                    {isSubmitting ? 'Đang gửi lệnh...' : 'Xác nhận xếp phòng'}
+                    {isSubmitting ? 'Đang xử lý...' : 'Xác nhận xếp phòng'}
                 </button>
             </div>
         </div>
