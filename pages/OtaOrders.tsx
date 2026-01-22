@@ -3,9 +3,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter
 } from 'lucide-react';
-import { format, parseISO, isSameDay, isValid, differenceInCalendarDays } from 'date-fns';
+import { format, parseISO, isSameDay, isValid, differenceInCalendarDays, isSameMonth } from 'date-fns';
 import { OtaOrder } from '../types';
 import { OtaAssignModal } from '../components/OtaAssignModal';
 
@@ -14,6 +14,11 @@ export const OtaOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed' | 'Cancelled'>('Pending');
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Time Filter State
+  const [filterTimeMode, setFilterTimeMode] = useState<'all' | 'day' | 'month'>('all');
+  const [filterDate, setFilterDate] = useState(format(new Date(), 'yyyy-MM-dd')); // For Day mode
+  const [filterMonth, setFilterMonth] = useState(format(new Date(), 'yyyy-MM')); // For Month mode
+
   // Modal State
   const [isAssignModalOpen, setAssignModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OtaOrder | null>(null);
@@ -27,7 +32,7 @@ export const OtaOrders: React.FC = () => {
   const displayOrders = useMemo(() => {
       const today = new Date();
       return otaOrders.filter(o => {
-          // 1. Tab Filter
+          // 1. Tab Filter (Status)
           let matchesTab = true;
           const isCancelledStatus = o.status === 'Cancelled';
           const isConfirmedApp = o.appConfirmStatus === 'CONFIRMED';
@@ -51,7 +56,24 @@ export const OtaOrders: React.FC = () => {
 
           if (!matchesTab) return false;
 
-          // 2. Search Filter (Name or Booking Code)
+          // 2. Time Filter (Check-in Date)
+          if (filterTimeMode !== 'all') {
+              const checkin = parseISO(o.checkIn);
+              if (!isValid(checkin)) return false;
+
+              if (filterTimeMode === 'day') {
+                  if (filterDate && !isSameDay(checkin, parseISO(filterDate))) return false;
+              } else if (filterTimeMode === 'month') {
+                  if (filterMonth) {
+                      const [y, m] = filterMonth.split('-').map(Number);
+                      const checkinYear = checkin.getFullYear();
+                      const checkinMonth = checkin.getMonth() + 1;
+                      if (checkinYear !== y || checkinMonth !== m) return false;
+                  }
+              }
+          }
+
+          // 3. Search Filter (Name or Booking Code)
           if (searchTerm.trim()) {
               const term = searchTerm.toLowerCase();
               const matchesName = (o.guestName || '').toLowerCase().includes(term);
@@ -61,7 +83,7 @@ export const OtaOrders: React.FC = () => {
 
           return true;
       });
-  }, [otaOrders, activeTab, searchTerm]);
+  }, [otaOrders, activeTab, searchTerm, filterTimeMode, filterDate, filterMonth]);
 
   const getPlatformConfig = (platform: string) => {
       switch (platform) {
@@ -120,7 +142,7 @@ export const OtaOrders: React.FC = () => {
   return (
     <div className="space-y-6 animate-enter pb-20">
         {/* HEADER */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
             <div>
                 <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
                     <CloudLightning className="text-brand-600" /> Sảnh Chờ Booking (OTA)
@@ -128,26 +150,65 @@ export const OtaOrders: React.FC = () => {
                 <p className="text-slate-500 text-sm font-medium">Đồng bộ và xử lý đơn hàng từ Agoda, Booking, Traveloka...</p>
             </div>
             
-            <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-                <div className="relative group w-full md:w-64">
-                    <Search className="absolute left-3 top-2.5 text-slate-400 group-focus-within:text-brand-500" size={16} />
-                    <input 
-                        type="text" 
-                        placeholder="Tìm tên khách, mã OTA..." 
-                        className="pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl w-full text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all bg-white text-slate-900 shadow-sm"
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                    />
+            <div className="flex flex-col md:flex-row gap-3 w-full xl:w-auto items-center">
+                {/* DATE FILTER GROUP */}
+                <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-sm w-full md:w-auto">
+                    <div className="flex gap-1 pr-2 border-r border-slate-100">
+                        <button 
+                            onClick={() => setFilterTimeMode('all')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filterTimeMode === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            Tất cả
+                        </button>
+                        <button 
+                            onClick={() => setFilterTimeMode('day')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filterTimeMode === 'day' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            Ngày
+                        </button>
+                        <button 
+                            onClick={() => setFilterTimeMode('month')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filterTimeMode === 'month' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            Tháng
+                        </button>
+                    </div>
+                    
+                    {filterTimeMode !== 'all' && (
+                        <div className="pl-2 animate-in slide-in-from-left-2 fade-in">
+                            <input 
+                                type={filterTimeMode === 'day' ? 'date' : 'month'} 
+                                className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer w-[110px]"
+                                value={filterTimeMode === 'day' ? filterDate : filterMonth}
+                                onChange={(e) => filterTimeMode === 'day' ? setFilterDate(e.target.value) : setFilterMonth(e.target.value)}
+                            />
+                        </div>
+                    )}
+                    {filterTimeMode === 'all' && <div className="px-3 text-xs font-medium text-slate-400 italic">Toàn thời gian</div>}
                 </div>
 
-                <button 
-                    onClick={() => syncOtaOrders()}
-                    disabled={isLoading}
-                    className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-50 hover:text-brand-600 transition-all shadow-sm active:scale-95 disabled:opacity-50 shrink-0"
-                >
-                    <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-                    {isLoading ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
-                </button>
+                {/* SEARCH & SYNC */}
+                <div className="flex gap-3 w-full md:w-auto">
+                    <div className="relative group w-full md:w-56">
+                        <Search className="absolute left-3 top-2.5 text-slate-400 group-focus-within:text-brand-500" size={16} />
+                        <input 
+                            type="text" 
+                            placeholder="Tìm tên, mã OTA..." 
+                            className="pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl w-full text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all bg-white text-slate-900 shadow-sm"
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    <button 
+                        onClick={() => syncOtaOrders()}
+                        disabled={isLoading}
+                        className="bg-brand-600 text-white border border-brand-600 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-brand-700 transition-all shadow-md shadow-brand-200 active:scale-95 disabled:opacity-50 shrink-0"
+                    >
+                        <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
+                        <span className="hidden md:inline">{isLoading ? 'Đang tải...' : 'Đồng bộ'}</span>
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -187,7 +248,9 @@ export const OtaOrders: React.FC = () => {
                             <tr>
                                 <td colSpan={6} className="p-12 text-center text-slate-400">
                                     <CloudLightning size={48} className="mx-auto mb-2 opacity-30"/>
-                                    <p className="text-sm font-medium">Không có đơn hàng nào phù hợp.</p>
+                                    <p className="text-sm font-medium">
+                                        {searchTerm ? 'Không tìm thấy kết quả phù hợp.' : 'Không có đơn hàng nào trong danh sách.'}
+                                    </p>
                                 </td>
                             </tr>
                         ) : (
