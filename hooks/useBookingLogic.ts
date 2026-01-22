@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { addDays, format, parseISO, isSameDay, endOfDay, isWeekend, addMonths, endOfMonth, eachDayOfInterval, eachHourOfInterval, isValid } from 'date-fns';
+import { addDays, format, parseISO, isSameDay, endOfDay, isWeekend, addMonths, endOfMonth, eachDayOfInterval, eachHourOfInterval, isValid, isWithinInterval, startOfDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { Booking, Room, Guest, HousekeepingTask } from '../types';
 
@@ -68,24 +68,115 @@ export const useBookingLogic = () => {
       else setCurrentDate(addDays(currentDate, direction * 7));
   };
 
-  const filteredBookings = useMemo(() => {
-    return bookings.filter(b => {
-      const customerName = b.customerName || '';
-      const bookingId = b.id || '';
-      const matchSearch = customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          bookingId.includes(searchTerm);
-      const matchFacility = filterFacility ? b.facilityName === filterFacility : true;
+  // --- OMNI-SEARCH LOGIC ---
+  // Helper: Check if a room matches the search term (Text OR Date)
+  const checkSearchMatch = (room: Room, facilityName: string) => {
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase().trim();
+
+      // 1. Check Room Info (Name, Type)
+      if (room.name.toLowerCase().includes(term)) return true;
+      if ((room.type || '').toLowerCase().includes(term)) return true;
+
+      // 2. Check Date Logic (DD/MM)
+      // Regex: Match "25/10" or "25-10" or "2023-10-25"
+      const dateMatch = term.match(/^(\d{1,2})[\/\-\.](\d{1,2})/) || term.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+      let searchDateObj: Date | null = null;
+
+      if (dateMatch) {
+          const now = new Date();
+          if (term.length <= 5) {
+             // DD/MM format -> assume current year
+             const day = parseInt(dateMatch[1]);
+             const month = parseInt(dateMatch[2]) - 1;
+             searchDateObj = new Date(now.getFullYear(), month, day);
+          } else {
+             // Full date
+             const d = new Date(term); // Try standard parse
+             if (isValid(d)) searchDateObj = d;
+          }
+      }
+
+      // 3. Check Bookings in this room
+      const roomBookings = bookings.filter(b => b.roomCode === room.name && b.facilityName === facilityName);
       
-      return matchSearch && matchFacility;
+      const hasBookingMatch = roomBookings.some(b => {
+          // A. Text Match
+          const customerName = (b.customerName || '').toLowerCase();
+          const bookingId = (b.id || '').toLowerCase();
+          const phone = (b.customerPhone || '').toLowerCase();
+          const note = (b.note || '').toLowerCase();
+
+          if (customerName.includes(term) || 
+              bookingId.includes(term) || 
+              phone.includes(term) || 
+              note.includes(term)) {
+              return true;
+          }
+
+          // B. Date Match (If term is a date)
+          if (searchDateObj && isValid(searchDateObj)) {
+              const checkin = parseISO(b.checkinDate);
+              const checkout = parseISO(b.checkoutDate);
+              if (isValid(checkin) && isValid(checkout)) {
+                  // Check if the search date falls within the booking range
+                  // Using startOfDay to compare purely on date
+                  const sDate = startOfDay(searchDateObj);
+                  const bStart = startOfDay(checkin);
+                  const bEnd = startOfDay(checkout);
+                  
+                  return isWithinInterval(sDate, { start: bStart, end: bEnd });
+              }
+          }
+
+          return false;
+      });
+
+      return hasBookingMatch;
+  };
+
+  const filteredBookings = useMemo(() => {
+    // This list filters bookings directly (used for Timeline Bars)
+    if (!searchTerm) return bookings;
+    
+    // We reuse the logic: A booking is valid if it matches text OR date
+    return bookings.filter(b => {
+        const term = searchTerm.toLowerCase().trim();
+        const customerName = (b.customerName || '').toLowerCase();
+        const bookingId = (b.id || '').toLowerCase();
+        const phone = (b.customerPhone || '').toLowerCase();
+        const note = (b.note || '').toLowerCase();
+        const roomCode = (b.roomCode || '').toLowerCase(); // Also search by room code here
+
+        // Text Match
+        if (customerName.includes(term) || bookingId.includes(term) || phone.includes(term) || note.includes(term) || roomCode.includes(term)) return true;
+
+        // Date Match
+        const dateMatch = term.match(/^(\d{1,2})[\/\-\.](\d{1,2})/);
+        if (dateMatch) {
+             // Simplified date logic just for list filtering
+             const checkin = parseISO(b.checkinDate);
+             const checkout = parseISO(b.checkoutDate);
+             const formattedIn = format(checkin, 'dd/MM/yyyy');
+             const formattedOut = format(checkout, 'dd/MM/yyyy');
+             // String match the date for simplicity in list view
+             if (formattedIn.includes(term) || formattedOut.includes(term)) return true;
+        }
+
+        return false;
     });
   }, [bookings, searchTerm, filterFacility]);
 
-  // --- ROOM MAP LOGIC ---
+  // --- ROOM MAP LOGIC (GRID VIEW) ---
   const roomMapData = useMemo(() => {
       const displayFacilities = facilities.filter(f => !filterFacility || f.facilityName === filterFacility);
       
       return displayFacilities.map(fac => {
-          const facilityRooms = rooms.filter(r => r.facility_id === fac.id).sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+          // FILTER ROOMS HERE based on Search Term
+          const facilityRooms = rooms
+            .filter(r => r.facility_id === fac.id)
+            .filter(r => checkSearchMatch(r, fac.facilityName)) // <--- Apply Omni-Search
+            .sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
           
           const roomsWithStatus = facilityRooms.map(room => {
               // 1. Find active booking
@@ -156,7 +247,7 @@ export const useBookingLogic = () => {
               rooms: roomsWithStatus
           };
       });
-  }, [facilities, rooms, bookings, housekeepingTasks, filterFacility, now]);
+  }, [facilities, rooms, bookings, housekeepingTasks, filterFacility, now, searchTerm]); // Add searchTerm dependency
 
   // --- STATS CALCULATION ---
   const roomStats = useMemo(() => {
@@ -167,34 +258,39 @@ export const useBookingLogic = () => {
       let incoming = 0;
       let outgoing = 0;
 
-      roomMapData.forEach(fac => {
-          fac.rooms.forEach(r => {
+      // Stats should reflect the FILTERED view or Global? 
+      // Usually Stats reflect the Global state unless specifically filtering.
+      // Let's calculate based on Global (Unfiltered by search, filtered by Facility) to show overall health.
+      const statsFacilities = facilities.filter(f => !filterFacility || f.facilityName === filterFacility);
+
+      statsFacilities.forEach(fac => {
+          const facilityRooms = rooms.filter(r => r.facility_id === fac.id);
+          facilityRooms.forEach(r => {
               total++;
+              // Simplified logic for stats (reusing activeBooking logic would be cleaner but this is fast)
+              const activeBooking = bookings.find(b => b.facilityName === fac.facilityName && b.roomCode === r.name && (b.status === 'CheckedIn' || (b.status === 'Confirmed' && isSameDay(parseISO(b.checkinDate), now))));
               
-              if (r.booking && r.booking.status === 'CheckedIn') {
+              if (activeBooking && activeBooking.status === 'CheckedIn') {
                   occupied++;
-                  if (isValid(parseISO(r.booking.checkoutDate)) && isSameDay(parseISO(r.booking.checkoutDate), now)) {
+                  if (isValid(parseISO(activeBooking.checkoutDate)) && isSameDay(parseISO(activeBooking.checkoutDate), now)) {
                       outgoing++;
                   }
+              } else {
+                  // Check incoming
+                  const incomingBooking = bookings.find(b => b.facilityName === fac.facilityName && b.roomCode === r.name && b.status === 'Confirmed' && isSameDay(parseISO(b.checkinDate), now));
+                  if (incomingBooking) incoming++;
               }
 
-              if (r.booking && r.booking.status === 'Confirmed' && isValid(parseISO(r.booking.checkinDate)) && isSameDay(parseISO(r.booking.checkinDate), now)) {
-                  incoming++;
-              }
-              else if (!r.booking && r.nextBooking && isValid(parseISO(r.nextBooking.checkinDate)) && isSameDay(parseISO(r.nextBooking.checkinDate), now)) {
-                  incoming++;
-              }
-
-              if (r.currentStatus === 'Dirty' || r.currentStatus === 'Cleanup') {
+              if (r.status === 'Bẩn' || r.status === 'Đang dọn') {
                   dirty++;
-              } else if (r.currentStatus === 'Vacant') {
+              } else if (!activeBooking && r.status === 'Đã dọn') {
                   available++;
               }
           });
       });
 
       return { total, available, occupied, dirty, incoming, outgoing };
-  }, [roomMapData, now]);
+  }, [facilities, rooms, bookings, now, filterFacility]);
 
   // --- ACTIONS ---
   const handleQuickClean = async (room: Room) => {
@@ -263,34 +359,39 @@ export const useBookingLogic = () => {
     const displayFacilities = facilities.filter(f => !filterFacility || f.facilityName === filterFacility);
 
     displayFacilities.forEach(facility => {
-      rows.push({ type: 'facility', name: facility.facilityName });
-      
+      // Filter rooms for Timeline too
       const facilityRooms = rooms
         .filter(r => r.facility_id === facility.id)
+        .filter(r => checkSearchMatch(r, facility.facilityName)) // <--- Apply Omni-Search
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
-      facilityRooms.forEach((room) => {
-        let displayStatus = room.status;
-        const activeTask = housekeepingTasks.find(t => 
-            t.facility_id === facility.id && 
-            t.room_code === room.name && 
-            t.status === 'In Progress'
-        );
-        if (activeTask && room.status !== 'Đã dọn') {
-            displayStatus = 'Đang dọn';
-        }
+      // Only show facility header if there are matching rooms
+      if (facilityRooms.length > 0) {
+          rows.push({ type: 'facility', name: facility.facilityName });
+          
+          facilityRooms.forEach((room) => {
+            let displayStatus = room.status;
+            const activeTask = housekeepingTasks.find(t => 
+                t.facility_id === facility.id && 
+                t.room_code === room.name && 
+                t.status === 'In Progress'
+            );
+            if (activeTask && room.status !== 'Đã dọn') {
+                displayStatus = 'Đang dọn';
+            }
 
-        rows.push({ 
-          type: 'room', 
-          facility: facility.facilityName,
-          code: room.name,
-          status: displayStatus, 
-          price: room.price || facility.facilityPrice
-        });
-      });
+            rows.push({ 
+              type: 'room', 
+              facility: facility.facilityName,
+              code: room.name,
+              status: displayStatus, 
+              price: room.price || facility.facilityPrice
+            });
+          });
+      }
     });
     return rows;
-  }, [facilities, rooms, filterFacility, housekeepingTasks]);
+  }, [facilities, rooms, filterFacility, housekeepingTasks, searchTerm]); // Add searchTerm dependency
 
   const getBookingsForRow = (facility: string, room: string) => {
     return filteredBookings.filter(b => b.facilityName === facility && b.roomCode === room);
