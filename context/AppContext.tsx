@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
   Facility, Room, Booking, Collaborator, Expense, ServiceItem, 
@@ -511,6 +512,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               // Xử lý số lượng khách (DB có thể lưu text "2 người lớn")
               guestCount: parseInt(item.guest_count) || 1, 
               guestDetails: item.guest_count,
+              breakfastStatus: item.breakfast_status, // FIX: Map breakfast status from DB
               
               roomType: item.room_type,
               roomQuantity: item.room_quantity || 1,

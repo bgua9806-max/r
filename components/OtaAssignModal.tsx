@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { Modal } from './Modal';
 import { OtaOrder, Room, Booking } from '../types';
 import { useAppContext } from '../context/AppContext';
@@ -21,6 +22,15 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
   
   // New state for payment strategy
   const [paymentStrategy, setPaymentStrategy] = useState<'GROUP' | 'SPLIT'>('GROUP');
+
+  // --- FIX: RESET STATE ON OPEN ---
+  useEffect(() => {
+      if (isOpen) {
+          setSelectedRoomIds([]);
+          setPaymentStrategy('GROUP');
+          setIsSubmitting(false);
+      }
+  }, [isOpen, order.id]);
 
   const handleRoomClick = (roomId: string, isAvailable: boolean) => {
       if (!isAvailable) return;
