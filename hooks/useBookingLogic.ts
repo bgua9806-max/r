@@ -171,11 +171,14 @@ export const useBookingLogic = () => {
   const roomMapData = useMemo(() => {
       const displayFacilities = facilities.filter(f => !filterFacility || f.facilityName === filterFacility);
       
+      // Determine if we are viewing "Today" or a different date
+      const isFutureView = !isSameDay(currentDate, new Date());
+
       return displayFacilities.map(fac => {
           // FILTER ROOMS HERE based on Search Term
           const facilityRooms = rooms
             .filter(r => r.facility_id === fac.id)
-            .filter(r => checkSearchMatch(r, fac.facilityName)) // <--- Apply Omni-Search
+            .filter(r => checkSearchMatch(r, fac.facilityName))
             .sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
           
           const roomsWithStatus = facilityRooms.map(room => {
@@ -184,23 +187,35 @@ export const useBookingLogic = () => {
                   if (b.facilityName !== fac.facilityName || b.roomCode !== room.name) return false;
                   if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false; 
 
-                  if (b.status === 'CheckedIn') return true;
+                  const checkIn = parseISO(b.checkinDate);
+                  const checkOut = parseISO(b.checkoutDate);
 
-                  if (b.status === 'Confirmed') {
-                      const checkin = parseISO(b.checkinDate);
-                      const checkout = parseISO(b.checkoutDate);
-                      if (!isValid(checkin) || !isValid(checkout)) return false;
-                      return isSameDay(checkin, now) || (checkin <= now && checkout >= now);
+                  if (isFutureView) {
+                      // FUTURE MODE: Check overlap by Date only (Forecasting)
+                      // Logic: The booking covers the selected date
+                      if (!isValid(checkIn) || !isValid(checkOut)) return false;
+                      const sDate = startOfDay(currentDate);
+                      // Check if selected date is within booking range
+                      // Note: We use < for checkout because standard checkout is noon
+                      return sDate >= startOfDay(checkIn) && sDate < startOfDay(checkOut);
+                  } else {
+                      // REAL-TIME MODE: Original Logic
+                      if (b.status === 'CheckedIn') return true;
+                      if (b.status === 'Confirmed') {
+                          if (!isValid(checkIn) || !isValid(checkOut)) return false;
+                          return isSameDay(checkIn, now) || (checkIn <= now && checkOut >= now);
+                      }
                   }
                   return false;
               });
 
               // 2. Find pending booking (Next arrival)
+              const referenceTime = isFutureView ? startOfDay(currentDate) : now;
               const nextBooking = !activeBooking ? bookings
                   .filter(b => {
                       if (b.facilityName !== fac.facilityName || b.roomCode !== room.name || b.status !== 'Confirmed') return false;
                       const checkin = parseISO(b.checkinDate);
-                      return isValid(checkin) && checkin > now;
+                      return isValid(checkin) && checkin > referenceTime;
                   })
                   .sort((a,b) => {
                       const da = parseISO(a.checkinDate);
@@ -219,18 +234,29 @@ export const useBookingLogic = () => {
               let status: 'Vacant' | 'Occupied' | 'Reserved' | 'Dirty' | 'Cleanup' | 'Overdue' = 'Vacant';
               
               if (activeBooking) {
-                  if (activeBooking.status === 'CheckedIn') {
-                      status = 'Occupied';
-                      const checkout = parseISO(activeBooking.checkoutDate);
-                      if (isValid(checkout) && now > checkout) {
-                          status = 'Overdue';
-                      }
-                  } else {
+                  if (isFutureView) {
+                      // In forecast mode (future), treat everything as Reserved/Occupied (Blue)
+                      // We don't distinguish CheckIn status for future dates
                       status = 'Reserved'; 
+                  } else {
+                      // Real-time mode (Today)
+                      if (activeBooking.status === 'CheckedIn') {
+                          status = 'Occupied';
+                          const checkout = parseISO(activeBooking.checkoutDate);
+                          if (isValid(checkout) && now > checkout) {
+                              status = 'Overdue';
+                          }
+                      } else {
+                          status = 'Reserved'; 
+                      }
                   }
               } else {
-                  if (room.status === 'Bẩn') status = 'Dirty';
-                  else if (room.status === 'Đang dọn' || activeTask?.status === 'In Progress') status = 'Cleanup';
+                  // If viewing Today -> Show real status (Dirty/Clean) from DB
+                  // If viewing Future -> Show Vacant (Assume clean unless booked)
+                  if (!isFutureView) {
+                      if (room.status === 'Bẩn') status = 'Dirty';
+                      else if (room.status === 'Đang dọn' || activeTask?.status === 'In Progress') status = 'Cleanup';
+                  }
               }
 
               return {
@@ -247,7 +273,7 @@ export const useBookingLogic = () => {
               rooms: roomsWithStatus
           };
       });
-  }, [facilities, rooms, bookings, housekeepingTasks, filterFacility, now, searchTerm]); // Add searchTerm dependency
+  }, [facilities, rooms, bookings, housekeepingTasks, filterFacility, now, searchTerm, currentDate]); // Added currentDate dependency
 
   // --- STATS CALCULATION ---
   const roomStats = useMemo(() => {
@@ -258,39 +284,56 @@ export const useBookingLogic = () => {
       let incoming = 0;
       let outgoing = 0;
 
-      // Stats should reflect the FILTERED view or Global? 
-      // Usually Stats reflect the Global state unless specifically filtering.
-      // Let's calculate based on Global (Unfiltered by search, filtered by Facility) to show overall health.
       const statsFacilities = facilities.filter(f => !filterFacility || f.facilityName === filterFacility);
+      const isFutureView = !isSameDay(currentDate, new Date());
 
       statsFacilities.forEach(fac => {
           const facilityRooms = rooms.filter(r => r.facility_id === fac.id);
           facilityRooms.forEach(r => {
               total++;
-              // Simplified logic for stats (reusing activeBooking logic would be cleaner but this is fast)
-              const activeBooking = bookings.find(b => b.facilityName === fac.facilityName && b.roomCode === r.name && (b.status === 'CheckedIn' || (b.status === 'Confirmed' && isSameDay(parseISO(b.checkinDate), now))));
               
-              if (activeBooking && activeBooking.status === 'CheckedIn') {
-                  occupied++;
-                  if (isValid(parseISO(activeBooking.checkoutDate)) && isSameDay(parseISO(activeBooking.checkoutDate), now)) {
-                      outgoing++;
-                  }
-              } else {
-                  // Check incoming
-                  const incomingBooking = bookings.find(b => b.facilityName === fac.facilityName && b.roomCode === r.name && b.status === 'Confirmed' && isSameDay(parseISO(b.checkinDate), now));
-                  if (incomingBooking) incoming++;
-              }
+              // Use same logic as map for consistency
+              const activeBooking = bookings.find(b => {
+                  if (b.facilityName !== fac.facilityName || b.roomCode !== r.name) return false;
+                  if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false; 
+                  
+                  const checkIn = parseISO(b.checkinDate);
+                  const checkOut = parseISO(b.checkoutDate);
 
-              if (r.status === 'Bẩn' || r.status === 'Đang dọn') {
-                  dirty++;
-              } else if (!activeBooking && r.status === 'Đã dọn') {
-                  available++;
+                  if (isFutureView) {
+                      if (!isValid(checkIn) || !isValid(checkOut)) return false;
+                      const sDate = startOfDay(currentDate);
+                      return sDate >= startOfDay(checkIn) && sDate < startOfDay(checkOut);
+                  } else {
+                      if (b.status === 'CheckedIn') return true;
+                      if (b.status === 'Confirmed') {
+                          return isSameDay(checkIn, now) || (checkIn <= now && checkOut >= now);
+                      }
+                  }
+                  return false;
+              });
+              
+              if (activeBooking) {
+                  occupied++;
+                  // Stats for incoming/outgoing relative to selected date
+                  const checkIn = parseISO(activeBooking.checkinDate);
+                  const checkOut = parseISO(activeBooking.checkoutDate);
+                  
+                  if (isValid(checkIn) && isSameDay(checkIn, currentDate)) incoming++;
+                  if (isValid(checkOut) && isSameDay(checkOut, currentDate)) outgoing++;
+
+              } else {
+                  if (!isFutureView && (r.status === 'Bẩn' || r.status === 'Đang dọn')) {
+                      dirty++;
+                  } else {
+                      available++;
+                  }
               }
           });
       });
 
       return { total, available, occupied, dirty, incoming, outgoing };
-  }, [facilities, rooms, bookings, now, filterFacility]);
+  }, [facilities, rooms, bookings, now, filterFacility, currentDate]);
 
   // --- ACTIONS ---
   const handleQuickClean = async (room: Room) => {
@@ -316,8 +359,12 @@ export const useBookingLogic = () => {
           setEditingBooking(null);
           setModalInitialTab('info');
           
-          const checkin = new Date();
-          const checkout = new Date();
+          // Pre-fill date based on Calendar Selection
+          const checkin = new Date(currentDate);
+          // Standard check-in time 14:00
+          checkin.setHours(14, 0, 0, 0);
+          
+          const checkout = new Date(currentDate);
           checkout.setDate(checkout.getDate() + 1);
           checkout.setHours(12, 0, 0, 0);
 

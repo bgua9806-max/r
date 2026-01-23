@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { ChevronLeft, ChevronRight, Plus, Search, Calendar, LayoutGrid, User, RotateCw, LogIn, LogOut, Brush, Home, Briefcase } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { CalendarViewMode } from '../../hooks/useBookingLogic';
 import { Facility } from '../../types';
@@ -79,10 +79,22 @@ export const BookingToolbar: React.FC<BookingToolbarProps> = ({
                      <button onClick={() => setViewMode('timeline')} className="p-2 rounded-md transition-all text-slate-500 hover:text-slate-700" title="Xem Lịch Timeline"><Calendar size={18}/></button>
                      <button onClick={() => setViewMode('grid')} className="p-2 rounded-md transition-all bg-white text-brand-600 shadow-sm font-medium" title="Sơ đồ phòng (Grid)"><LayoutGrid size={18}/></button>
                  </div>
+                 
+                 {/* DATE NAVIGATOR FOR GRID VIEW */}
+                 <div className="flex items-center border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden w-full md:w-auto">
+                    <button onClick={() => setCurrentDate(addDays(currentDate, -1))} className="p-2 hover:bg-slate-50 border-r border-slate-100"><ChevronLeft size={18} className="text-slate-500" /></button>
+                    <span className="flex-1 px-4 text-sm font-semibold text-slate-700 min-w-[120px] text-center capitalize whitespace-nowrap">
+                        {format(currentDate, 'EEEE, dd/MM', { locale: vi })}
+                    </span>
+                    <button onClick={() => setCurrentDate(addDays(currentDate, 1))} className="p-2 hover:bg-slate-50 border-l border-slate-100"><ChevronRight size={18} className="text-slate-500"/></button>
+                 </div>
+                 
+                 <button onClick={() => setCurrentDate(new Date())} className="hidden md:block text-xs font-semibold text-brand-600 hover:bg-brand-50 px-3 py-2 rounded-lg border border-brand-200 transition-colors shrink-0">Hôm nay</button>
+
                  <div className="h-8 w-[1px] bg-slate-200 mx-2 hidden md:block"></div>
+                 
                  {/* Stats */}
                  <div className="flex flex-nowrap overflow-x-auto no-scrollbar items-center gap-x-3 md:gap-x-6 gap-y-2 w-full md:w-auto pb-1 md:pb-0">
-                     {/* Reuse stats logic, but inline for Grid */}
                      <div className="flex items-center gap-2 bg-slate-50 rounded-lg pr-3 pl-1.5 py-1 border border-slate-100 shrink-0">
                          <div className="p-1 bg-white rounded-md text-slate-400 shadow-sm"><Home size={14}/></div>
                          <div className="flex items-baseline gap-1.5">
