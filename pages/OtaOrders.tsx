@@ -1,19 +1,27 @@
-import React, { useState, useMemo, useEffect } from 'react';
+
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter, Loader2
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays, isSameMonth } from 'date-fns';
 import { OtaOrder } from '../types';
 import { OtaAssignModal } from '../components/OtaAssignModal';
 
 export const OtaOrders: React.FC = () => {
-  const { otaOrders, syncOtaOrders, isLoading, deleteOtaOrder, bookings, updateBooking, notify, confirmOtaCancellation } = useAppContext();
+  const { otaOrders, syncOtaOrders, queryOtaOrders, isLoading: isSyncing, deleteOtaOrder, bookings, updateBooking, notify, confirmOtaCancellation } = useAppContext();
+  
+  // -- LOCAL STATE FOR SERVER-SIDE DATA --
+  const [listData, setListData] = useState<OtaOrder[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(0);
+  const [isFetching, setIsFetching] = useState(false);
+  const observerTarget = useRef<HTMLDivElement>(null);
+
+  // -- FILTERS --
   const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed' | 'Cancelled'>('Pending');
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Time Filter State
   const [filterTimeMode, setFilterTimeMode] = useState<'all' | 'day' | 'month'>('all');
   const [filterDate, setFilterDate] = useState(format(new Date(), 'yyyy-MM-dd')); // For Day mode
   const [filterMonth, setFilterMonth] = useState(format(new Date(), 'yyyy-MM')); // For Month mode
@@ -22,68 +30,75 @@ export const OtaOrders: React.FC = () => {
   const [isAssignModalOpen, setAssignModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OtaOrder | null>(null);
 
-  // Auto-sync on mount
+  // Auto-sync on mount (Background sync to keep local caches fresh)
   useEffect(() => {
-      syncOtaOrders();
+      syncOtaOrders(undefined, true); // Silent sync
   }, []);
 
-  // Filter Logic
-  const displayOrders = useMemo(() => {
-      const today = new Date();
-      return otaOrders.filter(o => {
-          // 1. Tab Filter (Status)
-          let matchesTab = true;
-          const isCancelledStatus = o.status === 'Cancelled';
-          const isConfirmedApp = o.appConfirmStatus === 'CONFIRMED';
+  // -- FETCHING LOGIC --
+  const fetchData = useCallback(async (reset = false) => {
+      if (isFetching) return;
+      setIsFetching(true);
+      
+      try {
+          const currentPage = reset ? 0 : page;
+          const { data, hasMore: more } = await queryOtaOrders({
+              page: currentPage,
+              pageSize: 20, // Load chunk size
+              tab: activeTab,
+              search: searchTerm,
+              dateFilter: filterTimeMode !== 'all' ? { mode: filterTimeMode, value: filterTimeMode === 'day' ? filterDate : filterMonth } : undefined
+          });
 
-          if (activeTab === 'Pending') {
-              // Pending or (Cancelled AND Not Confirmed yet)
-              matchesTab = o.status === 'Pending' || (isCancelledStatus && !isConfirmedApp);
+          if (reset) {
+              setListData(data);
+              setPage(1);
+          } else {
+              setListData(prev => {
+                  // Avoid duplicates
+                  const newIds = new Set(data.map(d => d.id));
+                  return [...prev.filter(p => !newIds.has(p.id)), ...data];
+              });
+              setPage(prev => prev + 1);
           }
-          else if (activeTab === 'Processed') {
-              matchesTab = o.status === 'Assigned';
-          }
-          else if (activeTab === 'Today') {
-              // Check-in Today
-              const checkin = parseISO(o.checkIn);
-              matchesTab = isValid(checkin) && isSameDay(checkin, today);
-          }
-          else if (activeTab === 'Cancelled') {
-              // Cancelled AND Confirmed
-              matchesTab = isCancelledStatus && isConfirmedApp;
-          }
+          setHasMore(more);
+      } catch (e) {
+          console.error("Fetch error", e);
+      } finally {
+          setIsFetching(false);
+      }
+  }, [page, activeTab, searchTerm, filterTimeMode, filterDate, filterMonth, isFetching, queryOtaOrders]);
 
-          if (!matchesTab) return false;
+  // -- DEBOUNCE SEARCH & FILTER EFFECT --
+  useEffect(() => {
+      const handler = setTimeout(() => {
+          fetchData(true); // Reset and fetch
+      }, 500); // 500ms debounce
 
-          // 2. Time Filter (Check-in Date)
-          if (filterTimeMode !== 'all') {
-              const checkin = parseISO(o.checkIn);
-              if (!isValid(checkin)) return false;
+      return () => clearTimeout(handler);
+  }, [activeTab, searchTerm, filterTimeMode, filterDate, filterMonth]);
 
-              if (filterTimeMode === 'day') {
-                  if (filterDate && !isSameDay(checkin, parseISO(filterDate))) return false;
-              } else if (filterTimeMode === 'month') {
-                  if (filterMonth) {
-                      const [y, m] = filterMonth.split('-').map(Number);
-                      const checkinYear = checkin.getFullYear();
-                      const checkinMonth = checkin.getMonth() + 1;
-                      if (checkinYear !== y || checkinMonth !== m) return false;
-                  }
+  // -- INFINITE SCROLL OBSERVER --
+  useEffect(() => {
+      const observer = new IntersectionObserver(
+          entries => {
+              if (entries[0].isIntersecting && hasMore && !isFetching) {
+                  fetchData(false); // Load next page
               }
-          }
+          },
+          { threshold: 1.0 }
+      );
 
-          // 3. Search Filter (Name or Booking Code)
-          if (searchTerm.trim()) {
-              const term = searchTerm.toLowerCase();
-              const matchesName = (o.guestName || '').toLowerCase().includes(term);
-              const matchesCode = (o.bookingCode || '').toLowerCase().includes(term);
-              if (!matchesName && !matchesCode) return false;
-          }
+      if (observerTarget.current) {
+          observer.observe(observerTarget.current);
+      }
 
-          return true;
-      });
-  }, [otaOrders, activeTab, searchTerm, filterTimeMode, filterDate, filterMonth]);
+      return () => {
+          if (observerTarget.current) observer.unobserve(observerTarget.current);
+      };
+  }, [hasMore, isFetching, fetchData]);
 
+  // -- HELPERS --
   const getPlatformConfig = (platform: string) => {
       switch (platform) {
           case 'Agoda': return { color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' };
@@ -99,17 +114,21 @@ export const OtaOrders: React.FC = () => {
       setAssignModalOpen(true);
   };
 
-  // Nút: Xác nhận Hủy (Gửi tín hiệu lên Sheet)
   const handleConfirmCancel = async (order: OtaOrder) => {
       if(confirm(`Xác nhận đơn ${order.bookingCode} đã hủy? Hành động này sẽ cập nhật lên Sheet và chuyển vào lưu trữ.`)) {
           await confirmOtaCancellation(order);
+          // Manually update local list to reflect change immediately
+          if (activeTab === 'Pending') {
+              setListData(prev => prev.filter(o => o.id !== order.id)); // Remove if viewing pending
+          } else {
+              setListData(prev => prev.map(o => o.id === order.id ? { ...o, appConfirmStatus: 'CONFIRMED' } : o));
+          }
       }
   };
 
   const handleResolveConflict = async (order: OtaOrder) => {
       if(!confirm(`Xác nhận hủy phòng ${order.assignedRoom} và xóa đơn OTA này?`)) return;
       
-      // Find booking
       const booking = bookings.find(b => 
           (b.roomCode === order.assignedRoom && b.status !== 'Cancelled' && b.status !== 'CheckedOut') ||
           (b.note && b.note.includes(order.bookingCode))
@@ -125,8 +144,12 @@ export const OtaOrders: React.FC = () => {
           notify('info', 'Không tìm thấy Booking tương ứng trong hệ thống. Chỉ xử lý đơn OTA.');
       }
       
-      // Sau khi giải quyết xung đột, coi như đã xác nhận hủy
       await confirmOtaCancellation(order);
+      if (activeTab === 'Pending') {
+          setListData(prev => prev.filter(o => o.id !== order.id));
+      } else {
+          setListData(prev => prev.map(o => o.id === order.id ? { ...o, appConfirmStatus: 'CONFIRMED' } : o));
+      }
       notify('success', 'Đã giải phóng phòng và lưu vết hủy.');
   };
 
@@ -201,11 +224,11 @@ export const OtaOrders: React.FC = () => {
 
                     <button 
                         onClick={() => syncOtaOrders()}
-                        disabled={isLoading}
+                        disabled={isSyncing}
                         className="bg-brand-600 text-white border border-brand-600 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-brand-700 transition-all shadow-md shadow-brand-200 active:scale-95 disabled:opacity-50 shrink-0"
                     >
-                        <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-                        <span className="hidden md:inline">{isLoading ? 'Đang tải...' : 'Đồng bộ'}</span>
+                        <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+                        <span className="hidden md:inline">{isSyncing ? 'Đang tải...' : 'Đồng bộ'}</span>
                     </button>
                 </div>
             </div>
@@ -215,6 +238,7 @@ export const OtaOrders: React.FC = () => {
         <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-fit overflow-x-auto no-scrollbar">
             <button onClick={() => setActiveTab('Pending')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Pending' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Clock size={16}/> Cần xử lý
+                {/* Badge based on Context (Real-time pending) */}
                 {otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length}</span>}
             </button>
             <button onClick={() => setActiveTab('Today')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Today' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -243,7 +267,7 @@ export const OtaOrders: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {displayOrders.length === 0 ? (
+                        {listData.length === 0 && !isFetching ? (
                             <tr>
                                 <td colSpan={6} className="p-12 text-center text-slate-400">
                                     <CloudLightning size={48} className="mx-auto mb-2 opacity-30"/>
@@ -253,7 +277,7 @@ export const OtaOrders: React.FC = () => {
                                 </td>
                             </tr>
                         ) : (
-                            displayOrders.map(order => {
+                            listData.map(order => {
                                 const checkin = parseISO(order.checkIn);
                                 const checkout = parseISO(order.checkOut);
                                 const isValidDates = isValid(checkin) && isValid(checkout);
@@ -261,7 +285,6 @@ export const OtaOrders: React.FC = () => {
                                 const styles = getPlatformConfig(order.platform);
                                 const nights = isValidDates ? differenceInCalendarDays(checkout, checkin) : 0;
                                 
-                                // LOGIC FIX: Compare Date Strings to ignore time/timezone issues
                                 const orderEmailDate = parseISO(order.emailDate || '');
                                 const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
                                 const isCancelled = order.status === 'Cancelled';
@@ -305,7 +328,6 @@ export const OtaOrders: React.FC = () => {
                                                 <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
-                                                {/* GUEST DETAILS - Updated to show full text on hover */}
                                                 <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 font-medium group/guest">
                                                     <Users size={12} className="shrink-0 text-slate-400"/>
                                                     <span 
@@ -321,26 +343,21 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 3: ROOM TYPE & BREAKFAST */}
                                         <td className="p-4 align-top">
                                             <div className="flex flex-col gap-1">
-                                                {/* Allow text wrap for long room names */}
                                                 <div className="text-sm font-medium text-slate-700 whitespace-normal leading-snug">
                                                     {order.roomType}
                                                 </div>
-                                                
                                                 <div className="flex flex-wrap gap-1 mt-1">
                                                     {order.roomQuantity > 1 && (
                                                         <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-200">
                                                             x{order.roomQuantity} Phòng
                                                         </span>
                                                     )}
-                                                    
-                                                    {/* BREAKFAST BADGE */}
                                                     {isBreakfastIncluded && (
                                                         <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded w-fit" title={order.breakfastStatus}>
                                                             <Coffee size={10} /> {order.breakfastStatus || 'Có ăn sáng'}
                                                         </span>
                                                     )}
                                                 </div>
-
                                                 {order.assignedRoom && isCancelled && (
                                                     <div className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded w-fit mt-1">
                                                         <AlertOctagon size={12}/> Phòng {order.assignedRoom}
@@ -383,7 +400,7 @@ export const OtaOrders: React.FC = () => {
                                             </div>
                                         </td>
 
-                                        {/* COL 6: ACTIONS (STICKY) */}
+                                        {/* COL 6: ACTIONS */}
                                         <td className="p-4 align-top text-center sticky right-0 bg-white group-hover:bg-white transition-colors z-10 border-l border-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.02)]">
                                             {isCancelled ? (
                                                 activeTab === 'Cancelled' ? (
@@ -423,20 +440,30 @@ export const OtaOrders: React.FC = () => {
                                 )
                             })
                         )}
+                        {/* INFINITE SCROLL LOADER */}
+                        <tr ref={observerTarget}>
+                            <td colSpan={6} className="p-4 text-center">
+                                {isFetching && (
+                                    <div className="flex items-center justify-center gap-2 text-slate-400 text-sm">
+                                        <Loader2 className="animate-spin" size={20}/> Đang tải thêm dữ liệu...
+                                    </div>
+                                )}
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
         {/* --- MOBILE VIEW: OPTIMIZED CARDS --- */}
-        <div className="md:hidden grid grid-cols-1 gap-4">
-            {displayOrders.length === 0 ? (
+        <div className="md:hidden space-y-4">
+            {listData.length === 0 && !isFetching ? (
                 <div className="text-center py-10 text-slate-400">
                     <CloudLightning size={40} className="mx-auto mb-2 opacity-50"/>
                     <p className="text-sm font-medium">Không có đơn hàng nào phù hợp.</p>
                 </div>
             ) : (
-                displayOrders.map(order => {
+                listData.map(order => {
                     const checkin = parseISO(order.checkIn);
                     const checkout = parseISO(order.checkOut);
                     const isValidDates = isValid(checkin) && isValid(checkout);
@@ -445,16 +472,13 @@ export const OtaOrders: React.FC = () => {
                     const isCancelled = order.status === 'Cancelled';
                     const isBreakfastIncluded = hasBreakfast(order);
                     
-                    // FIX: Strict date string comparison
                     const orderEmailDate = parseISO(order.emailDate || '');
                     const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
 
                     return (
                     <div key={order.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col relative ${isCancelled ? 'border-red-200 ring-2 ring-red-50' : 'border-slate-200'}`}>
-                        {/* Status Strip */}
                         <div className={`h-1.5 w-full ${isCancelled ? 'bg-red-500' : order.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                         
-                        {/* Today Banner */}
                         {isToday && order.status === 'Pending' && !isCancelled && (
                             <div className="bg-red-600 text-white text-[10px] font-black uppercase tracking-widest py-1 px-4 text-center animate-pulse flex items-center justify-center gap-2">
                                 <AlertTriangle size={12} fill="white" /> Khách đến hôm nay
@@ -462,7 +486,6 @@ export const OtaOrders: React.FC = () => {
                         )}
 
                         <div className="p-4 flex-1 flex flex-col">
-                            {/* Header */}
                             <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-50">
                                 <div className="flex items-center gap-2">
                                     <div className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${styles.bg} ${styles.color} ${styles.border}`}>
@@ -485,22 +508,15 @@ export const OtaOrders: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Content */}
                             <div className="space-y-3">
                                 <div>
                                     <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
-                                    {/* GUEST DETAILS MOBILE - Update to prioritize detail string */}
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
                                         <span className="flex items-center gap-1 truncate max-w-[200px]" title={order.guestDetails || `${order.guestCount} Khách`}>
                                             <Users size={12}/> {order.guestDetails || order.guestCount}
                                         </span>
                                         <span className="flex items-center gap-1 text-slate-400 border-l border-slate-200 pl-2"><BedDouble size={12}/> {order.roomQuantity}</span>
                                     </div>
-                                    {isCancelled && order.assignedRoom && (
-                                        <div className="mt-2 text-xs font-bold text-red-600 bg-red-50 p-2 rounded border border-red-100 flex items-center gap-2">
-                                            <AlertOctagon size={14}/> Cảnh báo: Đã xếp phòng {order.assignedRoom}
-                                        </div>
-                                    )}
                                 </div>
 
                                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
@@ -531,7 +547,6 @@ export const OtaOrders: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Footer */}
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
                                 <div>
                                     <div className={`text-lg font-black ${isCancelled ? 'text-slate-400' : 'text-brand-700'}`}>{order.totalAmount.toLocaleString()}</div>
@@ -579,6 +594,12 @@ export const OtaOrders: React.FC = () => {
                     )
                 })
             )}
+            {/* Mobile Loading Indicator */}
+            {isFetching && (
+                <div className="flex justify-center p-4">
+                    <Loader2 className="animate-spin text-slate-400" size={24}/>
+                </div>
+            )}
         </div>
 
         {/* MODAL */}
@@ -587,6 +608,10 @@ export const OtaOrders: React.FC = () => {
                 isOpen={isAssignModalOpen}
                 onClose={() => setAssignModalOpen(false)}
                 order={selectedOrder}
+                onSuccess={() => {
+                    // Update Local List immediately to hide the processed order
+                    setListData(prev => prev.filter(o => o.id !== selectedOrder?.id));
+                }}
             />
         )}
     </div>

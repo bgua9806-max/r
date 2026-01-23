@@ -11,9 +11,10 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   order: OtaOrder;
+  onSuccess?: () => void; // New prop for callback
 }
 
-export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
+export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order, onSuccess }) => {
   const { facilities, rooms, checkAvailability, addBooking, updateOtaOrder, notify, webhooks } = useAppContext();
   
   // Changed from single string to array for multi-room support
@@ -153,6 +154,9 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
           await Promise.all(updates);
 
           notify('success', `Đã xếp phòng ${roomNames} cho đơn ${order.bookingCode}.`);
+          
+          if (onSuccess) onSuccess(); // Trigger UI update in parent
+          
           onClose();
 
       } catch (error) {

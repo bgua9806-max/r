@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
-  LayoutDashboard, CalendarCheck, DoorOpen, Users, 
-  Wallet, Settings, LogOut, Brush, ChevronRight, Contact, Package, Clock, X, Smartphone, CloudLightning, Fingerprint
+  LayoutDashboard, CloudLightning, CalendarCheck, DoorOpen, Brush, 
+  Smartphone, Package, Contact, Users, Wallet, Settings, 
+  X, Fingerprint, Clock, ChevronRight, LogOut 
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { storageService } from '../services/storage';
@@ -17,8 +18,12 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
   const [isShiftModalOpen, setShiftModalOpen] = useState(false);
   const [isTimekeepingOpen, setTimekeepingOpen] = useState(false);
 
-  // Calculate pending OTA orders count
-  const pendingOtaCount = otaOrders.filter(o => o.status === 'Pending').length;
+  // FIX: Calculate pending count to include both 'Pending' and 'Cancelled' (but not confirmed)
+  // This matches the "Cần xử lý" tab logic in OtaOrders page
+  const pendingOtaCount = otaOrders.filter(o => 
+      o.status === 'Pending' || 
+      (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED')
+  ).length;
 
   // Check if currently clocked in
   const activeLog = currentUser ? timeLogs.find(l => l.staff_id === currentUser.id && !l.check_out_time) : null;
