@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
   Facility, Room, Booking, Collaborator, Expense, ServiceItem, 
@@ -12,6 +11,7 @@ import {
   MOCK_SERVICES, DEFAULT_SETTINGS, ROOM_RECIPES, ROLE_PERMISSIONS 
 } from '../constants';
 import { storageService } from '../services/storage';
+import { supabase } from '../services/supabaseClient';
 import { parseISO, areIntervalsOverlapping, isValid, format } from 'date-fns';
 
 interface AppContextType {
@@ -488,164 +488,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const syncOtaOrders = async (overrideWebhooks?: WebhookConfig[], silent = false) => {
-      const hooksToUse = overrideWebhooks || webhooks;
-      const hook = hooksToUse.find(w => w.event_type === 'ota_import' && w.is_active);
-      
       if (!silent) setIsLoading(true);
       try {
-          if (hook) {
-              const res = await fetch(hook.url + '?action=get_ota_orders');
-              const data = await res.json();
+          // 1. TRUY VẤN TRỰC TIẾP TỪ SUPABASE
+          const { data, error } = await supabase
+              .from('ota_orders')
+              .select('*')
+              .order('email_date', { ascending: false })
+              .limit(200);
+
+          if (error) throw error;
+
+          // 2. MAP DỮ LIỆU (DB snake_case -> App camelCase)
+          const mappedOrders: OtaOrder[] = data.map((item: any) => ({
+              id: item.id,
+              bookingCode: item.booking_code, // Key quan trọng nhất
+              platform: item.platform || 'Direct',
               
-              let ordersArray = data;
-              if (data && typeof data === 'object' && data.data && Array.isArray(data.data)) {
-                  ordersArray = data.data;
-              } else if (data && typeof data === 'object' && !Array.isArray(data)) {
-                  ordersArray = Object.values(data);
-              }
+              guestName: item.guest_name || 'No Name',
+              guestPhone: item.guest_phone,
+              
+              // Xử lý số lượng khách (DB có thể lưu text "2 người lớn")
+              guestCount: parseInt(item.guest_count) || 1, 
+              guestDetails: item.guest_count,
+              
+              roomType: item.room_type,
+              roomQuantity: item.room_quantity || 1,
+              
+              checkIn: item.check_in,   // DB đã là chuẩn ISO
+              checkOut: item.check_out, // DB đã là chuẩn ISO
+              emailDate: item.email_date,
+              
+              totalAmount: item.total_amount || 0,
+              netAmount: item.net_amount || 0,
+              paymentStatus: item.payment_status || 'Pay at hotel',
+              
+              // TRẠNG THÁI: App sẽ dùng trực tiếp trạng thái từ DB
+              status: item.status as any, // 'Pending' | 'Assigned' | 'Cancelled'
+              assignedRoom: item.assigned_room,
+              appConfirmStatus: item.app_confirm_status, // Để hiện nút "Đã lưu"
+              
+              notes: item.notes,
+              rawJson: JSON.stringify(item)
+          }));
 
-              if (Array.isArray(ordersArray)) {
-                  const parseSheetDate = (raw: any): string => {
-                      if (!raw) return new Date().toISOString();
-                      
-                      // Case 1: Excel Serial Number (e.g., 45000)
-                      if (typeof raw === 'number') {
-                          // Excel base date is Dec 30, 1899
-                          const date = new Date(Math.round((raw - 25569) * 86400 * 1000));
-                          return !isNaN(date.getTime()) ? date.toISOString() : new Date().toISOString();
-                      }
+          setOtaOrders(mappedOrders);
+          if (!silent) notify('success', `Đã tải ${mappedOrders.length} đơn từ Database.`);
 
-                      // Case 2: String
-                      if (typeof raw === 'string') {
-                          const s = raw.trim();
-                          
-                          // Handle DD/MM/YYYY (Vietnamese format) explicitly to avoid invalid date or month/day swap
-                          // Regex matches D/M/YYYY or DD/MM/YYYY
-                          const vnDateRegex = /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/;
-                          const match = s.match(vnDateRegex);
-                          
-                          if (match) {
-                              const day = parseInt(match[1], 10);
-                              const month = parseInt(match[2], 10) - 1; // Month is 0-indexed in JS
-                              const year = parseInt(match[3], 10);
-                              const d = new Date(year, month, day, 12, 0, 0); // Set to noon to avoid timezone shift issues
-                              if (!isNaN(d.getTime())) return d.toISOString();
-                          }
-                          
-                          // Fallback to standard parsing
-                          const d = new Date(s);
-                          if (!isNaN(d.getTime())) return d.toISOString();
-                      }
-
-                      return new Date().toISOString(); // Fallback
-                  };
-
-                  const realOrders: OtaOrder[] = ordersArray.map((item: any) => {
-                      const normalizedItem: any = {};
-                      Object.keys(item).forEach(k => {
-                          const cleanKey = k.toLowerCase().replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-                          normalizedItem[cleanKey] = item[k];
-                      });
-
-                      const getVal = (targets: string[]) => {
-                          for (const t of targets) {
-                              const cleanT = t.toLowerCase();
-                              if (normalizedItem[cleanT] !== undefined && normalizedItem[cleanT] !== null && normalizedItem[cleanT] !== "") return normalizedItem[cleanT];
-                          }
-                          return undefined;
-                      };
-
-                      const guestNameRaw = getVal(['tên khách', 'tên khách hàng', 'guest name', 'customer name', 'tên khách sạn', 'hotel name']) || 'No Name';
-                      const roomTypeRaw = getVal(['loại phòng', 'hạng phòng', 'room type', 'room name']) || 'Standard';
-                      const bookingCodeRaw = getVal(['mã booking', 'mã đặt phòng', 'booking id', 'id', 'mã bk']) || '';
-                      const paymentRaw = getVal(['thanh toán', 'trạng thái thanh toán', 'payment', 'payment status']) || '';
-                      const notesRaw = getVal(['yêu cầu đặc biệt', 'ghi chú', 'notes', 'special requests']) || '';
-                      const assignedRoomRaw = getVal(['xếp phòng', 'số phòng', 'room assigned', 'assigned', 'phòng']) || '';
-                      const checkInRaw = getVal(['ngày đến', 'check-in', 'check in', 'arrival']);
-                      const checkOutRaw = getVal(['ngày đi', 'check-out', 'check out', 'departure']);
-                      const emailDateRaw = getVal(['ngày email', 'email date', 'ngày', 'date', 'ngày đặt']); 
-                      const roomQtyRaw = getVal(['sl phòng', 'số lượng phòng', 'room qty', 'rooms']);
-                      const guestQtyRaw = getVal(['sl khách', 'số lượng khách', 'guest qty', 'guests', 'details', 'khách', 'chi tiết khách', 'số khách']);
-                      
-                      // NEW: Breakfast Mapping
-                      const breakfastRaw = getVal(['ăn sáng', 'breakfast', 'meals', 'chế độ ăn', 'bữa sáng', 'breakfast included', 'bữa ăn']);
-
-                      const totalRaw = getVal(['tổng tiền (gross)', 'tổng tiền', 'total amount', 'gross', 'doanh thu', 'thành tiền']);
-                      const netRaw = getVal(['thực nhận (net)', 'thực nhận', 'net amount', 'net']);
-                      const sheetStatusRaw = getVal(['trạng thái', 'tình trạng', 'status']) || '';
-                      const platformRaw = getVal(['kênh', 'nguồn', 'platform', 'source']) || 'Other';
-                      const cancellationDateRaw = getVal(['date cancelled', 'ngày hủy', 'cancelled date', 'cancellation date', 'ngày huỷ']);
-                      const appConfirmRaw = getVal(['xác nhận app', 'app confirm', 'confirm status', 'xác nhận hủy']) || '';
-
-                      let appStatus: OtaOrder['status'] = assignedRoomRaw ? 'Assigned' : 'Pending';
-                      const statusString = String(sheetStatusRaw).toUpperCase();
-                      if (statusString.includes('CANCEL') || statusString.includes('HỦY') || statusString.includes('HUY')) {
-                          appStatus = 'Cancelled';
-                      }
-
-                      const parseMoney = (val: any) => {
-                          if (typeof val === 'number') return val;
-                          if (typeof val === 'string') return Number(val.replace(/\./g, '').replace(/,/g, '').replace(/\s/g, '').replace('₫', '').replace('đ', '')) || 0;
-                          return 0;
-                      };
-
-                      // Helper to extract first number from guest string (e.g. "2 adults..." -> 2)
-                      const extractNumber = (val: any) => {
-                          if (typeof val === 'number') return val;
-                          if (typeof val === 'string') {
-                              const match = val.match(/\d+/);
-                              return match ? parseInt(match[0], 10) : 1;
-                          }
-                          return 1;
-                      };
-
-                      return {
-                          id: item.id || `OTA-${bookingCodeRaw}-${Math.random().toString(36).substr(2, 5)}`,
-                          platform: platformRaw,
-                          bookingCode: String(bookingCodeRaw).trim(), 
-                          guestName: guestNameRaw,
-                          guestPhone: '',
-                          checkIn: parseSheetDate(checkInRaw), 
-                          checkOut: parseSheetDate(checkOutRaw),
-                          emailDate: parseSheetDate(emailDateRaw),
-                          roomType: roomTypeRaw,
-                          roomQuantity: Number(roomQtyRaw) || 1,
-                          guestCount: extractNumber(guestQtyRaw),
-                          guestDetails: guestQtyRaw ? String(guestQtyRaw).trim() : undefined, // Keep raw text
-                          breakfastStatus: breakfastRaw ? String(breakfastRaw) : undefined, // Keep raw text
-                          totalAmount: parseMoney(totalRaw),
-                          netAmount: parseMoney(netRaw),
-                          paymentStatus: detectPaymentStatus(paymentRaw),
-                          status: appStatus,
-                          assignedRoom: assignedRoomRaw ? String(assignedRoomRaw).trim() : undefined,
-                          cancellationDate: cancellationDateRaw ? parseSheetDate(cancellationDateRaw) : undefined,
-                          appConfirmStatus: appConfirmRaw ? String(appConfirmRaw).trim().toUpperCase() : undefined,
-                          notes: notesRaw,
-                          rawJson: JSON.stringify(item)
-                      };
-                  });
-
-                  // Filter and Sort (Newest email date first)
-                  const validOrders = realOrders
-                      .filter(o => o.bookingCode && o.bookingCode !== '#N/A' && o.bookingCode !== 'Mã Booking')
-                      .sort((a, b) => {
-                          const dateA = new Date(a.emailDate || 0).getTime();
-                          const dateB = new Date(b.emailDate || 0).getTime();
-                          return dateB - dateA;
-                      });
-
-                  setOtaOrders(validOrders);
-                  if (!silent) notify('success', `Đã đồng bộ ${validOrders.length} đơn hàng.`);
-              }
-          } else {
-              if (!silent) {
-                  setOtaOrders([]);
-                  notify('info', 'Chưa cấu hình webhook OTA. Đang dùng dữ liệu trống.');
-              }
-          }
       } catch (err: any) {
-          console.error("Sync OTA Error:", err);
-          if (!silent) notify('error', `Lỗi đồng bộ: ${err.message}`);
+          console.error("Sync Error:", err);
+          if (!silent) notify('error', `Lỗi tải dữ liệu: ${err.message}`);
       } finally {
           if (!silent) setIsLoading(false);
       }
@@ -659,37 +551,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setOtaOrders(prev => prev.filter(o => o.id !== id));
   };
 
+  // Hàm Xác nhận Hủy (Update DB)
   const confirmOtaCancellation = async (order: OtaOrder) => {
       // 1. Optimistic Update Local
       setOtaOrders(prev => prev.map(o => o.id === order.id ? {...o, appConfirmStatus: 'CONFIRMED'} : o));
       
-      // 2. Trigger Webhook
-      const hook = webhooks.find(w => w.event_type === 'ota_import' && w.is_active);
-      if (hook) {
-          try {
-              // Sending multiple key variations to maximize compatibility with the existing Google Script
-              const payload = {
-                  action: 'confirm_cancellation',
-                  bookingCode: String(order.bookingCode).trim(), // Strict string handling
-                  status: 'CONFIRMED',
-                  app_confirm: 'CONFIRMED', // Matches column header concept
-                  appConfirmStatus: 'CONFIRMED', // Matches local type
-                  value: 'CONFIRMED' // Generic value
-              };
-              
-              await fetch(hook.url, {
-                  method: 'POST',
-                  mode: 'no-cors',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(payload)
-              });
-              notify('success', 'Đã gửi xác nhận hủy lên Sheet.');
-          } catch (e) {
-              console.error(e);
-              notify('error', 'Lỗi gửi tín hiệu xác nhận hủy.');
-          }
+      // 2. Update Supabase
+      const { error } = await supabase
+          .from('ota_orders')
+          .update({ app_confirm_status: 'CONFIRMED' })
+          .eq('id', order.id);
+
+      if (error) {
+          notify('error', 'Lỗi cập nhật trạng thái hủy trên Database.');
       } else {
-          notify('info', 'Đã xác nhận (Local). Chưa cấu hình Webhook để đồng bộ.');
+          notify('success', 'Đã xác nhận hủy đơn hàng.');
       }
   };
 

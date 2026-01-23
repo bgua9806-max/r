@@ -4,6 +4,7 @@ import { OtaOrder, Room, Booking } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { User, Calendar, Check, AlertTriangle, ArrowRight, DollarSign, BedDouble, Users, Coffee, Layers, Split } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
+import { supabase } from '../services/supabaseClient';
 
 interface Props {
   isOpen: boolean;
@@ -125,33 +126,18 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
               return addBooking(newBooking);
           });
 
-          // 1. Execute DB Inserts
+          // 1. Execute DB Inserts and Updates
           const updates: Promise<any>[] = [
               ...bookingPromises,
               // Optimistic UI update
-              updateOtaOrder(order.id, { status: 'Assigned', assignedRoom: roomNames })
+              updateOtaOrder(order.id, { status: 'Assigned', assignedRoom: roomNames }),
+              // Update Supabase DB Directly
+              supabase.from('ota_orders').update({
+                  status: 'Assigned',
+                  assigned_room: roomNames,
+                  updated_at: new Date().toISOString()
+              }).eq('id', order.id)
           ];
-
-          // 2. TRIGGER WEBHOOK (POST) TO UPDATE GOOGLE SHEET
-          const hook = webhooks.find(w => w.event_type === 'ota_import' && w.is_active);
-          if (hook) {
-              const payload = {
-                  action: 'update_room',
-                  bookingCode: String(order.bookingCode).trim(),
-                  room: roomNames // Sends "101, 102"
-              };
-
-              console.log("Sending Webhook Payload:", payload);
-
-              updates.push(
-                  fetch(hook.url, {
-                      method: 'POST',
-                      mode: 'no-cors', 
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(payload)
-                  }).catch(err => console.error("Webhook POST failed", err))
-              );
-          }
 
           // Execute Updates concurrently
           await Promise.all(updates);
