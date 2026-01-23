@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
@@ -213,7 +212,7 @@ export const OtaOrders: React.FC = () => {
         </div>
 
         {/* TABS */}
-        <div className="flex bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto no-scrollbar">
+        <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-fit overflow-x-auto no-scrollbar">
             <button onClick={() => setActiveTab('Pending')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Pending' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Clock size={16}/> Cần xử lý
                 {otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length}</span>}

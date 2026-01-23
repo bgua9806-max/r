@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Modal } from './Modal';
 import { OtaOrder, Room, Booking } from '../types';
@@ -195,105 +194,111 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Xếp Phòng (${selectedRoomIds.length}/${order.roomQuantity})`} size="lg">
         <div className="flex flex-col h-[80vh] md:h-auto">
-            {/* Header: Order Summary */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 shrink-0">
-                <div className="flex justify-between items-start">
-                    <div>
-                        <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                            {order.guestName}
-                            <span className="text-xs font-normal text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
-                                {order.bookingCode}
-                            </span>
-                        </h3>
-                        <div className="text-sm text-slate-600 mt-1 flex items-center gap-4">
-                            <span className="flex items-center gap-1"><Calendar size={14}/> {validDates ? format(checkInDate, 'dd/MM') : '--/--'} <ArrowRight size={12}/> {validDates ? format(checkOutDate, 'dd/MM') : '--/--'}</span>
-                            <span className="flex items-center gap-1"><BedDouble size={14}/> {order.roomType} (x{order.roomQuantity})</span>
-                        </div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-lg font-black text-brand-600">{order.totalAmount.toLocaleString()} ₫</div>
-                        <div className={`text-xs font-bold uppercase ${order.paymentStatus === 'Prepaid' ? 'text-green-600' : 'text-orange-600'}`}>
-                            {order.paymentStatus}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Strategy Selection (Only if > 1 room) */}
-            {order.roomQuantity > 1 && (
-                <div className="mb-4 bg-white border-2 border-slate-100 rounded-xl p-3">
-                    <div className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider">Chiến lược thanh toán</div>
-                    <div className="flex gap-4">
-                        <label className={`flex-1 flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${paymentStrategy === 'GROUP' ? 'border-brand-500 bg-brand-50' : 'border-slate-100 hover:bg-slate-50'}`}>
-                            <input 
-                                type="radio" 
-                                name="strategy" 
-                                className="hidden" 
-                                checked={paymentStrategy === 'GROUP'} 
-                                onChange={() => setPaymentStrategy('GROUP')}
-                            />
-                            <div className={`p-2 rounded-full ${paymentStrategy === 'GROUP' ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
-                                <Layers size={18}/>
-                            </div>
-                            <div>
-                                <div className="text-sm font-bold text-slate-800">Gộp bill (Trưởng đoàn)</div>
-                                <div className="text-[10px] text-slate-500">Trưởng đoàn trả hết, các phòng khác 0đ.</div>
-                            </div>
-                        </label>
-
-                        <label className={`flex-1 flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${paymentStrategy === 'SPLIT' ? 'border-brand-500 bg-brand-50' : 'border-slate-100 hover:bg-slate-50'}`}>
-                            <input 
-                                type="radio" 
-                                name="strategy" 
-                                className="hidden" 
-                                checked={paymentStrategy === 'SPLIT'} 
-                                onChange={() => setPaymentStrategy('SPLIT')}
-                            />
-                            <div className={`p-2 rounded-full ${paymentStrategy === 'SPLIT' ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
-                                <Split size={18}/>
-                            </div>
-                            <div>
-                                <div className="text-sm font-bold text-slate-800">Chia đều (Tự trả)</div>
-                                <div className="text-[10px] text-slate-500">Chia đều tiền cho từng phòng.</div>
-                            </div>
-                        </label>
-                    </div>
-                </div>
-            )}
-
-            {/* CRITICAL INFO ALERT BOX */}
-            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col md:flex-row gap-3 shadow-sm">
-                <div className="flex-1">
-                    <div className="flex items-center gap-2 text-blue-800 font-bold text-xs uppercase mb-1">
-                        <Users size={14}/> Chi tiết khách
-                    </div>
-                    <div className="text-sm font-bold text-slate-700">
-                        {order.guestDetails || `${order.guestCount} Khách`}
-                    </div>
-                </div>
+            {/* 
+               UNIFIED SCROLL CONTAINER 
+               Wraps Header, Strategy, Alert, and Grid together.
+               This allows the header to scroll away on mobile, giving full space to the room grid.
+            */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-1">
                 
-                {hasBreakfast(order) ? (
-                    <div className="flex-1 border-t md:border-t-0 md:border-l border-blue-200 pt-2 md:pt-0 md:pl-3">
-                        <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase mb-1">
-                            <Coffee size={14}/> Chế độ ăn uống
+                {/* Header: Order Summary */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                {order.guestName}
+                                <span className="text-xs font-normal text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
+                                    {order.bookingCode}
+                                </span>
+                            </h3>
+                            <div className="text-sm text-slate-600 mt-1 flex items-center gap-4">
+                                <span className="flex items-center gap-1"><Calendar size={14}/> {validDates ? format(checkInDate, 'dd/MM') : '--/--'} <ArrowRight size={12}/> {validDates ? format(checkOutDate, 'dd/MM') : '--/--'}</span>
+                                <span className="flex items-center gap-1"><BedDouble size={14}/> {order.roomType} (x{order.roomQuantity})</span>
+                            </div>
                         </div>
-                        <div className="text-sm font-black text-amber-600 bg-amber-100 w-fit px-2 py-0.5 rounded border border-amber-200">
-                            {order.breakfastStatus || 'Có ăn sáng'}
+                        <div className="text-right">
+                            <div className="text-lg font-black text-brand-600">{order.totalAmount.toLocaleString()} ₫</div>
+                            <div className={`text-xs font-bold uppercase ${order.paymentStatus === 'Prepaid' ? 'text-green-600' : 'text-orange-600'}`}>
+                                {order.paymentStatus}
+                            </div>
                         </div>
                     </div>
-                ) : (
-                    <div className="flex-1 border-t md:border-t-0 md:border-l border-blue-200 pt-2 md:pt-0 md:pl-3 flex items-center text-slate-400 text-xs italic">
-                        Không có chế độ ăn
+                </div>
+
+                {/* Strategy Selection (Only if > 1 room) */}
+                {order.roomQuantity > 1 && (
+                    <div className="mb-4 bg-white border-2 border-slate-100 rounded-xl p-3">
+                        <div className="text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider">Chiến lược thanh toán</div>
+                        <div className="flex gap-4">
+                            <label className={`flex-1 flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${paymentStrategy === 'GROUP' ? 'border-brand-500 bg-brand-50' : 'border-slate-100 hover:bg-slate-50'}`}>
+                                <input 
+                                    type="radio" 
+                                    name="strategy" 
+                                    className="hidden" 
+                                    checked={paymentStrategy === 'GROUP'} 
+                                    onChange={() => setPaymentStrategy('GROUP')}
+                                />
+                                <div className={`p-2 rounded-full ${paymentStrategy === 'GROUP' ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
+                                    <Layers size={18}/>
+                                </div>
+                                <div>
+                                    <div className="text-sm font-bold text-slate-800">Gộp bill (Trưởng đoàn)</div>
+                                    <div className="text-[10px] text-slate-500">Trưởng đoàn trả hết, các phòng khác 0đ.</div>
+                                </div>
+                            </label>
+
+                            <label className={`flex-1 flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${paymentStrategy === 'SPLIT' ? 'border-brand-500 bg-brand-50' : 'border-slate-100 hover:bg-slate-50'}`}>
+                                <input 
+                                    type="radio" 
+                                    name="strategy" 
+                                    className="hidden" 
+                                    checked={paymentStrategy === 'SPLIT'} 
+                                    onChange={() => setPaymentStrategy('SPLIT')}
+                                />
+                                <div className={`p-2 rounded-full ${paymentStrategy === 'SPLIT' ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
+                                    <Split size={18}/>
+                                </div>
+                                <div>
+                                    <div className="text-sm font-bold text-slate-800">Chia đều (Tự trả)</div>
+                                    <div className="text-[10px] text-slate-500">Chia đều tiền cho từng phòng.</div>
+                                </div>
+                            </label>
+                        </div>
                     </div>
                 )}
-            </div>
 
-            {/* Body: Room Selection Grid */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-                <div className="space-y-6">
+                {/* CRITICAL INFO ALERT BOX */}
+                <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col md:flex-row gap-3 shadow-sm">
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2 text-blue-800 font-bold text-xs uppercase mb-1">
+                            <Users size={14}/> Chi tiết khách
+                        </div>
+                        <div className="text-sm font-bold text-slate-700">
+                            {order.guestDetails || `${order.guestCount} Khách`}
+                        </div>
+                    </div>
+                    
+                    {hasBreakfast(order) ? (
+                        <div className="flex-1 border-t md:border-t-0 md:border-l border-blue-200 pt-2 md:pt-0 md:pl-3">
+                            <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase mb-1">
+                                <Coffee size={14}/> Chế độ ăn uống
+                            </div>
+                            <div className="text-sm font-black text-amber-600 bg-amber-100 w-fit px-2 py-0.5 rounded border border-amber-200">
+                                {order.breakfastStatus || 'Có ăn sáng'}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex-1 border-t md:border-t-0 md:border-l border-blue-200 pt-2 md:pt-0 md:pl-3 flex items-center text-slate-400 text-xs italic">
+                            Không có chế độ ăn
+                        </div>
+                    )}
+                </div>
+
+                {/* Room Selection Grid (Flows naturally within the scroll container) */}
+                <div className="space-y-6 pb-4">
                     {groupedRooms.map(group => (
                         <div key={group.facility.id}>
-                            <h4 className="font-bold text-slate-700 mb-2 sticky top-0 bg-white py-1 z-10 flex items-center gap-2">
+                            <h4 className="font-bold text-slate-700 mb-2 sticky top-0 bg-white py-2 z-10 flex items-center gap-2 border-b border-slate-100">
                                 <div className="w-1 h-4 bg-slate-300 rounded-full"></div> 
                                 {group.facility.facilityName}
                             </h4>
@@ -364,7 +369,7 @@ export const OtaAssignModal: React.FC<Props> = ({ isOpen, onClose, order }) => {
                 </div>
             </div>
 
-            {/* Footer */}
+            {/* Footer: Fixed at Bottom */}
             <div className="pt-4 mt-2 border-t border-slate-100 flex justify-end gap-3 shrink-0 bg-white items-center">
                 <div className="mr-auto text-xs text-slate-500">
                     Đã chọn: <b className={selectedRoomIds.length === order.roomQuantity ? 'text-green-600' : 'text-red-600'}>{selectedRoomIds.length}</b>/{order.roomQuantity} phòng
