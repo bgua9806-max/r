@@ -3,11 +3,94 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter, Loader2
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter, Loader2, Layers, Link
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays, isSameMonth } from 'date-fns';
 import { OtaOrder } from '../types';
 import { OtaAssignModal } from '../components/OtaAssignModal';
+
+// --- HELPER: GROUPING LOGIC ---
+// Gom nhóm các đơn hàng dựa trên Booking Code (Expedia) hoặc Tên khách + Ngày đến (Chung)
+const processOtaGroups = (orders: OtaOrder[]) => {
+    const groups: Record<string, OtaOrder[]> = {};
+    const processedOrders: (OtaOrder & { groupInfo?: { index: number, total: number, id: string } })[] = [];
+
+    // 1. Grouping Phase
+    orders.forEach(order => {
+        let groupKey = order.id; // Default unique key
+
+        // Logic 1: Expedia Style (8 ký tự đầu giống nhau)
+        if (order.platform === 'Expedia' && order.bookingCode.length >= 8) {
+            const prefix = order.bookingCode.substring(0, 8);
+            // Unique key combining platform + prefix + checkin (avoid collision with different dates)
+            groupKey = `EXP_${prefix}_${order.checkIn.substring(0,10)}`; 
+        } 
+        // Logic 2: General (Same Guest + Same CheckIn + Same Platform)
+        else {
+            const safeName = (order.guestName || '').toLowerCase().trim();
+            const safeDate = order.checkIn.substring(0, 10);
+            groupKey = `GEN_${order.platform}_${safeName}_${safeDate}`;
+        }
+
+        if (!groups[groupKey]) groups[groupKey] = [];
+        groups[groupKey].push(order);
+    });
+
+    // 2. Flattening & Indexing Phase
+    // Duyệt qua các nhóm, nếu nhóm có > 1 phần tử thì đánh số
+    Object.values(groups).forEach(group => {
+        if (group.length > 1) {
+            // Sort nội bộ nhóm theo mã booking để thứ tự Phòng 1, Phòng 2 đúng
+            group.sort((a, b) => a.bookingCode.localeCompare(b.bookingCode));
+            
+            group.forEach((order, index) => {
+                processedOrders.push({
+                    ...order,
+                    groupInfo: {
+                        id: group[0].id, // Dùng ID thằng đầu làm Group ID chung
+                        index: index + 1,
+                        total: group.length
+                    }
+                });
+            });
+        } else {
+            // Đơn lẻ
+            processedOrders.push(group[0]);
+        }
+    });
+
+    // 3. Sorting Phase (Giữ nguyên logic sort cũ, nhưng đảm bảo Group nằm cạnh nhau)
+    // Thực tế do ta duyệt Object.values nên các nhóm đã nằm cạnh nhau. 
+    // Tuy nhiên, để đúng thứ tự thời gian, ta cần sort lại mảng tổng dựa trên đại diện của nhóm.
+    
+    // Sort final list by CheckIn Date or Email Date based on Active Tab logic outside
+    // (Logic sort chính nằm ở hàm fetchData/query, ở đây ta chỉ trả về mảng đã gắn thẻ Group)
+    // Để đơn giản, ta tin tưởng thứ tự đầu vào của 'orders', chỉ gom nhóm lại.
+    
+    // Re-sort: Nếu đơn lẻ -> giữ vị trí. Nếu Group -> Gom lại vị trí của thằng đầu tiên.
+    // Cách đơn giản nhất: Map ID -> Order, sau đó chạy lại list gốc, nếu gặp item thuộc group chưa render thì render cả group.
+    
+    const finalResult: typeof processedOrders = [];
+    const renderedGroupIds = new Set<string>();
+
+    orders.forEach(orig => {
+        const enriched = processedOrders.find(p => p.id === orig.id);
+        if (!enriched) return;
+
+        if (enriched.groupInfo) {
+            if (!renderedGroupIds.has(enriched.groupInfo.id)) {
+                // Render cả nhóm ngay tại vị trí xuất hiện đầu tiên
+                const fullGroup = processedOrders.filter(p => p.groupInfo?.id === enriched.groupInfo?.id);
+                finalResult.push(...fullGroup);
+                renderedGroupIds.add(enriched.groupInfo.id);
+            }
+        } else {
+            finalResult.push(enriched);
+        }
+    });
+
+    return finalResult;
+};
 
 export const OtaOrders: React.FC = () => {
   const { otaOrders, syncOtaOrders, queryOtaOrders, isLoading: isSyncing, deleteOtaOrder, bookings, updateBooking, notify, confirmOtaCancellation } = useAppContext();
@@ -29,6 +112,11 @@ export const OtaOrders: React.FC = () => {
   // Modal State
   const [isAssignModalOpen, setAssignModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OtaOrder | null>(null);
+
+  // Computed Display Data (with Grouping)
+  const displayData = useMemo(() => {
+      return processOtaGroups(listData);
+  }, [listData]);
 
   // Auto-sync on mount (Background sync to keep local caches fresh)
   useEffect(() => {
@@ -273,7 +361,7 @@ export const OtaOrders: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {listData.length === 0 && !isFetching ? (
+                        {displayData.length === 0 && !isFetching ? (
                             <tr>
                                 <td colSpan={6} className="p-12 text-center text-slate-400">
                                     <CloudLightning size={48} className="mx-auto mb-2 opacity-30"/>
@@ -283,7 +371,7 @@ export const OtaOrders: React.FC = () => {
                                 </td>
                             </tr>
                         ) : (
-                            listData.map(order => {
+                            displayData.map((order, idx) => {
                                 const checkin = parseISO(order.checkIn);
                                 const checkout = parseISO(order.checkOut);
                                 const isValidDates = isValid(checkin) && isValid(checkout);
@@ -306,8 +394,12 @@ export const OtaOrders: React.FC = () => {
                                     rowClass = 'bg-blue-50/30 hover:bg-blue-50/50';
                                 }
 
+                                // GROUP STYLING
+                                const isGroup = order.groupInfo && order.groupInfo.total > 1;
+                                const groupBorderClass = isGroup ? 'border-l-4 border-l-purple-400' : '';
+
                                 return (
-                                    <tr key={order.id} className={`group transition-colors ${rowClass}`}>
+                                    <tr key={order.id} className={`group transition-colors ${rowClass} ${groupBorderClass}`}>
                                         {/* COL 1: SOURCE & CODE */}
                                         <td className="p-4 align-top">
                                             <div className="flex flex-col gap-1.5">
@@ -343,6 +435,13 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 2: CUSTOMER */}
                                         <td className="p-4 align-top">
                                             <div className="max-w-[200px]">
+                                                {/* GROUP BADGE */}
+                                                {isGroup && order.groupInfo && (
+                                                    <span className="inline-flex items-center gap-1 mb-1 bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-black uppercase border border-purple-200">
+                                                        <Layers size={10}/> Nhóm: Phòng {order.groupInfo.index}/{order.groupInfo.total}
+                                                    </span>
+                                                )}
+
                                                 <div className={`font-bold text-sm break-words whitespace-normal line-clamp-3 ${isCancelled ? 'text-red-700' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
@@ -479,13 +578,13 @@ export const OtaOrders: React.FC = () => {
 
         {/* --- MOBILE VIEW: OPTIMIZED CARDS --- */}
         <div className="md:hidden space-y-4">
-            {listData.length === 0 && !isFetching ? (
+            {displayData.length === 0 && !isFetching ? (
                 <div className="text-center py-10 text-slate-400">
                     <CloudLightning size={40} className="mx-auto mb-2 opacity-50"/>
                     <p className="text-sm font-medium">Không có đơn hàng nào.</p>
                 </div>
             ) : (
-                listData.map(order => {
+                displayData.map(order => {
                     const checkin = parseISO(order.checkIn);
                     const checkout = parseISO(order.checkOut);
                     const isValidDates = isValid(checkin) && isValid(checkout);
@@ -498,8 +597,12 @@ export const OtaOrders: React.FC = () => {
                     const orderEmailDate = parseISO(order.emailDate || '');
                     const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
 
+                    // Group Check for Mobile
+                    const isGroup = order.groupInfo && order.groupInfo.total > 1;
+                    const groupBorderClass = isGroup ? 'border-l-4 border-l-purple-400' : '';
+
                     return (
-                    <div key={order.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col relative ${isCancelled ? 'border-red-300 ring-2 ring-red-100' : 'border-slate-200'}`}>
+                    <div key={order.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col relative ${isCancelled ? 'border-red-300 ring-2 ring-red-100' : 'border-slate-200'} ${groupBorderClass}`}>
                         <div className={`h-1.5 w-full ${isCancelled ? 'bg-red-500' : isConfirmed ? 'bg-slate-400' : order.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                         
                         {isToday && order.status === 'Pending' && !isCancelled && (
@@ -533,6 +636,11 @@ export const OtaOrders: React.FC = () => {
 
                             <div className="space-y-3">
                                 <div>
+                                    {isGroup && order.groupInfo && (
+                                        <span className="inline-flex items-center gap-1 mb-1 bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-black uppercase border border-purple-200">
+                                            <Layers size={10}/> Nhóm: Phòng {order.groupInfo.index}/{order.groupInfo.total}
+                                        </span>
+                                    )}
                                     <h3 className={`font-black text-base leading-tight break-words line-clamp-3 ${isCancelled ? 'text-red-700' : isConfirmed ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
                                         <span className="flex items-center gap-1 truncate max-w-[200px]" title={order.guestDetails || `${order.guestCount} Khách`}>
