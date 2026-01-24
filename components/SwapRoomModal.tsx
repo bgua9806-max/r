@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Modal } from './Modal';
 import { Booking, Room } from '../types';
 import { useAppContext } from '../context/AppContext';
-import { ArrowRightLeft, AlertCircle, ArrowRight, Wallet, Calculator, Info } from 'lucide-react';
+import { ArrowRightLeft, AlertCircle, ArrowRight, Wallet, Calculator, Info, Building } from 'lucide-react';
 import { format, parseISO, differenceInHours } from 'date-fns';
 
 interface SwapRoomModalProps {
@@ -17,6 +17,9 @@ type PriceStrategy = 'KEEP_OLD' | 'RECALCULATE' | 'CUSTOM';
 
 export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, booking }) => {
   const { rooms, facilities, updateBooking, upsertRoom, checkAvailability, notify } = useAppContext();
+  
+  // State for Target Selection
+  const [targetFacilityName, setTargetFacilityName] = useState('');
   const [targetRoomCode, setTargetRoomCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -26,26 +29,42 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
 
   // Reset state on open
   useEffect(() => {
-      setTargetRoomCode('');
-      setPriceStrategy('KEEP_OLD');
-      setCustomTotal(booking?.totalRevenue || 0);
+      if (booking) {
+          setTargetFacilityName(booking.facilityName); // Default to current facility
+          setTargetRoomCode('');
+          setPriceStrategy('KEEP_OLD');
+          setCustomTotal(booking.totalRevenue || 0);
+      }
   }, [isOpen, booking]);
 
-  // Tìm danh sách phòng khả dụng
+  // When Facility Changes, reset room code
+  const handleFacilityChange = (newName: string) => {
+      setTargetFacilityName(newName);
+      setTargetRoomCode('');
+  };
+
+  // Tìm danh sách phòng khả dụng (Based on selected Facility)
   const availableTargetRooms = useMemo(() => {
-      if (!booking) return [];
-      const facilityId = facilities.find(f => f.facilityName === booking.facilityName)?.id;
+      if (!booking || !targetFacilityName) return [];
+      const facilityId = facilities.find(f => f.facilityName === targetFacilityName)?.id;
       if (!facilityId) return [];
 
       return rooms.filter(r => {
           if (r.facility_id !== facilityId) return false;
-          if (r.name === booking.roomCode) return false;
+          // If same facility, exclude current room. If different facility, allow all valid rooms.
+          if (targetFacilityName === booking.facilityName && r.name === booking.roomCode) return false;
           if (r.status === 'Sửa chữa') return false;
-          return checkAvailability(booking.facilityName, r.name, booking.checkinDate, booking.checkoutDate, booking.id);
+          
+          // Check availability in the TARGET facility
+          return checkAvailability(targetFacilityName, r.name, booking.checkinDate, booking.checkoutDate, booking.id);
       }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  }, [booking, rooms, facilities, checkAvailability]);
+  }, [booking, rooms, facilities, targetFacilityName, checkAvailability]);
 
-  const selectedRoomData = rooms.find(r => r.facility_id === facilities.find(f => f.facilityName === booking.facilityName)?.id && r.name === targetRoomCode);
+  // Get Data of the selected target room
+  const selectedRoomData = useMemo(() => {
+      const facilityId = facilities.find(f => f.facilityName === targetFacilityName)?.id;
+      return rooms.find(r => r.facility_id === facilityId && r.name === targetRoomCode);
+  }, [rooms, facilities, targetFacilityName, targetRoomCode]);
 
   // --- LOGIC TÍNH TOÁN CỐT LÕI ---
   const calculation = useMemo(() => {
@@ -67,7 +86,6 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
       const totalHours = Math.abs(differenceInHours(end, start));
       
       // Xác định đơn vị tính (Ngày hay Giờ) dựa trên loại hình thanh toán cũ
-      // Nếu không xác định được, mặc định theo quy tắc: > 24h tính ngày, < 24h tính giờ hoặc 1 đêm
       let quantity = 1; 
       let unitLabel = 'đêm';
       
@@ -76,7 +94,6 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
           unitLabel = 'giờ';
           // Nếu tính theo giờ nhưng giá quá cao (>= giá ngày), có thể coi là 1 combo/đêm
           if (selectedRoomData.price && selectedRoomData.price > 200000 && quantity > 1) {
-             // Logic check nhanh: Nếu giá niêm yết là giá ngày, thì quantity phải là 1 (cho < 24h)
              quantity = 1; 
              unitLabel = 'ngày/đêm';
           }
@@ -96,10 +113,7 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
           // Tổng = Giá niêm yết phòng mới * Số lượng
           newPriceUnit = selectedRoomData.price || 0;
           
-          // Phụ thu giữ nguyên hoặc reset? Tạm thời giữ nguyên phụ thu cũ
           const extra = booking.extraFee || 0;
-          
-          // Tính tiền phòng thuần túy
           const roomCharge = newPriceUnit * quantity;
           
           newTotal = roomCharge + extra;
@@ -121,18 +135,20 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
       setIsSubmitting(true);
       try {
           const oldRoomCode = booking.roomCode;
-          const oldFacilityId = facilities.find(f => f.facilityName === booking.facilityName)?.id;
+          const oldFacilityName = booking.facilityName;
+          const oldFacilityId = facilities.find(f => f.facilityName === oldFacilityName)?.id;
 
           const totalPaid = booking.totalRevenue - booking.remainingAmount;
           const newRemaining = calculation.newTotal - totalPaid;
 
           const updatedBooking: Booking = {
               ...booking,
+              facilityName: targetFacilityName, // IMPORTANT: Update Facility Name
               roomCode: targetRoomCode,
               price: calculation.newPriceUnit,
               totalRevenue: calculation.newTotal,
               remainingAmount: newRemaining,
-              note: booking.note + `\n[${format(new Date(), 'dd/MM HH:mm')}] Đổi ${oldRoomCode} -> ${targetRoomCode}. ${calculation.explanation}`
+              note: booking.note + `\n[${format(new Date(), 'dd/MM HH:mm')}] Đổi ${oldRoomCode}(${oldFacilityName}) -> ${targetRoomCode}(${targetFacilityName}). ${calculation.explanation}`
           };
           await updateBooking(updatedBooking);
 
@@ -147,7 +163,9 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
               }
           }
           
-          notify('success', `Đã chuyển sang phòng ${targetRoomCode}`);
+          // Không cần update phòng mới thành Occupied, hệ thống grid view tự tính dựa trên booking
+          
+          notify('success', `Đã chuyển sang ${targetFacilityName} - Phòng ${targetRoomCode}`);
           onClose();
       } catch (err) {
           notify('error', 'Lỗi khi đổi phòng');
@@ -182,32 +200,51 @@ export const SwapRoomModal: React.FC<SwapRoomModalProps> = ({ isOpen, onClose, b
                 </div>
             </div>
 
-            {/* 2. Target Selection */}
-            <div>
-                <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 block">Chọn phòng trống</label>
-                {availableTargetRooms.length === 0 ? (
-                    <div className="p-4 bg-orange-50 text-orange-700 text-sm rounded-xl border border-orange-100 flex items-center gap-2">
-                        <AlertCircle size={18}/> Không còn phòng trống phù hợp.
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[150px] overflow-y-auto custom-scrollbar">
-                        {availableTargetRooms.map(r => (
-                            <button
-                                key={r.id}
-                                onClick={() => setTargetRoomCode(r.name)}
-                                className={`
-                                    px-2 py-2 rounded-xl border-2 font-bold text-sm transition-all flex flex-col items-center
-                                    ${targetRoomCode === r.name 
-                                        ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-md ring-1 ring-brand-500' 
-                                        : 'border-slate-100 bg-white text-slate-600 hover:border-brand-200 hover:bg-slate-50'}
-                                `}
-                            >
-                                <span>{r.name}</span>
-                                <span className="text-[10px] font-normal opacity-60">{(r.price || 0)/1000}k</span>
-                            </button>
+            {/* 2. Target Selection (Cross-Facility) */}
+            <div className="space-y-3">
+                {/* Facility Selector */}
+                <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                        <Building size={12}/> Cơ sở đích
+                    </label>
+                    <select 
+                        className="w-full border-2 border-slate-100 rounded-xl p-2.5 text-sm font-bold text-slate-700 bg-white outline-none focus:border-brand-500"
+                        value={targetFacilityName}
+                        onChange={(e) => handleFacilityChange(e.target.value)}
+                    >
+                        {facilities.map(f => (
+                            <option key={f.id} value={f.facilityName}>{f.facilityName}</option>
                         ))}
-                    </div>
-                )}
+                    </select>
+                </div>
+
+                {/* Room Selector */}
+                <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 block">Chọn phòng trống ({targetFacilityName})</label>
+                    {availableTargetRooms.length === 0 ? (
+                        <div className="p-4 bg-orange-50 text-orange-700 text-sm rounded-xl border border-orange-100 flex items-center gap-2">
+                            <AlertCircle size={18}/> Không còn phòng trống phù hợp tại cơ sở này.
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[150px] overflow-y-auto custom-scrollbar">
+                            {availableTargetRooms.map(r => (
+                                <button
+                                    key={r.id}
+                                    onClick={() => setTargetRoomCode(r.name)}
+                                    className={`
+                                        px-2 py-2 rounded-xl border-2 font-bold text-sm transition-all flex flex-col items-center
+                                        ${targetRoomCode === r.name 
+                                            ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-md ring-1 ring-brand-500' 
+                                            : 'border-slate-100 bg-white text-slate-600 hover:border-brand-200 hover:bg-slate-50'}
+                                    `}
+                                >
+                                    <span>{r.name}</span>
+                                    <span className="text-[10px] font-normal opacity-60">{(r.price || 0)/1000}k</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* 3. Pricing Strategy */}
