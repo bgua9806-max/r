@@ -334,28 +334,30 @@ export interface AppConfig {
   description?: string;
 }
 
-// --- OTA ORDER INTERFACE (NEW) ---
+// --- OTA ORDER INTERFACE (UPDATED) ---
 export interface OtaOrder {
   id: string;
   platform: 'Agoda' | 'Booking.com' | 'Traveloka' | 'Expedia' | 'Direct';
   bookingCode: string;
   guestName: string;
   guestPhone?: string;
-  emailDate?: string; // ADDED: Ngày Email để cảnh báo đơn mới
+  emailDate?: string; 
   checkIn: string; // ISO String
   checkOut: string; // ISO String
-  roomType: string; // Tên loại phòng trên OTA (VD: Deluxe Double)
+  roomType: string; 
   roomQuantity: number;
   guestCount: number;
-  guestDetails?: string; // ADDED: Raw guest string from sheet (e.g. "2 Adults, 1 Child")
-  breakfastStatus?: string; // ADDED: Breakfast status (e.g., "Included", "Không")
+  guestDetails?: string; 
+  breakfastStatus?: string; 
   totalAmount: number;
-  netAmount: number; // Thực nhận
+  netAmount: number; 
   paymentStatus: 'Prepaid' | 'Pay at hotel';
-  status: 'Pending' | 'Assigned' | 'Cancelled';
-  assignedRoom?: string; // Room assigned from Sheet (Column T)
-  cancellationDate?: string; // ADDED: Ngày hủy
-  appConfirmStatus?: string; // ADDED: Cột V (Xác nhận từ App)
+  
+  // UPDATED STATUS FIELD: 4 STATES
+  status: 'Pending' | 'Assigned' | 'Cancelled' | 'Confirmed';
+  
+  assignedRoom?: string; 
+  cancellationDate?: string; 
   notes?: string;
-  rawJson?: string; // Lưu dữ liệu gốc từ Sheet
+  rawJson?: string; 
 }

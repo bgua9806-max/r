@@ -50,6 +50,17 @@ export const OtaOrders: React.FC = () => {
               dateFilter: filterTimeMode !== 'all' ? { mode: filterTimeMode, value: filterTimeMode === 'day' ? filterDate : filterMonth } : undefined
           });
 
+          // SORTING LOGIC FOR PENDING TAB
+          if (activeTab === 'Pending') {
+              data.sort((a, b) => {
+                  // Cancelled first
+                  if (a.status === 'Cancelled' && b.status !== 'Cancelled') return -1;
+                  if (b.status === 'Cancelled' && a.status !== 'Cancelled') return 1;
+                  // Then by email date desc (newest first)
+                  return (b.emailDate || '').localeCompare(a.emailDate || '');
+              });
+          }
+
           if (reset) {
               setListData(data);
               setPage(1);
@@ -115,13 +126,11 @@ export const OtaOrders: React.FC = () => {
   };
 
   const handleConfirmCancel = async (order: OtaOrder) => {
-      if(confirm(`Xác nhận đơn ${order.bookingCode} đã hủy? Hành động này sẽ cập nhật lên Sheet và chuyển vào lưu trữ.`)) {
+      if(confirm(`Xác nhận đơn ${order.bookingCode} đã hủy? Hành động này sẽ chuyển đơn vào Lịch sử.`)) {
           await confirmOtaCancellation(order);
-          // Manually update local list to reflect change immediately
+          // Manually remove from local list if in Pending tab
           if (activeTab === 'Pending') {
-              setListData(prev => prev.filter(o => o.id !== order.id)); // Remove if viewing pending
-          } else {
-              setListData(prev => prev.map(o => o.id === order.id ? { ...o, appConfirmStatus: 'CONFIRMED' } : o));
+              setListData(prev => prev.filter(o => o.id !== order.id));
           }
       }
   };
@@ -145,11 +154,8 @@ export const OtaOrders: React.FC = () => {
       }
       
       await confirmOtaCancellation(order);
-      if (activeTab === 'Pending') {
-          setListData(prev => prev.filter(o => o.id !== order.id));
-      } else {
-          setListData(prev => prev.map(o => o.id === order.id ? { ...o, appConfirmStatus: 'CONFIRMED' } : o));
-      }
+      // Remove from view
+      setListData(prev => prev.filter(o => o.id !== order.id));
       notify('success', 'Đã giải phóng phòng và lưu vết hủy.');
   };
 
@@ -238,14 +244,14 @@ export const OtaOrders: React.FC = () => {
         <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-fit overflow-x-auto no-scrollbar">
             <button onClick={() => setActiveTab('Pending')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Pending' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Clock size={16}/> Cần xử lý
-                {/* Badge based on Context (Real-time pending) */}
-                {otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => (o.status === 'Pending' || (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED'))).length}</span>}
+                {/* Badge for Pending/Cancelled */}
+                {otaOrders.filter(o => o.status === 'Pending' || o.status === 'Cancelled').length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{otaOrders.filter(o => o.status === 'Pending' || o.status === 'Cancelled').length}</span>}
             </button>
             <button onClick={() => setActiveTab('Today')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Today' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Calendar size={16}/> Check-in Hôm nay
             </button>
             <button onClick={() => setActiveTab('Processed')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Processed' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                <CheckCircle size={16}/> Đã xếp phòng
+                <CheckCircle size={16}/> Đã xếp
             </button>
             <button onClick={() => setActiveTab('Cancelled')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === 'Cancelled' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Archive size={16}/> Lịch sử Hủy
@@ -272,7 +278,7 @@ export const OtaOrders: React.FC = () => {
                                 <td colSpan={6} className="p-12 text-center text-slate-400">
                                     <CloudLightning size={48} className="mx-auto mb-2 opacity-30"/>
                                     <p className="text-sm font-medium">
-                                        {searchTerm ? 'Không tìm thấy kết quả phù hợp.' : 'Không có đơn hàng nào trong danh sách.'}
+                                        {searchTerm ? 'Không tìm thấy kết quả phù hợp.' : 'Không có đơn hàng nào.'}
                                     </p>
                                 </td>
                             </tr>
@@ -287,24 +293,36 @@ export const OtaOrders: React.FC = () => {
                                 
                                 const orderEmailDate = parseISO(order.emailDate || '');
                                 const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
+                                
                                 const isCancelled = order.status === 'Cancelled';
+                                const isConfirmed = order.status === 'Confirmed';
                                 const isBreakfastIncluded = hasBreakfast(order);
 
+                                // Row Styling: Highlight Cancelled rows if in Pending Tab
+                                let rowClass = 'hover:bg-slate-50';
+                                if (activeTab === 'Pending' && isCancelled) {
+                                    rowClass = 'bg-red-50 hover:bg-red-100/50 border-l-4 border-l-red-500';
+                                } else if (isToday) {
+                                    rowClass = 'bg-blue-50/30 hover:bg-blue-50/50';
+                                }
+
                                 return (
-                                    <tr key={order.id} className={`group transition-colors ${isCancelled ? 'bg-red-50 hover:bg-red-100/50' : isToday ? 'bg-blue-50/30 hover:bg-blue-50/50' : 'hover:bg-slate-50'}`}>
+                                    <tr key={order.id} className={`group transition-colors ${rowClass}`}>
                                         {/* COL 1: SOURCE & CODE */}
                                         <td className="p-4 align-top">
                                             <div className="flex flex-col gap-1.5">
-                                                {isNewToday && !isCancelled && (
+                                                {/* BADGES */}
+                                                {isNewToday && !isCancelled && !isConfirmed && (
                                                     <span className="flex items-center gap-1 w-fit bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
                                                         <Bell size={10} fill="white"/> MỚI VỀ
                                                     </span>
                                                 )}
                                                 {isCancelled && (
-                                                    <span className="flex items-center gap-1 w-fit bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
-                                                        <XCircle size={10} fill="white" className="text-red-600"/> ĐÃ HỦY
+                                                    <span className="flex items-center gap-1 w-fit bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase animate-pulse shadow-sm">
+                                                        <XCircle size={10} fill="white" className="text-red-600"/> CẢNH BÁO HỦY
                                                     </span>
                                                 )}
+                                                
                                                 <span className={`inline-block w-fit px-2 py-0.5 rounded text-[10px] font-black uppercase border ${styles.bg} ${styles.color} ${styles.border}`}>
                                                     {order.platform}
                                                 </span>
@@ -325,7 +343,7 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 2: CUSTOMER */}
                                         <td className="p-4 align-top">
                                             <div>
-                                                <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>
+                                                <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-red-700' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
                                                 <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 font-medium group/guest">
@@ -359,7 +377,7 @@ export const OtaOrders: React.FC = () => {
                                                     )}
                                                 </div>
                                                 {order.assignedRoom && isCancelled && (
-                                                    <div className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded w-fit mt-1">
+                                                    <div className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded w-fit mt-1 border border-red-200">
                                                         <AlertOctagon size={12}/> Phòng {order.assignedRoom}
                                                     </div>
                                                 )}
@@ -369,7 +387,7 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 4: TIME */}
                                         <td className="p-4 align-top text-center">
                                             <div className="flex flex-col items-center gap-1">
-                                                {isToday && !isCancelled && (
+                                                {isToday && !isCancelled && !isConfirmed && (
                                                     <span className="text-[9px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded animate-pulse mb-0.5">
                                                         CHECK-IN HÔM NAY
                                                     </span>
@@ -391,7 +409,7 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 5: FINANCIALS */}
                                         <td className="p-4 align-top text-right">
                                             <div className="flex flex-col items-end gap-1">
-                                                <div className={`font-black text-sm ${isCancelled ? 'text-slate-400 line-through' : 'text-brand-600'}`}>
+                                                <div className={`font-black text-sm ${isCancelled || isConfirmed ? 'text-slate-400 line-through' : 'text-brand-600'}`}>
                                                     {order.totalAmount.toLocaleString()} ₫
                                                 </div>
                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1 ${order.paymentStatus === 'Prepaid' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-orange-50 text-orange-700 border border-orange-100'}`}>
@@ -403,37 +421,41 @@ export const OtaOrders: React.FC = () => {
                                         {/* COL 6: ACTIONS */}
                                         <td className="p-4 align-top text-center sticky right-0 bg-white group-hover:bg-white transition-colors z-10 border-l border-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.02)]">
                                             {isCancelled ? (
-                                                activeTab === 'Cancelled' ? (
-                                                    <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full bg-slate-100 text-slate-500 border-slate-200">
-                                                        Đã lưu
-                                                    </span>
-                                                ) : order.assignedRoom ? (
+                                                /* CANCELLED STATE ACTION */
+                                                order.assignedRoom ? (
                                                     <button 
                                                         onClick={() => handleResolveConflict(order)}
-                                                        className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5"
+                                                        className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5 animate-pulse"
                                                     >
-                                                        <span>HỦY PHÒNG</span>
-                                                        <span className="opacity-80">& XÁC NHẬN</span>
+                                                        <span>XÁC NHẬN HỦY</span>
+                                                        <span className="opacity-80">(Giải phóng phòng)</span>
                                                     </button>
                                                 ) : (
                                                     <button 
                                                         onClick={() => handleConfirmCancel(order)}
-                                                        className="w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
+                                                        className="w-full bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
                                                     >
                                                         <Trash2 size={14}/> Xác nhận Hủy
                                                     </button>
                                                 )
-                                            ) : order.status === 'Pending' ? (
+                                            ) : isConfirmed ? (
+                                                /* CONFIRMED (HISTORY) STATE */
+                                                <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full bg-slate-100 text-slate-500 border-slate-200">
+                                                    Đã lưu
+                                                </span>
+                                            ) : order.status === 'Assigned' ? (
+                                                /* ASSIGNED STATE */
+                                                <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full truncate max-w-[100px] bg-green-50 text-green-700 border-green-200" title={order.assignedRoom}>
+                                                    {order.assignedRoom || 'Đã xếp'}
+                                                </span>
+                                            ) : (
+                                                /* PENDING STATE ACTION */
                                                 <button 
                                                     onClick={() => handleAssignRoom(order)}
                                                     className="w-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95"
                                                 >
                                                     Xếp phòng
                                                 </button>
-                                            ) : (
-                                                <span className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full truncate max-w-[100px] ${order.status === 'Assigned' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`} title={order.assignedRoom}>
-                                                    {order.status === 'Assigned' ? (order.assignedRoom || 'Đã xếp') : 'Unknown'}
-                                                </span>
                                             )}
                                         </td>
                                     </tr>
@@ -460,7 +482,7 @@ export const OtaOrders: React.FC = () => {
             {listData.length === 0 && !isFetching ? (
                 <div className="text-center py-10 text-slate-400">
                     <CloudLightning size={40} className="mx-auto mb-2 opacity-50"/>
-                    <p className="text-sm font-medium">Không có đơn hàng nào phù hợp.</p>
+                    <p className="text-sm font-medium">Không có đơn hàng nào.</p>
                 </div>
             ) : (
                 listData.map(order => {
@@ -470,14 +492,15 @@ export const OtaOrders: React.FC = () => {
                     const isToday = isValidDates && isSameDay(checkin, new Date());
                     const styles = getPlatformConfig(order.platform);
                     const isCancelled = order.status === 'Cancelled';
+                    const isConfirmed = order.status === 'Confirmed';
                     const isBreakfastIncluded = hasBreakfast(order);
                     
                     const orderEmailDate = parseISO(order.emailDate || '');
                     const isNewToday = isValid(orderEmailDate) && format(orderEmailDate, 'yyyy-MM-dd') === todayDateStr;
 
                     return (
-                    <div key={order.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col relative ${isCancelled ? 'border-red-200 ring-2 ring-red-50' : 'border-slate-200'}`}>
-                        <div className={`h-1.5 w-full ${isCancelled ? 'bg-red-500' : order.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
+                    <div key={order.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col relative ${isCancelled ? 'border-red-300 ring-2 ring-red-100' : 'border-slate-200'}`}>
+                        <div className={`h-1.5 w-full ${isCancelled ? 'bg-red-500' : isConfirmed ? 'bg-slate-400' : order.status === 'Pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                         
                         {isToday && order.status === 'Pending' && !isCancelled && (
                             <div className="bg-red-600 text-white text-[10px] font-black uppercase tracking-widest py-1 px-4 text-center animate-pulse flex items-center justify-center gap-2">
@@ -491,14 +514,14 @@ export const OtaOrders: React.FC = () => {
                                     <div className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${styles.bg} ${styles.color} ${styles.border}`}>
                                         {order.platform}
                                     </div>
-                                    {isNewToday && !isCancelled && (
+                                    {isNewToday && !isCancelled && !isConfirmed && (
                                         <span className="flex items-center gap-1 bg-rose-100 text-rose-600 border border-rose-200 text-[9px] font-black px-1.5 py-0.5 rounded animate-pulse">
                                             <Bell size={10}/> MỚI
                                         </span>
                                     )}
                                     {isCancelled && (
-                                        <span className="flex items-center gap-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase">
-                                            ĐÃ HỦY
+                                        <span className="flex items-center gap-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase animate-pulse shadow-sm">
+                                            CẢNH BÁO HỦY
                                         </span>
                                     )}
                                 </div>
@@ -510,7 +533,7 @@ export const OtaOrders: React.FC = () => {
 
                             <div className="space-y-3">
                                 <div>
-                                    <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
+                                    <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-red-700' : isConfirmed ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
                                         <span className="flex items-center gap-1 truncate max-w-[200px]" title={order.guestDetails || `${order.guestCount} Khách`}>
                                             <Users size={12}/> {order.guestDetails || order.guestCount}
@@ -549,24 +572,21 @@ export const OtaOrders: React.FC = () => {
 
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
                                 <div>
-                                    <div className={`text-lg font-black ${isCancelled ? 'text-slate-400' : 'text-brand-700'}`}>{order.totalAmount.toLocaleString()}</div>
+                                    <div className={`text-lg font-black ${isCancelled ? 'text-slate-400 line-through' : 'text-brand-700'}`}>{order.totalAmount.toLocaleString()}</div>
                                     <div className={`text-[9px] font-bold uppercase flex items-center gap-1 ${order.paymentStatus === 'Prepaid' ? 'text-green-600' : 'text-orange-600'}`}>
                                         {order.paymentStatus === 'Prepaid' ? <CheckCircle size={10}/> : <CreditCard size={10}/>}
                                         {order.paymentStatus === 'Prepaid' ? 'Prepaid' : 'Tại KS'}
                                     </div>
                                 </div>
 
+                                {/* ACTION BUTTONS MOBILE */}
                                 {isCancelled ? (
-                                    activeTab === 'Cancelled' ? (
-                                        <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-slate-100 text-slate-500 border-slate-200">
-                                            Đã lưu
-                                        </span>
-                                    ) : order.assignedRoom ? (
+                                    order.assignedRoom ? (
                                         <button 
                                             onClick={() => handleResolveConflict(order)}
-                                            className="bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-700 transition-colors"
+                                            className="bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-700 transition-colors animate-pulse"
                                         >
-                                            Hủy P & Xóa
+                                            XÁC NHẬN HỦY
                                         </button>
                                     ) : (
                                         <button 
@@ -576,17 +596,21 @@ export const OtaOrders: React.FC = () => {
                                             Xác nhận Hủy
                                         </button>
                                     )
-                                ) : order.status === 'Pending' ? (
+                                ) : isConfirmed ? (
+                                    <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-slate-100 text-slate-500 border-slate-200">
+                                        Đã lưu
+                                    </span>
+                                ) : order.status === 'Assigned' ? (
+                                    <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-green-50 text-green-700 border-green-200">
+                                        Đã xếp
+                                    </span>
+                                ) : (
                                     <button 
                                         onClick={() => handleAssignRoom(order)}
                                         className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-brand-600 transition-colors"
                                     >
                                         Xếp phòng
                                     </button>
-                                ) : (
-                                    <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-green-50 text-green-700 border-green-200">
-                                        Đã xếp
-                                    </span>
                                 )}
                             </div>
                         </div>

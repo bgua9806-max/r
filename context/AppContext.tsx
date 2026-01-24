@@ -142,7 +142,6 @@ const mapOtaData = (data: any[]): OtaOrder[] => {
     status: d.status,
     assignedRoom: d.assigned_room,
     cancellationDate: d.cancellation_date,
-    appConfirmStatus: d.app_confirm_status,
     notes: d.notes,
     rawJson: d.raw_json
   }));
@@ -396,16 +395,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBankAccount = async (b: BankAccount) => { await storageService.updateBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
   const deleteBankAccount = async (id: string) => { await storageService.deleteBankAccount(id); setBankAccounts(await storageService.getBankAccounts()); };
 
-  // --- OTA LOGIC ---
+  // --- OTA LOGIC (UPDATED) ---
   const syncOtaOrders = async (orders?: OtaOrder[], silent = false) => {
       if (storageService.isUsingMock()) return;
       if (!silent) setIsLoading(true);
       try {
-          // Fetch pending/cancelled-but-not-confirmed
+          // Fetch Pending or Cancelled (Active Attention Needed)
           const { data, error } = await supabase
               .from('ota_orders')
               .select('*')
-              .or('status.eq.Pending,and(status.eq.Cancelled,app_confirm_status.is.null)')
+              .in('status', ['Pending', 'Cancelled'])
               .order('email_date', { ascending: false });
 
           if (error) throw error;
@@ -428,10 +427,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       let query = supabase.from('ota_orders').select('*').order('email_date', { ascending: false });
 
-      // Filters
-      if (params.tab === 'Pending') query = query.eq('status', 'Pending');
+      // Filters based on new logic
+      if (params.tab === 'Pending') query = query.in('status', ['Pending', 'Cancelled']);
       else if (params.tab === 'Processed') query = query.eq('status', 'Assigned');
-      else if (params.tab === 'Cancelled') query = query.eq('status', 'Cancelled');
+      else if (params.tab === 'Cancelled') query = query.eq('status', 'Confirmed'); // History tab shows confirmed cancellations
       else if (params.tab === 'Today') {
           const today = new Date().toISOString().substring(0, 10);
           query = query.gte('check_in', `${today}T00:00:00`).lte('check_in', `${today}T23:59:59`);
@@ -467,7 +466,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateOtaOrder = async (id: string, updates: Partial<OtaOrder>) => {
       // Optimistic update
       setOtaOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
-      // In background, supabase update is handled by the caller or specialized method usually
   };
 
   const deleteOtaOrder = async (id: string) => {
@@ -477,13 +475,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const confirmOtaCancellation = async (order: OtaOrder) => {
+      // Update status to 'Confirmed'
       await supabase.from('ota_orders').update({
-          app_confirm_status: 'CONFIRMED',
-          status: 'Cancelled'
+          status: 'Confirmed'
       }).eq('id', order.id);
       
       // Update local state
-      setOtaOrders(prev => prev.map(o => o.id === order.id ? { ...o, appConfirmStatus: 'CONFIRMED', status: 'Cancelled' } : o));
+      setOtaOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'Confirmed' } : o));
       
       // Trigger Webhook to update Sheet
       triggerWebhook('ota_import', {
