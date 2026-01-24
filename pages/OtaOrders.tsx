@@ -342,8 +342,8 @@ export const OtaOrders: React.FC = () => {
 
                                         {/* COL 2: CUSTOMER */}
                                         <td className="p-4 align-top">
-                                            <div>
-                                                <div className={`font-bold text-sm line-clamp-2 ${isCancelled ? 'text-red-700' : 'text-slate-800'}`} title={order.guestName}>
+                                            <div className="max-w-[200px]">
+                                                <div className={`font-bold text-sm break-words whitespace-normal line-clamp-3 ${isCancelled ? 'text-red-700' : 'text-slate-800'}`} title={order.guestName}>
                                                     {order.guestName}
                                                 </div>
                                                 <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 font-medium group/guest">
@@ -533,7 +533,7 @@ export const OtaOrders: React.FC = () => {
 
                             <div className="space-y-3">
                                 <div>
-                                    <h3 className={`font-black text-base leading-tight line-clamp-2 ${isCancelled ? 'text-red-700' : isConfirmed ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
+                                    <h3 className={`font-black text-base leading-tight break-words line-clamp-3 ${isCancelled ? 'text-red-700' : isConfirmed ? 'text-slate-500 line-through' : 'text-slate-800'}`} title={order.guestName}>{order.guestName}</h3>
                                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 font-medium">
                                         <span className="flex items-center gap-1 truncate max-w-[200px]" title={order.guestDetails || `${order.guestCount} Khách`}>
                                             <Users size={12}/> {order.guestDetails || order.guestCount}
