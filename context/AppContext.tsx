@@ -1,230 +1,204 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
-  Booking, Room, Facility, Collaborator, ServiceItem, Expense, Settings, 
-  InventoryTransaction, TimeLog, ShiftSchedule, AttendanceAdjustment, 
-  LeaveRequest, OtaOrder, HousekeepingTask, GuestProfile, Shift, RoomRecipe, 
-  BankAccount, ToastMessage, WebhookConfig, AppConfig, Role 
+  Collaborator, Facility, Room, Booking, ServiceItem, Expense, 
+  Shift, ShiftSchedule, AttendanceAdjustment, LeaveRequest, 
+  HousekeepingTask, WebhookConfig, InventoryTransaction, 
+  Settings, RoomRecipe, BankAccount, TimeLog, OtaOrder, 
+  ToastMessage, GuestProfile, LendingItem
 } from '../types';
-import { storageService, IS_USING_MOCK } from '../services/storage';
-import { DEFAULT_SETTINGS, ROLE_PERMISSIONS, ROOM_RECIPES } from '../constants';
-import { parseISO, isValid } from 'date-fns';
+import { ROLE_PERMISSIONS, DEFAULT_SETTINGS } from '../constants';
+import { storageService } from '../services/storage';
+import { supabase } from '../services/supabaseClient';
 
 interface AppContextType {
-  // Data
-  bookings: Booking[];
-  rooms: Room[];
+  currentUser: Collaborator | null;
+  setCurrentUser: (user: Collaborator | null) => void;
+  isLoading: boolean;
+  isInitialized: boolean;
+  
   facilities: Facility[];
-  collaborators: Collaborator[];
+  rooms: Room[];
+  bookings: Booking[];
   services: ServiceItem[];
   expenses: Expense[];
-  settings: Settings;
+  collaborators: Collaborator[];
+  housekeepingTasks: HousekeepingTask[];
   inventoryTransactions: InventoryTransaction[];
-  timeLogs: TimeLog[];
+  shifts: Shift[];
   schedules: ShiftSchedule[];
   adjustments: AttendanceAdjustment[];
   leaveRequests: LeaveRequest[];
   otaOrders: OtaOrder[];
-  housekeepingTasks: HousekeepingTask[];
-  shifts: Shift[];
-  roomRecipes: Record<string, RoomRecipe>;
+  timeLogs: TimeLog[];
   bankAccounts: BankAccount[];
+  
+  settings: Settings;
+  roomRecipes: Record<string, RoomRecipe>;
   webhooks: WebhookConfig[];
-  
-  // User & Auth
-  currentUser: Collaborator | null;
-  setCurrentUser: (user: Collaborator | null) => void;
-  canAccess: (path: string) => boolean;
-  
-  // State
-  isLoading: boolean;
-  isInitialized: boolean;
-  toasts: ToastMessage[];
   currentShift: Shift | null;
+  toasts: ToastMessage[];
 
-  // Actions - Core
-  refreshData: (force?: boolean) => Promise<void>;
+  // Methods
+  refreshData: (full?: boolean) => Promise<void>;
+  canAccess: (path: string) => boolean;
   notify: (type: 'success' | 'error' | 'info', message: string) => void;
   removeToast: (id: number) => void;
-
-  // Actions - Booking
-  addBooking: (booking: Booking) => Promise<boolean>;
-  updateBooking: (booking: Booking) => Promise<boolean>;
-  deleteBooking: (id: string) => Promise<boolean>;
-  checkAvailability: (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => boolean;
-
-  // Actions - Room & Facility
-  addFacility: (facility: Facility) => Promise<void>;
-  updateFacility: (facility: Facility) => Promise<void>;
+  
+  // CRUD
+  addFacility: (item: Facility) => Promise<void>;
+  updateFacility: (item: Facility) => Promise<void>;
   deleteFacility: (id: string) => Promise<void>;
-  upsertRoom: (room: Room) => Promise<void>;
+  
+  upsertRoom: (item: Room) => Promise<void>;
   deleteRoom: (id: string) => Promise<void>;
-
-  // Actions - Collaborator
-  addCollaborator: (collaborator: Collaborator) => Promise<void>;
-  updateCollaborator: (collaborator: Collaborator) => Promise<void>;
-  deleteCollaborator: (id: string) => Promise<void>;
-
-  // Actions - Service & Inventory
-  addService: (service: ServiceItem) => Promise<void>;
-  updateService: (service: ServiceItem) => Promise<void>;
+  
+  addBooking: (item: Booking) => Promise<boolean>;
+  updateBooking: (item: Booking) => Promise<boolean>;
+  checkAvailability: (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => boolean;
+  
+  addService: (item: ServiceItem) => Promise<void>;
+  updateService: (item: ServiceItem) => Promise<void>;
   deleteService: (id: string) => Promise<void>;
-  addInventoryTransaction: (transaction: InventoryTransaction) => Promise<void>;
   
-  // Actions - Expenses
-  addExpense: (expense: Expense) => Promise<void>;
-  updateExpense: (expense: Expense) => Promise<void>;
+  addExpense: (item: Expense) => Promise<void>;
+  updateExpense: (item: Expense) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
-
-  // Actions - Settings & Config
-  updateSettings: (settings: Settings) => Promise<void>;
-  getGeminiApiKey: () => Promise<string | null>;
-  setAppConfig: (config: AppConfig) => Promise<void>;
-  updateRoomRecipe: (key: string, recipe: RoomRecipe) => Promise<void>;
-  deleteRoomRecipe: (key: string) => Promise<void>;
   
-  // Actions - Bank Accounts
-  addBankAccount: (account: BankAccount) => Promise<void>;
-  updateBankAccount: (account: BankAccount) => Promise<void>;
-  deleteBankAccount: (id: string) => Promise<void>;
-
-  // Actions - Webhooks
-  addWebhook: (webhook: WebhookConfig) => Promise<void>;
-  updateWebhook: (webhook: WebhookConfig) => Promise<void>;
-  deleteWebhook: (id: string) => Promise<void>;
-  triggerWebhook: (eventType: string, payload: any) => Promise<void>;
-
-  // Actions - Timekeeping & Shifts
+  addCollaborator: (item: Collaborator) => Promise<void>;
+  updateCollaborator: (item: Collaborator) => Promise<void>;
+  deleteCollaborator: (id: string) => Promise<void>;
+  
+  syncHousekeepingTasks: (tasks: HousekeepingTask[]) => Promise<void>;
+  addInventoryTransaction: (item: InventoryTransaction) => Promise<void>;
+  
+  openShift: (startCash: number) => Promise<void>;
+  closeShift: (endCash: number, note: string) => Promise<void>;
+  
   clockIn: (facilityId: string, lat: number, lng: number) => Promise<{success: boolean, message: string}>;
   clockOut: () => Promise<{success: boolean, message: string}>;
-  upsertSchedule: (schedule: ShiftSchedule) => Promise<void>;
-  deleteSchedule: (id: string) => Promise<void>;
-  upsertAdjustment: (adjustment: AttendanceAdjustment) => Promise<void>;
-  addLeaveRequest: (request: LeaveRequest) => Promise<void>;
-  updateLeaveRequest: (request: LeaveRequest) => Promise<void>;
-  openShift: (startCash: number) => Promise<void>;
-  closeShift: (endCashActual: number, note: string) => Promise<void>;
-  getShifts: () => Promise<Shift[]>;
-
-  // Actions - Housekeeping & Guests
-  syncHousekeepingTasks: (tasks: HousekeepingTask[]) => Promise<void>;
-  addGuestProfile: (profile: GuestProfile) => Promise<void>;
   
-  // Actions - OTA
+  addLeaveRequest: (item: LeaveRequest) => Promise<void>;
+  updateLeaveRequest: (item: LeaveRequest) => Promise<void>;
+  
+  upsertSchedule: (item: ShiftSchedule) => Promise<void>;
+  deleteSchedule: (id: string) => Promise<void>;
+  upsertAdjustment: (item: AttendanceAdjustment) => Promise<void>;
+  
+  // Settings & Config
+  updateSettings: (s: Settings) => Promise<void>;
+  updateRoomRecipe: (id: string, recipe: RoomRecipe) => Promise<void>;
+  deleteRoomRecipe: (id: string) => Promise<void>;
+  addWebhook: (w: WebhookConfig) => Promise<void>;
+  updateWebhook: (w: WebhookConfig) => Promise<void>;
+  deleteWebhook: (id: string) => Promise<void>;
+  triggerWebhook: (eventType: string, payload: any) => Promise<void>;
+  
+  getGeminiApiKey: () => Promise<string | null>;
+  setAppConfig: (config: {key: string, value: string, description?: string}) => Promise<void>;
+  
+  addGuestProfile: (p: GuestProfile) => Promise<void>;
+  
+  // OTA
   syncOtaOrders: (orders?: OtaOrder[], silent?: boolean) => Promise<void>;
-  queryOtaOrders: (params: any) => Promise<{data: OtaOrder[], hasMore: boolean}>;
+  queryOtaOrders: (params: { page: number, pageSize: number, tab: string, search: string, dateFilter?: any }) => Promise<{ data: OtaOrder[], hasMore: boolean }>;
   updateOtaOrder: (id: string, updates: Partial<OtaOrder>) => Promise<void>;
-  confirmOtaCancellation: (order: OtaOrder) => Promise<void>;
   deleteOtaOrder: (id: string) => Promise<void>;
+  confirmOtaCancellation: (order: OtaOrder) => Promise<void>;
+  
+  // Bank Accounts
+  addBankAccount: (b: BankAccount) => Promise<void>;
+  updateBankAccount: (b: BankAccount) => Promise<void>;
+  deleteBankAccount: (id: string) => Promise<void>;
 
-  // Specialized Processes
-  processLendingUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
+  // Processors
   processMinibarUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
-  processCheckoutLinenReturn: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
+  processLendingUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
   processRoomRestock: (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => Promise<void>;
-  handleLinenExchange: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
+  processCheckoutLinenReturn: (facilityName: string, roomCode: string) => Promise<void>; // Legacy placeholder
+  handleLinenExchange: (facilityName: string, roomCode: string, items: any[]) => Promise<void>; // Legacy placeholder
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Core Data
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
-  const [services, setServices] = useState<ServiceItem[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>([]);
-  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
-  const [schedules, setSchedules] = useState<ShiftSchedule[]>([]);
-  const [adjustments, setAdjustments] = useState<AttendanceAdjustment[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [otaOrders, setOtaOrders] = useState<OtaOrder[]>([]);
-  const [housekeepingTasks, setHousekeepingTasks] = useState<HousekeepingTask[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>(ROOM_RECIPES);
-  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
-  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
+const mapOtaData = (data: any[]): OtaOrder[] => {
+  return data.map(d => ({
+    id: d.id,
+    platform: d.platform,
+    bookingCode: d.booking_code,
+    guestName: d.guest_name,
+    guestPhone: d.guest_phone,
+    emailDate: d.email_date,
+    checkIn: d.check_in,
+    checkOut: d.check_out,
+    roomType: d.room_type,
+    roomQuantity: d.room_quantity,
+    guestCount: d.guest_count,
+    guestDetails: d.guest_details,
+    breakfastStatus: d.breakfast_status,
+    totalAmount: d.total_amount,
+    netAmount: d.net_amount,
+    paymentStatus: d.payment_status,
+    status: d.status,
+    assignedRoom: d.assigned_room,
+    cancellationDate: d.cancellation_date,
+    notes: d.notes,
+    rawJson: d.raw_json
+  }));
+};
 
-  // Auth & State
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<Collaborator | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Initial Load
+  // Data States
+  const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [services, setServices] = useState<ServiceItem[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [housekeepingTasks, setHousekeepingTasks] = useState<HousekeepingTask[]>([]);
+  const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [schedules, setSchedules] = useState<ShiftSchedule[]>([]);
+  const [adjustments, setAdjustments] = useState<AttendanceAdjustment[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [otaOrders, setOtaOrders] = useState<OtaOrder[]>([]);
+  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>({});
+  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
+
+  // Auth & Init
   useEffect(() => {
     const init = async () => {
-      // 1. Check Connection
-      await storageService.checkConnection();
-      
-      // 2. Load User from LocalStorage
-      const savedUser = storageService.getUser();
-      if (savedUser) setCurrentUser(savedUser);
-
-      // 3. Load Data
-      await refreshData();
-      setIsInitialized(true);
+        const user = storageService.getUser();
+        if (user) setCurrentUser(user);
+        
+        await storageService.checkConnection();
+        // Load settings first as they are critical
+        const [sets, recipes, banks] = await Promise.all([
+            storageService.getSettings(),
+            storageService.getRoomRecipes(),
+            storageService.getBankAccounts()
+        ]);
+        setSettings(sets);
+        setRoomRecipes(recipes);
+        setBankAccounts(banks);
+        
+        // Load data if user is logged in
+        if (user) {
+            await refreshData(true);
+        }
+        setIsInitialized(true);
     };
     init();
   }, []);
-
-  const refreshData = async (force = false) => {
-    if (isLoading && !force) return;
-    setIsLoading(true);
-    try {
-        const [
-            bs, rs, fs, cs, ss, es, sett, inv, tls, sch, adj, lrs, hks, sh, rr, ba, wh
-        ] = await Promise.all([
-            storageService.getBookings(),
-            storageService.getRooms(),
-            storageService.getFacilities(),
-            storageService.getCollaborators(),
-            storageService.getServices(),
-            storageService.getExpenses(),
-            storageService.getSettings(),
-            storageService.getInventoryTransactions(),
-            storageService.getTimeLogs(),
-            storageService.getSchedules(),
-            storageService.getAdjustments(),
-            storageService.getLeaveRequests(),
-            storageService.getHousekeepingTasks(),
-            storageService.getShifts(),
-            storageService.getRoomRecipes(),
-            storageService.getBankAccounts(),
-            storageService.getWebhooks()
-        ]);
-
-        setBookings(bs);
-        setRooms(rs);
-        setFacilities(fs);
-        setCollaborators(cs);
-        setServices(ss);
-        setExpenses(es);
-        setSettings(sett);
-        setInventoryTransactions(inv);
-        setTimeLogs(tls);
-        setSchedules(sch);
-        setAdjustments(adj);
-        setLeaveRequests(lrs);
-        setHousekeepingTasks(hks);
-        setShifts(sh);
-        setRoomRecipes(rr);
-        setBankAccounts(ba);
-        setWebhooks(wh);
-    } catch (e) {
-        console.error("Failed to refresh data", e);
-        notify('error', 'Lỗi đồng bộ dữ liệu. Đang dùng chế độ offline.');
-    } finally {
-        setIsLoading(false);
-    }
-  };
-
-  const currentShift = useMemo(() => {
-      if (!currentUser) return null;
-      return shifts.find(s => s.staff_id === currentUser.id && s.status === 'Open') || null;
-  }, [shifts, currentUser]);
 
   const notify = (type: 'success' | 'error' | 'info', message: string) => {
     const id = Date.now();
@@ -236,284 +210,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const canAccess = (path: string): boolean => {
-    if (!currentUser) return false;
-    const allowed = ROLE_PERMISSIONS[currentUser.role];
-    if (!allowed) return false;
-    return allowed.some(p => path.startsWith(p) || p === path);
-  };
+  const refreshData = async (full = false) => {
+      setIsLoading(true);
+      try {
+          const [
+              facs, rms, bks, svcs, exps, collabs, tasks, trans, shfts, schs, adjs, leaves, logs, whs
+          ] = await Promise.all([
+              storageService.getFacilities(),
+              storageService.getRooms(),
+              storageService.getBookings(),
+              storageService.getServices(),
+              storageService.getExpenses(),
+              storageService.getCollaborators(),
+              storageService.getHousekeepingTasks(),
+              storageService.getInventoryTransactions(),
+              storageService.getShifts(),
+              storageService.getSchedules(),
+              storageService.getAdjustments(),
+              storageService.getLeaveRequests(),
+              storageService.getTimeLogs(),
+              storageService.getWebhooks()
+          ]);
 
-  // --- CRUD ACTIONS ---
-
-  const checkAvailability = (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => {
-      if (!checkIn || !checkOut) return true;
-      const start = parseISO(checkIn);
-      const end = parseISO(checkOut);
-      
-      if (!isValid(start) || !isValid(end)) return true;
-
-      // Check overlaps
-      const hasConflict = bookings.some(b => {
-          if (b.id === excludeId) return false;
-          if (b.facilityName !== facilityName || b.roomCode !== roomCode) return false;
-          if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false;
-
-          const bStart = parseISO(b.checkinDate);
-          const bEnd = parseISO(b.checkoutDate);
-          if (!isValid(bStart) || !isValid(bEnd)) return false;
-
-          // Logic trùng: (StartA < EndB) and (EndA > StartB)
-          // Standard hotel logic usually: CheckIn time 14:00, CheckOut 12:00.
-          // Simple overlap logic:
-          return (start < bEnd && end > bStart);
-      });
-
-      return !hasConflict;
-  };
-
-  const addBooking = async (booking: Booking) => {
-      await storageService.addBooking(booking);
-      setBookings(prev => [...prev, booking]);
-      return true;
-  };
-
-  const updateBooking = async (booking: Booking) => {
-      await storageService.updateBooking(booking);
-      setBookings(prev => prev.map(b => b.id === booking.id ? booking : b));
-      return true;
-  };
-
-  const deleteBooking = async (id: string) => {
-      // In this system we usually cancel instead of delete, but this might be used for cleanup
-      // storageService doesn't have deleteBooking, assuming we update status to Cancelled usually
-      // If we need hard delete, implement in storage service.
-      return false; 
-  };
-
-  const addFacility = async (item: Facility) => {
-      await storageService.addFacility(item);
-      setFacilities(prev => [...prev, item]);
-  };
-
-  const updateFacility = async (item: Facility) => {
-      await storageService.updateFacility(item);
-      setFacilities(prev => prev.map(f => f.id === item.id ? item : f));
-  };
-
-  const deleteFacility = async (id: string) => {
-      await storageService.deleteFacility(id);
-      setFacilities(prev => prev.filter(f => f.id !== id));
-      setRooms(prev => prev.filter(r => r.facility_id !== id)); // Cascade
-  };
-
-  const upsertRoom = async (item: Room) => {
-      await storageService.upsertRoom(item);
-      setRooms(prev => {
-          const idx = prev.findIndex(r => r.id === item.id);
-          if (idx >= 0) {
-              const copy = [...prev];
-              copy[idx] = item;
-              return copy;
+          setFacilities(facs);
+          setRooms(rms);
+          setBookings(bks);
+          setServices(svcs);
+          setExpenses(exps);
+          setCollaborators(collabs);
+          setHousekeepingTasks(tasks);
+          setInventoryTransactions(trans);
+          setShifts(shfts);
+          setSchedules(schs);
+          setAdjustments(adjs);
+          setLeaveRequests(leaves);
+          setTimeLogs(logs);
+          setWebhooks(whs);
+          
+          if (full) {
+              await syncOtaOrders(undefined, true);
           }
-          return [...prev, item];
-      });
-  };
-
-  const deleteRoom = async (id: string) => {
-      await storageService.deleteRoom(id);
-      setRooms(prev => prev.filter(r => r.id !== id));
-  };
-
-  const addCollaborator = async (item: Collaborator) => {
-      await storageService.addCollaborator(item);
-      setCollaborators(prev => [...prev, item]);
-  };
-
-  const updateCollaborator = async (item: Collaborator) => {
-      await storageService.updateCollaborator(item);
-      setCollaborators(prev => prev.map(c => c.id === item.id ? item : c));
-  };
-
-  const deleteCollaborator = async (id: string) => {
-      await storageService.deleteCollaborator(id);
-      setCollaborators(prev => prev.filter(c => c.id !== id));
-  };
-
-  const addService = async (item: ServiceItem) => {
-      await storageService.addService(item);
-      setServices(prev => [...prev, item]);
-  };
-
-  const updateService = async (item: ServiceItem) => {
-      await storageService.updateService(item);
-      setServices(prev => prev.map(s => s.id === item.id ? item : s));
-  };
-
-  const deleteService = async (id: string) => {
-      await storageService.deleteService(id);
-      setServices(prev => prev.filter(s => s.id !== id));
-  };
-
-  const addInventoryTransaction = async (item: InventoryTransaction) => {
-      await storageService.addInventoryTransaction(item);
-      setInventoryTransactions(prev => [item, ...prev]);
-  };
-
-  const addExpense = async (item: Expense) => {
-      await storageService.addExpense(item);
-      setExpenses(prev => [item, ...prev]);
-  };
-
-  const updateExpense = async (item: Expense) => {
-      await storageService.updateExpense(item);
-      setExpenses(prev => prev.map(e => e.id === item.id ? item : e));
-  };
-
-  const deleteExpense = async (id: string) => {
-      await storageService.deleteExpense(id);
-      setExpenses(prev => prev.filter(e => e.id !== id));
-  };
-
-  const updateSettings = async (newSettings: Settings) => {
-      await storageService.saveSettings(newSettings);
-      setSettings(newSettings);
-  };
-
-  const getGeminiApiKey = async () => {
-      return await storageService.getAppConfig('GEMINI_API_KEY');
-  };
-
-  const setAppConfig = async (config: AppConfig) => {
-      await storageService.setAppConfig(config);
-  };
-
-  const updateRoomRecipe = async (key: string, recipe: RoomRecipe) => {
-      await storageService.upsertRoomRecipe(recipe);
-      setRoomRecipes(prev => ({ ...prev, [key]: recipe }));
-  };
-
-  const deleteRoomRecipe = async (key: string) => {
-      await storageService.deleteRoomRecipe(key);
-      setRoomRecipes(prev => {
-          const copy = { ...prev };
-          delete copy[key];
-          return copy;
-      });
-  };
-
-  const addBankAccount = async (item: BankAccount) => {
-      await storageService.addBankAccount(item);
-      await refreshData(); // Refresh to handle is_default logic from server
-  };
-
-  const updateBankAccount = async (item: BankAccount) => {
-      await storageService.updateBankAccount(item);
-      await refreshData();
-  };
-
-  const deleteBankAccount = async (id: string) => {
-      await storageService.deleteBankAccount(id);
-      setBankAccounts(prev => prev.filter(b => b.id !== id));
-  };
-
-  const addWebhook = async (item: WebhookConfig) => {
-      await storageService.addWebhook(item);
-      setWebhooks(prev => [...prev, item]);
-  };
-
-  const updateWebhook = async (item: WebhookConfig) => {
-      await storageService.updateWebhook(item);
-      setWebhooks(prev => prev.map(w => w.id === item.id ? item : w));
-  };
-
-  const deleteWebhook = async (id: string) => {
-      await storageService.deleteWebhook(id);
-      setWebhooks(prev => prev.filter(w => w.id !== id));
-  };
-
-  const triggerWebhook = async (eventType: string, payload: any) => {
-      const hooks = webhooks.filter(w => w.is_active && w.event_type === eventType);
-      for (const hook of hooks) {
-          try {
-              fetch(hook.url, {
-                  method: 'POST',
-                  mode: 'no-cors', // Often needed for Google Apps Script
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(payload)
-              });
-          } catch(e) { console.error(e); }
+      } catch (e) {
+          console.error("Refresh Error", e);
+          if(!storageService.isUsingMock()) notify('error', 'Lỗi tải dữ liệu');
+      } finally {
+          setIsLoading(false);
       }
   };
 
-  // --- TIMEKEEPING ---
-  const clockIn = async (facilityId: string, lat: number, lng: number) => {
-      if (!currentUser) return { success: false, message: 'Not logged in' };
-      const res = await storageService.clockIn(currentUser.id, facilityId, lat, lng);
-      if (res.success && res.data) {
-          setTimeLogs(prev => [res.data!, ...prev]);
-          notify('success', res.message);
-      } else {
-          notify('error', res.message);
-      }
-      return res;
+  const canAccess = (path: string) => {
+      if (!currentUser) return false;
+      const allowed = ROLE_PERMISSIONS[currentUser.role] || [];
+      return allowed.some(p => path.startsWith(p));
   };
 
-  const clockOut = async () => {
-      if (!currentUser) return { success: false, message: 'Not logged in' };
-      const res = await storageService.clockOut(currentUser.id);
-      if (res.success) {
-          await refreshData(); // Reload logs to get updated checkout time
-          notify('success', res.message);
-      } else {
-          notify('error', res.message);
-      }
-      return res;
-  };
+  // --- CRUD WRAPPERS ---
+  const addFacility = async (item: Facility) => { await storageService.addFacility(item); refreshData(); };
+  const updateFacility = async (item: Facility) => { await storageService.updateFacility(item); refreshData(); };
+  const deleteFacility = async (id: string) => { await storageService.deleteFacility(id); refreshData(); };
 
-  const upsertSchedule = async (item: ShiftSchedule) => {
-      await storageService.upsertSchedule(item);
-      setSchedules(prev => {
-          const idx = prev.findIndex(s => s.id === item.id);
-          if (idx >= 0) {
-              const copy = [...prev];
-              copy[idx] = item;
-              return copy;
-          }
-          return [...prev, item];
-      });
-  };
+  const upsertRoom = async (item: Room) => { await storageService.upsertRoom(item); refreshData(); };
+  const deleteRoom = async (id: string) => { await storageService.deleteRoom(id); refreshData(); };
 
-  const deleteSchedule = async (id: string) => {
-      await storageService.deleteSchedule(id);
-      setSchedules(prev => prev.filter(s => s.id !== id));
-  };
+  const addBooking = async (item: Booking) => { await storageService.addBooking(item); refreshData(); return true; };
+  const updateBooking = async (item: Booking) => { await storageService.updateBooking(item); refreshData(); return true; };
 
-  const upsertAdjustment = async (item: AttendanceAdjustment) => {
-      await storageService.upsertAdjustment(item);
-      setAdjustments(prev => {
-          const idx = prev.findIndex(a => a.staff_id === item.staff_id && a.month === item.month);
-          if (idx >= 0) {
-              const copy = [...prev];
-              copy[idx] = item;
-              return copy;
-          }
-          return [...prev, item];
-      });
-  };
+  const addService = async (item: ServiceItem) => { await storageService.addService(item); refreshData(); };
+  const updateService = async (item: ServiceItem) => { await storageService.updateService(item); refreshData(); };
+  const deleteService = async (id: string) => { await storageService.deleteService(id); refreshData(); };
 
-  const addLeaveRequest = async (item: LeaveRequest) => {
-      await storageService.addLeaveRequest(item);
-      setLeaveRequests(prev => [item, ...prev]);
-  };
+  const addExpense = async (item: Expense) => { await storageService.addExpense(item); refreshData(); };
+  const updateExpense = async (item: Expense) => { await storageService.updateExpense(item); refreshData(); };
+  const deleteExpense = async (id: string) => { await storageService.deleteExpense(id); refreshData(); };
 
-  const updateLeaveRequest = async (item: LeaveRequest) => {
-      await storageService.updateLeaveRequest(item);
-      setLeaveRequests(prev => prev.map(r => r.id === item.id ? item : r));
-  };
+  const addCollaborator = async (item: Collaborator) => { await storageService.addCollaborator(item); refreshData(); };
+  const updateCollaborator = async (item: Collaborator) => { await storageService.updateCollaborator(item); refreshData(); };
+  const deleteCollaborator = async (id: string) => { await storageService.deleteCollaborator(id); refreshData(); };
 
+  const syncHousekeepingTasks = async (tasks: HousekeepingTask[]) => { await storageService.syncHousekeepingTasks(tasks); refreshData(); };
+  
+  const addInventoryTransaction = async (item: InventoryTransaction) => { await storageService.addInventoryTransaction(item); refreshData(); };
+
+  // --- SHIFTS ---
   const openShift = async (startCash: number) => {
       if (!currentUser) return;
-      const newShift: Shift = {
+      const shift: Shift = {
           id: `SH-${Date.now()}`,
           staff_id: currentUser.id,
           staff_name: currentUser.collaboratorName,
@@ -524,74 +305,271 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           end_cash_expected: startCash,
           status: 'Open'
       };
-      await storageService.addShift(newShift);
-      setShifts(prev => [newShift, ...prev]);
-      notify('success', 'Đã mở ca làm việc mới');
+      await storageService.addShift(shift);
+      refreshData();
   };
 
-  const closeShift = async (endCashActual: number, note: string) => {
-      if (!currentShift) return;
-      const updatedShift: Shift = {
-          ...currentShift,
-          end_time: new Date().toISOString(),
-          end_cash_actual: endCashActual,
-          difference: endCashActual - currentShift.end_cash_expected,
-          note: note,
-          status: 'Closed'
-      };
-      await storageService.updateShift(updatedShift);
-      setShifts(prev => prev.map(s => s.id === updatedShift.id ? updatedShift : s));
-      notify('success', 'Đã chốt ca thành công');
+  const closeShift = async (endCash: number, note: string) => {
+      const active = shifts.find(s => s.staff_id === currentUser?.id && s.status === 'Open');
+      if (active) {
+          await storageService.updateShift({
+              ...active,
+              end_time: new Date().toISOString(),
+              end_cash_actual: endCash,
+              difference: endCash - active.end_cash_expected,
+              note,
+              status: 'Closed'
+          });
+          refreshData();
+      }
   };
 
-  const getShifts = async () => {
-      return await storageService.getShifts();
-  };
+  const currentShift = React.useMemo(() => shifts.find(s => s.staff_id === currentUser?.id && s.status === 'Open') || null, [shifts, currentUser]);
 
-  // --- HOUSEKEEPING ---
-  const syncHousekeepingTasks = async (tasks: HousekeepingTask[]) => {
-      await storageService.syncHousekeepingTasks(tasks);
-      // Merge updates into local state
-      setHousekeepingTasks(prev => {
-          const newMap = new Map(prev.map(t => [t.id, t]));
-          tasks.forEach(t => newMap.set(t.id, t));
-          return Array.from(newMap.values());
+  // --- OTHER FEATURES ---
+  const checkAvailability = (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => {
+      const start = new Date(checkIn).getTime();
+      const end = new Date(checkOut).getTime();
+      
+      return !bookings.some(b => {
+          if (b.id === excludeId) return false;
+          if (b.facilityName !== facilityName || b.roomCode !== roomCode) return false;
+          if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false;
+          
+          const bStart = new Date(b.checkinDate).getTime();
+          const bEnd = new Date(b.checkoutDate).getTime();
+          
+          // Check overlap
+          return (start < bEnd && end > bStart);
       });
   };
 
-  const addGuestProfile = async (profile: GuestProfile) => {
-      await storageService.addGuestProfile(profile);
+  const clockIn = async (facilityId: string, lat: number, lng: number) => {
+      if (!currentUser) return { success: false, message: 'No user' };
+      const res = await storageService.clockIn(currentUser.id, facilityId, lat, lng);
+      refreshData();
+      notify(res.success ? 'success' : 'info', res.message);
+      return res;
   };
 
-  // --- OTA ---
+  const clockOut = async () => {
+      if (!currentUser) return { success: false, message: 'No user' };
+      const res = await storageService.clockOut(currentUser.id);
+      refreshData();
+      notify(res.success ? 'success' : 'info', res.message);
+      return res;
+  };
+
+  const addLeaveRequest = async (item: LeaveRequest) => { await storageService.addLeaveRequest(item); refreshData(); };
+  const updateLeaveRequest = async (item: LeaveRequest) => { await storageService.updateLeaveRequest(item); refreshData(); };
+
+  const upsertSchedule = async (item: ShiftSchedule) => { await storageService.upsertSchedule(item); refreshData(); };
+  const deleteSchedule = async (id: string) => { await storageService.deleteSchedule(id); refreshData(); };
+  const upsertAdjustment = async (item: AttendanceAdjustment) => { await storageService.upsertAdjustment(item); refreshData(); };
+
+  const updateSettings = async (s: Settings) => { await storageService.saveSettings(s); setSettings(s); };
+  const updateRoomRecipe = async (id: string, recipe: RoomRecipe) => { await storageService.upsertRoomRecipe(recipe); setRoomRecipes(await storageService.getRoomRecipes()); };
+  const deleteRoomRecipe = async (id: string) => { await storageService.deleteRoomRecipe(id); setRoomRecipes(await storageService.getRoomRecipes()); };
+
+  const addWebhook = async (w: WebhookConfig) => { await storageService.addWebhook(w); refreshData(); };
+  const updateWebhook = async (w: WebhookConfig) => { await storageService.updateWebhook(w); refreshData(); };
+  const deleteWebhook = async (id: string) => { await storageService.deleteWebhook(id); refreshData(); };
+
+  const triggerWebhook = async (eventType: string, payload: any) => {
+      const targets = webhooks.filter(w => w.is_active && w.event_type === eventType);
+      targets.forEach(w => {
+          fetch(w.url, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          }).catch(e => console.error("Webhook trigger failed", e));
+      });
+  };
+
+  const getGeminiApiKey = async () => await storageService.getAppConfig('GEMINI_API_KEY');
+  const setAppConfig = async (config: {key: string, value: string, description?: string}) => { await storageService.setAppConfig(config); };
+  const addGuestProfile = async (p: GuestProfile) => { await storageService.addGuestProfile(p); };
+
+  const addBankAccount = async (b: BankAccount) => { await storageService.addBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
+  const updateBankAccount = async (b: BankAccount) => { await storageService.updateBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
+  const deleteBankAccount = async (id: string) => { await storageService.deleteBankAccount(id); setBankAccounts(await storageService.getBankAccounts()); };
+
+  // --- OTA LOGIC (UPDATED) ---
   const syncOtaOrders = async (orders?: OtaOrder[], silent = false) => {
-      // Mock sync for now or fetch from API if implemented
-      // storageService doesn't have explicit OTA table yet in types provided initially, 
-      // but let's assume we handle it via webhooks/local state or future implementation.
-      // For now, we rely on `queryOtaOrders` from a hypothetical backend or just mock it.
-      if (!silent) notify('info', 'Đang đồng bộ OTA...');
-      // Logic would go here.
+      if (storageService.isUsingMock()) return;
+      if (!silent) setIsLoading(true);
+      try {
+          // Fetch Pending or Cancelled (Active Attention Needed)
+          const { data, error } = await supabase
+              .from('ota_orders')
+              .select('*')
+              .in('status', ['Pending', 'Cancelled'])
+              .order('email_date', { ascending: false });
+
+          if (error) throw error;
+          
+          if (data) {
+              const mapped = mapOtaData(data);
+              setOtaOrders(mapped);
+              if (!silent) notify('success', 'Đã đồng bộ đơn OTA');
+          }
+      } catch (e) {
+          console.error(e);
+          if (!silent) notify('error', 'Lỗi đồng bộ OTA');
+      } finally {
+          if (!silent) setIsLoading(false);
+      }
   };
 
-  const queryOtaOrders = async (params: any) => {
-      // Mock implementation
-      return { data: otaOrders, hasMore: false };
+  const queryOtaOrders = async (params: { page: number, pageSize: number, tab: string, search: string, dateFilter?: any }) => {
+      if (storageService.isUsingMock()) return { data: [], hasMore: false };
+      
+      let query = supabase.from('ota_orders').select('*').order('email_date', { ascending: false });
+
+      // Filters based on new logic
+      if (params.tab === 'Pending') query = query.in('status', ['Pending', 'Cancelled']);
+      else if (params.tab === 'Processed') query = query.eq('status', 'Assigned');
+      else if (params.tab === 'Cancelled') query = query.eq('status', 'Confirmed'); // History tab shows confirmed cancellations
+      else if (params.tab === 'Today') {
+          const today = new Date().toISOString().substring(0, 10);
+          query = query.gte('check_in', `${today}T00:00:00`).lte('check_in', `${today}T23:59:59`);
+      }
+
+      if (params.search) {
+          query = query.or(`guest_name.ilike.%${params.search}%,booking_code.ilike.%${params.search}%`);
+      }
+
+      if (params.dateFilter) {
+          if (params.dateFilter.mode === 'day') {
+              query = query.gte('check_in', `${params.dateFilter.value}T00:00:00`).lte('check_in', `${params.dateFilter.value}T23:59:59`);
+          } else if (params.dateFilter.mode === 'month') {
+              const [y, m] = params.dateFilter.value.split('-');
+              const start = new Date(Number(y), Number(m) - 1, 1).toISOString();
+              const end = new Date(Number(y), Number(m), 0, 23, 59, 59).toISOString();
+              query = query.gte('check_in', start).lte('check_in', end);
+          }
+      }
+
+      const from = params.page * params.pageSize;
+      const to = from + params.pageSize - 1;
+      
+      const { data, error } = await query.range(from, to);
+      if (error) throw error;
+      
+      return { 
+          data: data ? mapOtaData(data) : [], 
+          hasMore: (data || []).length === params.pageSize 
+      };
   };
 
   const updateOtaOrder = async (id: string, updates: Partial<OtaOrder>) => {
+      // Optimistic update
       setOtaOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
   };
 
-  const confirmOtaCancellation = async (order: OtaOrder) => {
-      await updateOtaOrder(order.id, { status: 'Cancelled' });
-  };
-
   const deleteOtaOrder = async (id: string) => {
+      if (storageService.isUsingMock()) return;
+      await supabase.from('ota_orders').delete().eq('id', id);
       setOtaOrders(prev => prev.filter(o => o.id !== id));
   };
 
-  // --- SPECIALIZED PROCESSES ---
-  
+  const confirmOtaCancellation = async (order: OtaOrder) => {
+      // Update status to 'Confirmed'
+      await supabase.from('ota_orders').update({
+          status: 'Confirmed'
+      }).eq('id', order.id);
+      
+      // Update local state
+      setOtaOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'Confirmed' } : o));
+      
+      // Trigger Webhook to update Sheet
+      triggerWebhook('ota_import', {
+          action: 'confirm_cancel',
+          bookingCode: order.bookingCode,
+          status: 'Đã hủy & Xác nhận'
+      });
+  };
+
+  // --- SPECIAL PROCESSORS ---
+  const processMinibarUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
+      // 1. Deduct Inventory & Create Transaction
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId);
+          if (service) {
+              const newStock = Math.max(0, (service.stock || 0) - item.qty);
+              await updateService({ ...service, stock: newStock });
+              
+              await addInventoryTransaction({
+                  id: `TR-MB-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                  created_at: new Date().toISOString(),
+                  staff_id: currentUser?.id || 'SYS',
+                  staff_name: currentUser?.collaboratorName || 'System',
+                  item_id: service.id,
+                  item_name: service.name,
+                  type: 'MINIBAR_SOLD',
+                  quantity: item.qty,
+                  price: service.costPrice || 0,
+                  total: (service.costPrice || 0) * item.qty,
+                  facility_name: facilityName,
+                  note: `Khách dùng tại phòng ${roomCode}`
+              });
+          }
+      }
+
+      // 2. Add to Booking Services (Bill)
+      const booking = bookings.find(b => b.facilityName === facilityName && b.roomCode === roomCode && (b.status === 'CheckedIn' || b.status === 'Confirmed'));
+      if (booking) {
+          const currentServices = booking.servicesJson ? JSON.parse(booking.servicesJson) : [];
+          for (const item of items) {
+              const service = services.find(s => s.id === item.itemId);
+              if (service && service.price > 0) {
+                  const existing = currentServices.find((s: any) => s.serviceId === item.itemId);
+                  if (existing) {
+                      existing.quantity += item.qty;
+                      existing.total = existing.quantity * existing.price;
+                  } else {
+                      currentServices.push({
+                          serviceId: service.id,
+                          name: service.name,
+                          price: service.price,
+                          quantity: item.qty,
+                          total: service.price * item.qty,
+                          time: new Date().toISOString()
+                      });
+                  }
+              }
+          }
+          await updateBooking({ ...booking, servicesJson: JSON.stringify(currentServices) });
+      }
+  };
+
+  const processRoomRestock = async (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => {
+      // 1. Return Dirty: In Room -> Laundry (Dirty)
+      // 2. Restock Clean: Stock (Clean) -> In Room
+      
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId);
+          if (service) {
+              let updatedService = { ...service };
+              
+              // Return Dirty Logic
+              if (item.dirtyReturnQty > 0) {
+                  updatedService.in_circulation = Math.max(0, (updatedService.in_circulation || 0) - item.dirtyReturnQty);
+                  updatedService.laundryStock = (updatedService.laundryStock || 0) + item.dirtyReturnQty;
+              }
+
+              // Restock Clean Logic
+              if (item.cleanRestockQty > 0) {
+                  updatedService.stock = Math.max(0, (updatedService.stock || 0) - item.cleanRestockQty);
+                  updatedService.in_circulation = (updatedService.in_circulation || 0) + item.cleanRestockQty;
+              }
+
+              await updateService(updatedService);
+          }
+      }
+  };
+
   const processLendingUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
       // Stock -> In Circulation
       for (const item of items) {
@@ -602,6 +580,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               updatedService.in_circulation = (updatedService.in_circulation || 0) + item.qty;
               await updateService(updatedService);
 
+              // LOG TRANSACTION
               const trans: InventoryTransaction = {
                   id: `TR-LEND-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                   created_at: new Date().toISOString(),
@@ -609,7 +588,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   staff_name: currentUser?.collaboratorName || 'System',
                   item_id: service.id,
                   item_name: service.name,
-                  type: 'OUT', 
+                  type: 'OUT',
                   quantity: item.qty,
                   price: service.costPrice || 0,
                   total: (service.costPrice || 0) * item.qty,
@@ -621,152 +600,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
   };
 
-  const processMinibarUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
-      // Consumed -> Reduce Stock or In Circulation depending on item type
-      for (const item of items) {
-          const service = services.find(s => s.id === item.itemId);
-          if (service) {
-              // Minibar/Amenity: Stock -> Gone
-              // Linen/Asset: In Circulation -> Gone (Lost/Damage) or Stayover usage? 
-              // Usually Housekeeping reports consumption of minibar/amenity.
-              
-              const updatedService = { ...service };
-              updatedService.stock = Math.max(0, (updatedService.stock || 0) - item.qty);
-              
-              // Only update DB if stock changed
-              await updateService(updatedService);
-
-              const trans: InventoryTransaction = {
-                  id: `TR-USE-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                  created_at: new Date().toISOString(),
-                  staff_id: currentUser?.id || 'SYS',
-                  staff_name: currentUser?.collaboratorName || 'HK App',
-                  item_id: service.id,
-                  item_name: service.name,
-                  type: 'OUT',
-                  quantity: item.qty,
-                  price: service.costPrice || 0,
-                  total: (service.costPrice || 0) * item.qty,
-                  facility_name: facilityName,
-                  note: `Tiêu hao tại phòng ${roomCode}`
-              };
-              await addInventoryTransaction(trans);
-          }
-      }
-  };
-
-  const processCheckoutLinenReturn = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
-      // In Circulation -> Dirty (Laundry)
-      for (const item of items) {
-          const service = services.find(s => s.id === item.itemId);
-          if (service) {
-              const updatedService = { ...service };
-              // Reduce In Circulation
-              updatedService.in_circulation = Math.max(0, (updatedService.in_circulation || 0) - item.qty);
-              // Increase Dirty/Laundry Stock
-              updatedService.laundryStock = (updatedService.laundryStock || 0) + item.qty;
-              
-              await updateService(updatedService);
-          }
-      }
-  };
-
-  const processRoomRestock = async (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => {
-      // Complex Cycle:
-      // 1. Return Dirty: In Circulation -> Laundry (dirtyReturnQty)
-      // 2. Restock Clean: Stock -> In Circulation (cleanRestockQty)
-      
-      for (const item of items) {
-          const service = services.find(s => s.id === item.itemId);
-          if (service) {
-              const updatedService = { ...service };
-              
-              // 1. Return
-              if (item.dirtyReturnQty > 0) {
-                  // If linen is tracked in circulation, reduce it. 
-                  // Note: Some systems track linen strictly assigned to room vs general circulation. 
-                  // Here assume In Circulation is global pool currently in rooms.
-                  updatedService.in_circulation = Math.max(0, (updatedService.in_circulation || 0) - item.dirtyReturnQty);
-                  updatedService.laundryStock = (updatedService.laundryStock || 0) + item.dirtyReturnQty;
-              }
-
-              // 2. Restock
-              if (item.cleanRestockQty > 0) {
-                  updatedService.stock = Math.max(0, (updatedService.stock || 0) - item.cleanRestockQty);
-                  updatedService.in_circulation = (updatedService.in_circulation || 0) + item.cleanRestockQty;
-              }
-
-              await updateService(updatedService);
-          }
-      }
-  };
-
-  const handleLinenExchange = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
-      // 1-1 Exchange: Dirty Out, Clean In (Same Quantity)
-      // In Circulation stays same.
-      // Stock - qty, Laundry + qty
-      
-      for (const item of items) {
-          const service = services.find(s => s.id === item.itemId);
-          if (service) {
-              const updatedService = { ...service };
-              updatedService.stock = Math.max(0, (updatedService.stock || 0) - item.qty);
-              updatedService.laundryStock = (updatedService.laundryStock || 0) + item.qty;
-              await updateService(updatedService);
-              
-              const trans: InventoryTransaction = {
-                  id: `TR-EX-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                  created_at: new Date().toISOString(),
-                  staff_id: currentUser?.id || 'SYS',
-                  staff_name: currentUser?.collaboratorName || 'HK App',
-                  item_id: service.id,
-                  item_name: service.name,
-                  type: 'EXCHANGE',
-                  quantity: item.qty,
-                  price: 0,
-                  total: 0,
-                  facility_name: facilityName,
-                  note: `Đổi đồ dơ tại phòng ${roomCode}`
-              };
-              await addInventoryTransaction(trans);
-          }
-      }
-  };
+  // Placeholders for legacy compatibility
+  const processCheckoutLinenReturn = async () => {};
+  const handleLinenExchange = async () => {};
 
   return (
     <AppContext.Provider value={{
-      bookings, rooms, facilities, collaborators, services, expenses, settings, inventoryTransactions,
-      timeLogs, schedules, adjustments, leaveRequests, otaOrders, housekeepingTasks, shifts,
-      roomRecipes, bankAccounts, webhooks,
+      currentUser, setCurrentUser, isLoading, isInitialized,
+      facilities, rooms, bookings, services, expenses, collaborators,
+      housekeepingTasks, inventoryTransactions, shifts, schedules, adjustments,
+      leaveRequests, otaOrders, timeLogs, bankAccounts,
+      settings, roomRecipes, webhooks, currentShift, toasts,
       
-      currentUser, setCurrentUser, canAccess, isLoading, isInitialized, toasts, currentShift,
-      
-      refreshData, notify, removeToast,
-      
-      addBooking, updateBooking, deleteBooking, checkAvailability,
-      
-      addFacility, updateFacility, deleteFacility, upsertRoom, deleteRoom,
-      
-      addCollaborator, updateCollaborator, deleteCollaborator,
-      
-      addService, updateService, deleteService, addInventoryTransaction,
-      
+      refreshData, canAccess, notify, removeToast,
+      addFacility, updateFacility, deleteFacility,
+      upsertRoom, deleteRoom,
+      addBooking, updateBooking, checkAvailability,
+      addService, updateService, deleteService,
       addExpense, updateExpense, deleteExpense,
-      
-      updateSettings, getGeminiApiKey, setAppConfig, updateRoomRecipe, deleteRoomRecipe,
-      
+      addCollaborator, updateCollaborator, deleteCollaborator,
+      syncHousekeepingTasks, addInventoryTransaction,
+      openShift, closeShift, clockIn, clockOut,
+      addLeaveRequest, updateLeaveRequest,
+      upsertSchedule, deleteSchedule, upsertAdjustment,
+      updateSettings, updateRoomRecipe, deleteRoomRecipe,
+      addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
+      getGeminiApiKey, setAppConfig, addGuestProfile,
       addBankAccount, updateBankAccount, deleteBankAccount,
       
-      addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
+      syncOtaOrders, queryOtaOrders, updateOtaOrder, deleteOtaOrder, confirmOtaCancellation,
       
-      clockIn, clockOut, upsertSchedule, deleteSchedule, upsertAdjustment, addLeaveRequest, updateLeaveRequest,
-      openShift, closeShift, getShifts,
-      
-      syncHousekeepingTasks, addGuestProfile,
-      
-      syncOtaOrders, queryOtaOrders, updateOtaOrder, confirmOtaCancellation, deleteOtaOrder,
-      
-      processLendingUsage, processMinibarUsage, processCheckoutLinenReturn, processRoomRestock, handleLinenExchange
+      processMinibarUsage, processLendingUsage, processRoomRestock,
+      processCheckoutLinenReturn, handleLinenExchange
     }}>
       {children}
     </AppContext.Provider>
@@ -775,8 +640,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useAppContext = () => {
   const context = useContext(AppContext);
-  if (context === undefined) {
-    throw new Error('useAppContext must be used within an AppProvider');
-  }
+  if (!context) throw new Error('useAppContext must be used within AppProvider');
   return context;
 };
