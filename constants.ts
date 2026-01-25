@@ -7,7 +7,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   'Quản lý': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'],
   'Nhân viên': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal', '/collaborators'],
   'Nhà đầu tư': ['/dashboard'],
-  'Buồng phòng': ['/staff-portal']
+  // UPDATED: Buồng phòng có quyền giống Nhân viên
+  'Buồng phòng': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal', '/collaborators']
 };
 
 export const DEFAULT_SETTINGS: Settings = {

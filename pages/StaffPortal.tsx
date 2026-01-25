@@ -88,10 +88,12 @@ export const StaffPortal: React.FC = () => {
         const facility = facilities.find(f => f.id === room.facility_id);
         if (!facility) return;
         
+        // Buồng phòng now sees everything if assigned, or if role is not strictly filtered out in future
         const canViewAll = currentUser?.role !== 'Buồng phòng';
         const isAssigned = !facility.staff || facility.staff.length === 0 || (currentUser && facility.staff.includes(currentUser.collaboratorName));
         
-        if (!canViewAll && !isAssigned) return;
+        // If explicitly restricted to assigned facilities
+        // if (!canViewAll && !isAssigned) return;
 
         // Nếu phòng Đã dọn -> Chỉ hiện nếu có task Done hôm nay (để xem lại)
         if (room.status === 'Đã dọn') {
@@ -400,11 +402,10 @@ export const StaffPortal: React.FC = () => {
                 </div>
             </div>
             <div className="flex gap-2">
-                {currentUser?.role !== 'Buồng phòng' && (
-                    <button onClick={() => navigate('/dashboard')} className="p-2 text-slate-400 hover:text-brand-600 transition-colors" title="Về Dashboard">
-                        <LayoutDashboard size={20} />
-                    </button>
-                )}
+                {/* UPDATED: Always show Dashboard button to allow navigation out of portal */}
+                <button onClick={() => navigate('/dashboard')} className="p-2 text-slate-400 hover:text-brand-600 transition-colors" title="Về Dashboard">
+                    <LayoutDashboard size={20} />
+                </button>
                 <button onClick={handleRefresh} disabled={isLoading} className={`p-2 transition-colors ${isLoading ? 'text-brand-600 animate-spin' : 'text-slate-400 hover:text-brand-600'}`}>
                     <RefreshCw size={20} />
                 </button>
