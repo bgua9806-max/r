@@ -481,7 +481,7 @@ export const Housekeeping: React.FC = () => {
           )}
       </div>
 
-      {/* DESKTOP TOOLBAR - Kept same as previous version but ensures new logic triggers */}
+      {/* DESKTOP TOOLBAR */}
       <div className="hidden md:block bg-white p-4 rounded-xl border border-slate-200 shadow-sm shrink-0">
          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div className="flex items-center gap-4">
@@ -503,6 +503,40 @@ export const Housekeeping: React.FC = () => {
                   <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${filterType === t ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200'}`}>{t === 'All' ? 'Tất cả' : t}</button>
                ))}
             </div>
+
+            {/* ADDED: Bulk Actions for Desktop */}
+            {selectedTaskIds.length > 0 && (
+                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-5">
+                    <span className="text-xs font-black text-brand-600 bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-100">{selectedTaskIds.length} đã chọn</span>
+                    
+                    <div className="flex items-center border border-slate-200 rounded-lg p-1 gap-1">
+                        <select 
+                            className="text-xs font-bold text-slate-600 bg-transparent outline-none px-2 py-1 cursor-pointer hover:text-brand-600"
+                            onChange={(e) => handleBulkAction('Assign', e.target.value)} 
+                            value=""
+                        >
+                            <option value="" disabled>-- Phân công --</option>
+                            {workload.staffList.map(s => <option key={s} value={s}>{s}</option>)}
+                            <option value="">(Hủy phân công)</option>
+                        </select>
+                    </div>
+
+                    <button 
+                        onClick={() => handleBulkAction('Status', 'Done')} 
+                        className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1"
+                    >
+                        <CheckCircle size={14}/> Xong
+                    </button>
+                    
+                    <button 
+                        onClick={() => setSelectedTaskIds([])} 
+                        className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Hủy chọn"
+                    >
+                        <X size={16}/>
+                    </button>
+                </div>
+            )}
          </div>
       </div>
 
