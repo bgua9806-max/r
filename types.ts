@@ -243,7 +243,8 @@ export interface HousekeepingTask {
 export interface WebhookConfig {
   id: string;
   url: string;
-  event_type: 'checkout' | 'housekeeping_assign' | 'residence_declaration' | 'leave_update' | 'ota_import';
+  // UPDATED: Added 'general_notification'
+  event_type: 'checkout' | 'housekeeping_assign' | 'residence_declaration' | 'leave_update' | 'ota_import' | 'general_notification';
   is_active: boolean;
   description?: string;
   created_at?: string;

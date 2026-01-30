@@ -121,11 +121,9 @@ export const Collaborators: React.FC = () => {
                 // Determine Shift based on Check-in Time
                 // Morning: 05:00 - 14:00 (Start ~06:00)
                 // Night: 14:00 - 23:00 (Start ~18:00)
-                let isNight = false;
                 
                 if (hour >= 14) {
                     // Night Shift
-                    isNight = true;
                     nightShifts += 1;
                     standardDays += 1.2;
                     
@@ -261,7 +259,7 @@ export const Collaborators: React.FC = () => {
       setLeaveForm({ ...leaveForm, reason: '' }); // Reset partial
       notify('success', 'Đã gửi đơn xin nghỉ.');
       
-      // Auto trigger webhook notification for new request
+      // 1. Send Zalo Specific (Legacy)
       triggerWebhook('leave_update', {
           event: 'new_request',
           staff: req.staff_name,
@@ -269,6 +267,17 @@ export const Collaborators: React.FC = () => {
           dates: `${format(parseISO(req.start_date), 'dd/MM')} - ${format(parseISO(req.end_date), 'dd/MM')}`,
           reason: req.reason,
           status: 'Chờ duyệt'
+      });
+
+      // 2. Send General Notification (New Feature)
+      triggerWebhook('general_notification', {
+          type: 'STAFF_LEAVE', // Label for n8n Switch
+          payload: {
+              staff_name: req.staff_name,
+              reason: req.reason,
+              dates: `${format(parseISO(req.start_date), 'dd/MM')} - ${format(parseISO(req.end_date), 'dd/MM')}`,
+              status: 'PENDING'
+          }
       });
   };
 
@@ -292,13 +301,24 @@ export const Collaborators: React.FC = () => {
               notify('info', `Đã từ chối đơn của ${req.staff_name}.`);
           }
 
-          // Trigger Webhook Notification to Zalo
+          // 1. Legacy Zalo
           triggerWebhook('leave_update', {
               event: 'status_update',
               staff: req.staff_name,
               status: isApproved ? 'ĐÃ DUYỆT ✅' : 'ĐÃ TỪ CHỐI ❌',
               dates: `${format(parseISO(req.start_date), 'dd/MM')} - ${format(parseISO(req.end_date), 'dd/MM')}`,
               approver: currentUser?.collaboratorName || 'Admin'
+          });
+
+          // 2. General Notification (New Feature)
+          // Also notifying on status change
+          triggerWebhook('general_notification', {
+              type: 'STAFF_LEAVE_UPDATE', 
+              payload: {
+                  staff_name: req.staff_name,
+                  status: isApproved ? 'APPROVED' : 'REJECTED',
+                  approver: currentUser?.collaboratorName
+              }
           });
       } catch (err) {
           notify('error', 'Có lỗi khi cập nhật trạng thái.');

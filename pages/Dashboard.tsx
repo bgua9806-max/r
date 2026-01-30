@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import { 
@@ -8,7 +8,7 @@ import {
 import { 
   TrendingUp, Calendar, Wallet, TrendingDown, Clock, LogIn, LogOut, BedDouble, 
   CreditCard, Brush, Package, CheckCircle2, ChevronRight, Zap, Star, DollarSign,
-  UserX, ShieldAlert, CloudLightning
+  UserX, ShieldAlert, CloudLightning, Send
 } from 'lucide-react';
 import { 
   format, endOfDay, endOfMonth, endOfYear, 
@@ -19,7 +19,7 @@ import { vi } from 'date-fns/locale';
 type TimeFilter = 'day' | 'month' | 'year';
 
 export const Dashboard: React.FC = () => {
-  const { bookings, rooms, expenses, services, leaveRequests, otaOrders } = useAppContext();
+  const { bookings, rooms, expenses, services, leaveRequests, otaOrders, triggerWebhook, notify } = useAppContext();
   const [filter, setFilter] = useState<TimeFilter>('day');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const navigate = useNavigate();
@@ -84,25 +84,16 @@ export const Dashboard: React.FC = () => {
     bookings.forEach(b => {
        if (b.status === 'Cancelled') return;
        
-       // Sửa lỗi logic: Ưu tiên dùng thời gian thực tế (Actual) để tính KPI
-       // Nếu khách đến/đi sớm hoặc muộn hơn lịch, Dashboard vẫn phải hiện đúng trong ngày đó
        const bIn = (b.actualCheckIn) ? parseISO(b.actualCheckIn) : parseISO(b.checkinDate);
-       
-       // Nếu đã Checkout thì dùng actualCheckOut, nếu chưa thì dùng lịch checkoutDate
        const bOut = (b.status === 'CheckedOut' && b.actualCheckOut) 
             ? parseISO(b.actualCheckOut) 
             : parseISO(b.checkoutDate);
        
-       // FIX: Skip invalid dates
        if (!isValid(bIn) || !isValid(bOut)) return;
 
-       // Tính KPI Checkin/Checkout
        if (isSameDay(bIn, selectedDate)) checkinsToday++;
        if (isSameDay(bOut, selectedDate)) checkoutsToday++;
        
-       // Tính KPI Công suất phòng (Chỉ tính những phòng ĐANG có khách trong khoảng thời gian xem)
-       // Không tính phòng đã trả (CheckedOut)
-       // Use native startOfDay logic
        const viewStart = new Date(bIn); viewStart.setHours(0,0,0,0);
        const viewEnd = endOfDay(bOut);
        
@@ -133,7 +124,6 @@ export const Dashboard: React.FC = () => {
                 const pd = new Date(p.ngayThanhToan);
                 if(isValid(pd) && isSameDay(pd, day)) rev += Number(p.soTien);
              });
-             // Forecast: Dự báo doanh thu dựa trên ngày Check-in của các đơn Confirmed/CheckedIn
              const checkin = parseISO(b.checkinDate);
              if(isValid(checkin) && isSameDay(checkin, day) && (b.status === 'Confirmed' || b.status === 'CheckedIn')) {
                 forecast += b.totalRevenue;
@@ -168,6 +158,43 @@ export const Dashboard: React.FC = () => {
        alerts, chartData
     };
   }, [bookings, expenses, rooms, services, leaveRequests, otaOrders, filter, selectedDate]);
+
+  // --- AUTOMATIC REPORT TRIGGER LOGIC (7 AM) ---
+  const sendDailyReport = () => {
+      const stats = {
+          date: format(new Date(), 'dd/MM/yyyy'),
+          revenue: dashboardData.totalRevenue,
+          checkin: dashboardData.checkinsToday,
+          checkout: dashboardData.checkoutsToday,
+          occupancy: dashboardData.occupancyRate,
+          dirty_rooms: dashboardData.alerts.dirtyRooms.length,
+          pending_ota: dashboardData.alerts.pendingOtaOrders.length,
+          staff_absent: dashboardData.alerts.leavesToday.length
+      };
+
+      triggerWebhook('general_notification', {
+          type: 'DAILY_REPORT',
+          payload: stats
+      });
+      
+      notify('success', 'Đã gửi báo cáo tổng hợp Today\'s Ops.');
+  };
+
+  useEffect(() => {
+      // 1. Check local storage key for "last_daily_report_date"
+      const lastSentDate = localStorage.getItem('last_daily_report_date');
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const now = new Date();
+      
+      // 2. Logic: If today is NOT lastSentDate AND time is >= 7 AM
+      if (lastSentDate !== todayStr && now.getHours() >= 7) {
+          // Send report
+          sendDailyReport();
+          // Update key
+          localStorage.setItem('last_daily_report_date', todayStr);
+          console.log("[Auto-Report] Sent daily report at", now.toISOString());
+      }
+  }, []); // Run once on mount
 
   // --- SUB-COMPONENTS ---
   const KPICard = ({ title, value, sub, icon: Icon, colorClass, trend, isMain, onClick }: any) => (
@@ -298,7 +325,15 @@ export const Dashboard: React.FC = () => {
                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                     <Zap size={20} className="text-brand-600 fill-brand-600"/> Today's Ops
                 </h3>
-                <span className="bg-brand-50 text-brand-700 text-[10px] font-bold px-2 py-1 rounded-full uppercase">Trung tâm điều hành</span>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={sendDailyReport}
+                        className="bg-brand-50 text-brand-700 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-brand-100 flex items-center gap-1 hover:bg-brand-100 transition-colors"
+                        title="Gửi báo cáo thủ công"
+                    >
+                        <Send size={12}/> Báo cáo ngay
+                    </button>
+                </div>
             </div>
             
             <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">

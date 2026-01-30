@@ -213,6 +213,15 @@ export const Settings: React.FC = () => {
           };
       }
       
+      // TÙY CHỈNH CHO GENERAL NOTIFICATION
+      if (wh.event_type === 'general_notification') {
+          mockPayload = {
+              type: 'TEST_SIGNAL',
+              message: 'Kiểm tra kết nối hệ thống thông báo chung.',
+              timestamp: new Date().toISOString()
+          };
+      }
+      
       triggerWebhook(wh.event_type, mockPayload);
       notify('info', `Đã gửi tín hiệu test đến ${wh.event_type}`);
   };
@@ -486,6 +495,7 @@ export const Settings: React.FC = () => {
                              <option value="checkout">Checkout</option>
                              <option value="housekeeping_assign">Housekeeping Assign</option>
                              <option value="leave_update">Cập nhật nghỉ phép (Zalo)</option>
+                             <option value="general_notification">Thông báo chung (Master)</option>
                           </select>
                           <input className="flex-[2] min-w-[150px] border rounded p-2 text-sm bg-white text-slate-900" placeholder="Mô tả (GG Sheet, Zalo...)" value={newWebhook.description} onChange={e => setNewWebhook({...newWebhook, description: e.target.value})} />
                        </div>
