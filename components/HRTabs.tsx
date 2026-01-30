@@ -24,8 +24,8 @@ export const HRTabs: React.FC<HRTabsProps> = ({ activeTab, onTabChange }) => {
 
   // Filter tabs based on Role
   const visibleTabs = allTabs.filter(tab => {
-      // If user is 'Nhân viên', hide sensitive tabs
-      if (currentUser?.role === 'Nhân viên') {
+      // Hide sensitive tabs for 'Nhân viên' AND 'Buồng phòng'
+      if (currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng') {
           return tab.id !== 'employees' && tab.id !== 'timesheet';
       }
       // Other roles (Admin, Quản lý) see everything

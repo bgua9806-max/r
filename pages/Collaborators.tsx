@@ -53,8 +53,8 @@ export const Collaborators: React.FC = () => {
   // Loading state for approval actions
   const [processingLeaveId, setProcessingLeaveId] = useState<string | null>(null);
 
-  // Permission Check Helper
-  const isRestricted = currentUser?.role === 'Nhân viên';
+  // Permission Check Helper - UPDATED: Include 'Buồng phòng'
+  const isRestricted = currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng';
 
   const weekDays = useMemo(() => {
     const start = new Date(currentDate);
