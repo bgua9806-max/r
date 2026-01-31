@@ -764,7 +764,7 @@ Return JSON with this structure:
 If a field is not visible, return empty string "".`;
 
           const response = await ai.models.generateContent({
-              model: 'gemini-2.0-flash-exp', 
+              model: 'gemini-2.0-flash', 
               contents: {
                   parts: [
                       { inlineData: { mimeType: mimeType, data: base64Data } },
