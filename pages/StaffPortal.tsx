@@ -65,7 +65,7 @@ export const StaffPortal: React.FC = () => {
 
     // ANTI-GHOST LOGIC:
     // Tạo danh sách các phòng vừa được dọn xong gần đây (trong 2 tiếng)
-    // Để tránh hiển thị lại task "Bẩn" (Virtual Task) nếu DB chưa kịp cập nhật trạng thái phòng
+    // Để tránh hiển thị lại task "Bẩn" hoặc "Stayover" (Virtual Task) nếu DB chưa kịp cập nhật hoặc vừa làm xong.
     const recentDoneMap = new Map<string, number>();
     housekeepingTasks.forEach(t => {
         if (t.status === 'Done') {
@@ -76,11 +76,13 @@ export const StaffPortal: React.FC = () => {
         }
     });
 
+    // Map existing active tasks from DB
     const dbTasksMap = new Map<string, HousekeepingTask>();
     housekeepingTasks.forEach(t => {
         const created = parseISO(t.created_at);
         if (isValid(created)) {
             const tDate = format(created, 'yyyy-MM-dd');
+            // Include active tasks OR completed tasks for today (to show history)
             if (t.status !== 'Done' || tDate === todayStr) {
                 dbTasksMap.set(`${t.facility_id}_${t.room_code}`, t);
             }
@@ -91,60 +93,74 @@ export const StaffPortal: React.FC = () => {
         const facility = facilities.find(f => f.id === room.facility_id);
         if (!facility) return;
         
-        // Buồng phòng now sees everything if assigned, or if role is not strictly filtered out in future
-        const canViewAll = currentUser?.role !== 'Buồng phòng';
-        const isAssigned = !facility.staff || facility.staff.length === 0 || (currentUser && facility.staff.includes(currentUser.collaboratorName));
-        
-        // If explicitly restricted to assigned facilities
-        // if (!canViewAll && !isAssigned) return;
+        const uniqueKey = `${room.facility_id}_${room.name}`;
+        const existingTask = dbTasksMap.get(uniqueKey);
 
-        // Nếu phòng Đã dọn -> Chỉ hiện nếu có task Done hôm nay (để xem lại)
-        if (room.status === 'Đã dọn') {
-            const existingTask = dbTasksMap.get(`${room.facility_id}_${room.name}`);
-            if (existingTask && existingTask.status === 'Done') {
-                 taskList.push({
-                    ...existingTask,
-                    facilityName: facility.facilityName,
-                    roomStatus: room.status,
-                    roomType: room.type || '1GM8'
-                });
-            }
+        // PRIORITY 1: Show Existing Task (DB)
+        if (existingTask) {
+             taskList.push({
+                ...existingTask,
+                // If room is 'Đang dọn' but task is 'Pending', optimistic update UI to In Progress
+                status: room.status === 'Đang dọn' && existingTask.status === 'Pending' ? 'In Progress' : existingTask.status,
+                facilityName: facility.facilityName,
+                roomStatus: room.status,
+                roomType: room.type || '1GM8'
+            });
+            return;
+        }
+
+        // PRIORITY 2: Auto-Generate Virtual Tasks
+        
+        // Anti-Ghost: If task was done recently (< 2h), don't auto-generate again
+        const lastDoneTime = recentDoneMap.get(uniqueKey);
+        if (lastDoneTime && differenceInMinutes(today, new Date(lastDoneTime)) < 120) {
             return; 
         }
 
-        // Nếu phòng Bẩn/Đang dọn -> Hiện task
+        // A. Dirty Room (Priority High)
         if (room.status === 'Bẩn' || room.status === 'Đang dọn') {
-            const existingTask = dbTasksMap.get(`${room.facility_id}_${room.name}`);
-            
-            if (existingTask) {
-                // Task thật có sẵn trong DB
-                taskList.push({
-                    ...existingTask,
-                    status: room.status === 'Đang dọn' ? 'In Progress' : existingTask.status === 'Done' ? 'Pending' : existingTask.status,
-                    facilityName: facility.facilityName,
-                    roomStatus: room.status,
-                    roomType: room.type || '1GM8'
-                });
-            } else {
-                // Task ảo (Virtual)
-                // ANTI-GHOST CHECK: Nếu vừa làm xong task này cách đây < 2 tiếng -> KHÔNG HIỆN LẠI
-                const uniqueKey = `${room.facility_id}_${room.name}`;
-                const lastDoneTime = recentDoneMap.get(uniqueKey);
-                
-                if (lastDoneTime && differenceInMinutes(today, new Date(lastDoneTime)) < 120) {
-                    return; // Skip ghost task
-                }
+             taskList.push({
+                id: `VIRTUAL_${uniqueKey}`,
+                facility_id: room.facility_id,
+                room_code: room.name,
+                task_type: 'Dirty', 
+                status: room.status === 'Đang dọn' ? 'In Progress' : 'Pending',
+                assignee: currentUser?.collaboratorName || null,
+                priority: 'High',
+                created_at: new Date().toISOString(),
+                note: 'Phòng báo Bẩn (Tự động đồng bộ)',
+                facilityName: facility.facilityName,
+                roomStatus: room.status,
+                roomType: room.type || '1GM8'
+            });
+            return;
+        }
 
-                taskList.push({
-                    id: `VIRTUAL_${room.facility_id}_${room.name}`,
+        // B. Stayover (Active Guest) - NEW LOGIC
+        const activeBooking = bookings.find(b => 
+            b.facilityName === facility.facilityName && 
+            b.roomCode === room.name && 
+            b.status === 'CheckedIn'
+        );
+
+        if (activeBooking) {
+            const checkIn = format(parseISO(activeBooking.checkinDate), 'yyyy-MM-dd');
+            const checkOut = format(parseISO(activeBooking.checkoutDate), 'yyyy-MM-dd');
+            
+            // Logic: Stayover is strictly between CheckIn and CheckOut days.
+            // Don't show on Arrival Day (usually handled by Dirty status before guest arrives)
+            // Don't show on Departure Day (handled by Checkout status)
+            if (todayStr > checkIn && todayStr < checkOut) {
+                 taskList.push({
+                    id: `AUTO_STAYOVER_${uniqueKey}`,
                     facility_id: room.facility_id,
                     room_code: room.name,
-                    task_type: 'Dirty', 
-                    status: room.status === 'Đang dọn' ? 'In Progress' : 'Pending',
-                    assignee: currentUser?.collaboratorName || null,
-                    priority: 'High',
+                    task_type: 'Stayover',
+                    status: 'Pending',
+                    assignee: null,
+                    priority: 'Normal',
                     created_at: new Date().toISOString(),
-                    note: 'Phòng báo Bẩn (Tự động đồng bộ)',
+                    note: 'Khách đang ở (Tự động)',
                     facilityName: facility.facilityName,
                     roomStatus: room.status,
                     roomType: room.type || '1GM8'
@@ -159,7 +175,7 @@ export const StaffPortal: React.FC = () => {
         const pOrder = { 'Checkout': 0, 'Dirty': 1, 'Stayover': 2, 'Vacant': 3 };
         return (pOrder[a.task_type] ?? 4) - (pOrder[b.task_type] ?? 4);
     });
-  }, [facilities, rooms, housekeepingTasks, currentUser]);
+  }, [facilities, rooms, housekeepingTasks, currentUser, bookings]);
 
   const workloadStats = useMemo(() => {
     const total = myTasks.length;
@@ -314,14 +330,14 @@ export const StaffPortal: React.FC = () => {
       if (!activeTask || isProcessing) return;
       setIsProcessing(true);
       try {
-        const isVirtual = activeTask.id.startsWith('VIRTUAL_');
+        const isVirtual = activeTask.id.startsWith('VIRTUAL_') || activeTask.id.startsWith('AUTO_STAYOVER_');
         const taskToSync: HousekeepingTask = {
             ...activeTask,
             id: isVirtual ? crypto.randomUUID() : activeTask.id,
             status: 'In Progress',
             started_at: new Date().toISOString(),
             assignee: currentUser?.collaboratorName || activeTask.assignee,
-            points: 2
+            points: activeTask.task_type === 'Checkout' ? 4 : activeTask.task_type === 'Dirty' ? 2 : 1
         };
         await Promise.all([
             syncHousekeepingTasks([taskToSync]),
@@ -399,6 +415,8 @@ export const StaffPortal: React.FC = () => {
             syncHousekeepingTasks([updatedTask])
         ];
 
+        // Update Room status to Clean ONLY if it's a Checkout or Dirty task. 
+        // Stayover usually keeps room status as Occupied/CheckedIn conceptually, but system uses 'Đã dọn' to indicate readiness.
         const roomObj = rooms.find(r => r.facility_id === activeTask.facility_id && r.name === activeTask.room_code);
         if (roomObj) {
             updates.push(upsertRoom({ ...roomObj, status: 'Đã dọn' }));
