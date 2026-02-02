@@ -1,11 +1,11 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { 
   LogOut, CheckCircle, Clock, MapPin, 
   ChevronRight, CheckSquare, Square, 
-  ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle
+  ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle,
+  BedDouble, Brush
 } from 'lucide-react';
 import { format, parseISO, differenceInMinutes, isValid } from 'date-fns';
 import { HousekeepingTask, ChecklistItem, RoomRecipeItem, ServiceItem, LendingItem, Booking } from '../types';
@@ -37,6 +37,9 @@ export const StaffPortal: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [consumedItems, setConsumedItems] = useState<Record<string, number>>({});
   const [returnedLinenCounts, setReturnedLinenCounts] = useState<Record<string, number>>({});
+
+  // NEW: Tab State
+  const [activeTab, setActiveTab] = useState<'Checkout' | 'Stayover' | 'Others'>('Checkout');
 
   const navigate = useNavigate();
   
@@ -163,6 +166,30 @@ export const StaffPortal: React.FC = () => {
     const completed = myTasks.filter(t => t.status === 'Done').length;
     return { total, completed, pending: total - completed };
   }, [myTasks]);
+
+  // NEW: Filtered Tasks and Tab Counts
+  const tabCounts = useMemo(() => {
+      const counts = { Checkout: 0, Stayover: 0, Others: 0 };
+      if (myTasks) {
+          myTasks.forEach(t => {
+              if (t.status === 'Done') return; // Don't count done tasks in badges
+              if (t.task_type === 'Checkout') counts.Checkout++;
+              else if (t.task_type === 'Stayover') counts.Stayover++;
+              else if (t.task_type === 'Dirty' || t.task_type === 'Vacant') counts.Others++;
+          });
+      }
+      return counts;
+  }, [myTasks]);
+
+  const filteredTasks = useMemo(() => {
+      if (!myTasks) return [];
+      return myTasks.filter(t => {
+          if (activeTab === 'Checkout') return t.task_type === 'Checkout';
+          if (activeTab === 'Stayover') return t.task_type === 'Stayover';
+          if (activeTab === 'Others') return t.task_type === 'Dirty' || t.task_type === 'Vacant';
+          return true;
+      });
+  }, [myTasks, activeTab]);
 
   // ... (Recipe Logic unchanged) ...
   const recipeItems = useMemo(() => {
@@ -402,7 +429,6 @@ export const StaffPortal: React.FC = () => {
                 </div>
             </div>
             <div className="flex gap-2">
-                {/* UPDATED: Always show Dashboard button to allow navigation out of portal */}
                 <button onClick={() => navigate('/dashboard')} className="p-2 text-slate-400 hover:text-brand-600 transition-colors" title="Về Dashboard">
                     <LayoutDashboard size={20} />
                 </button>
@@ -431,17 +457,59 @@ export const StaffPortal: React.FC = () => {
             </div>
         </div>
 
-        <div className="flex-1 px-4 pb-24 space-y-4 overflow-y-auto">
-            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Cần thực hiện</h2>
-            {myTasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-center">
-                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-4">
-                        <CheckCircle size={40} className="text-emerald-400" />
+        {/* TAB SWITCHER */}
+        <div className="px-4 pb-2 sticky top-[73px] z-40 bg-slate-50 pt-2">
+            <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200">
+                <button
+                    onClick={() => setActiveTab('Checkout')}
+                    className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1
+                        ${activeTab === 'Checkout' ? 'bg-red-50 text-red-600 shadow-sm border border-red-100' : 'text-slate-400 hover:bg-slate-50'}
+                    `}
+                >
+                    <div className="flex items-center gap-1.5">
+                        <LogOut size={14}/> Trả Phòng
                     </div>
-                    <p className="font-bold text-sm">Tuyệt vời! Tất cả phòng đã sạch.</p>
+                    {tabCounts.Checkout > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 rounded-full">{tabCounts.Checkout}</span>}
+                </button>
+                
+                <button
+                    onClick={() => setActiveTab('Stayover')}
+                    className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1
+                        ${activeTab === 'Stayover' ? 'bg-blue-50 text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400 hover:bg-slate-50'}
+                    `}
+                >
+                    <div className="flex items-center gap-1.5">
+                        <BedDouble size={14}/> Dọn Ở
+                    </div>
+                    {tabCounts.Stayover > 0 && <span className="bg-blue-500 text-white text-[9px] px-1.5 rounded-full">{tabCounts.Stayover}</span>}
+                </button>
+
+                <button
+                    onClick={() => setActiveTab('Others')}
+                    className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1
+                        ${activeTab === 'Others' ? 'bg-amber-50 text-amber-600 shadow-sm border border-amber-100' : 'text-slate-400 hover:bg-slate-50'}
+                    `}
+                >
+                    <div className="flex items-center gap-1.5">
+                        <Brush size={14}/> Bẩn/Trống
+                    </div>
+                    {tabCounts.Others > 0 && <span className="bg-amber-500 text-white text-[9px] px-1.5 rounded-full">{tabCounts.Others}</span>}
+                </button>
+            </div>
+        </div>
+
+        <div className="flex-1 px-4 pb-24 space-y-4 overflow-y-auto pt-2">
+            {filteredTasks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-center">
+                    <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-4 ${activeTab === 'Checkout' ? 'bg-red-50' : activeTab === 'Stayover' ? 'bg-blue-50' : 'bg-amber-50'}`}>
+                        {activeTab === 'Checkout' ? <LogOut size={40} className="text-red-300"/> : 
+                         activeTab === 'Stayover' ? <BedDouble size={40} className="text-blue-300"/> : 
+                         <Brush size={40} className="text-amber-300"/>}
+                    </div>
+                    <p className="font-bold text-sm">Không có phòng nào trong mục này.</p>
                 </div>
             ) : (
-                myTasks.map(task => (
+                filteredTasks.map(task => (
                     <div 
                         key={task.id} 
                         onClick={() => openTaskDetail(task)}
@@ -451,13 +519,21 @@ export const StaffPortal: React.FC = () => {
                               task.status === 'In Progress' ? 'border-brand-500 shadow-brand-100 ring-2 ring-brand-500/10' : 'border-white'}
                         `}
                     >
-                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${task.task_type === 'Checkout' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
+                            task.task_type === 'Checkout' ? 'bg-red-500' : 
+                            task.task_type === 'Stayover' ? 'bg-blue-500' : 'bg-amber-500'
+                        }`}></div>
+                        
                         <div className="flex justify-between items-center mb-3">
                              <div className="flex items-center gap-4">
                                  <h2 className="text-3xl font-black text-slate-800">{task.room_code}</h2>
                                  <div className="space-y-1">
-                                     <div className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase border w-fit ${task.task_type === 'Checkout' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'}`}>
-                                         {task.task_type}
+                                     <div className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase border w-fit 
+                                        ${task.task_type === 'Checkout' ? 'bg-red-50 text-red-600 border-red-100' : 
+                                          task.task_type === 'Stayover' ? 'bg-blue-50 text-blue-600 border-blue-100' : 
+                                          'bg-amber-50 text-amber-600 border-amber-100'}
+                                     `}>
+                                         {task.task_type === 'Stayover' && task.note?.includes('hỏi') ? 'HỎI DỌN' : task.task_type}
                                      </div>
                                      <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold">
                                          <MapPin size={10}/> {task.facilityName} - {task.roomType}
@@ -466,7 +542,8 @@ export const StaffPortal: React.FC = () => {
                              </div>
                              {task.status !== 'Done' && <ChevronRight className="text-slate-300" size={20} />}
                         </div>
-                        {task.status === 'In Progress' && <div className="mt-4 flex items-center gap-1 text-[10px] text-emerald-600 font-bold animate-pulse"><Clock size={10}/> Đang dọn...</div>}
+                        {task.note && <p className="text-xs text-slate-500 italic mb-2 line-clamp-1 border-l-2 border-slate-200 pl-2">{task.note}</p>}
+                        {task.status === 'In Progress' && <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-600 font-bold animate-pulse"><Clock size={10}/> Đang dọn...</div>}
                     </div>
                 ))
             )}
