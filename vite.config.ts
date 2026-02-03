@@ -1,3 +1,4 @@
+
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -20,10 +21,11 @@ export default defineConfig(({ mode }) => {
         }
       },
       build: {
-        // Tăng giới hạn cảnh báo lên 3MB
-        chunkSizeWarningLimit: 3000,
+        // Tăng giới hạn cảnh báo lên 2000kB (2MB) để không báo vàng nữa
+        chunkSizeWarningLimit: 2000,
         rollupOptions: {
           output: {
+            // Chia nhỏ các thư viện lớn thành các file riêng để tải nhanh hơn
             manualChunks(id) {
               if (id.includes('node_modules')) {
                 if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
@@ -38,9 +40,7 @@ export default defineConfig(({ mode }) => {
                 if (id.includes('@supabase')) {
                   return 'vendor-supabase';
                 }
-                if (id.includes('date-fns')) {
-                  return 'vendor-date';
-                }
+                // Các thư viện còn lại gom vào vendor chung
                 return 'vendor';
               }
             }
