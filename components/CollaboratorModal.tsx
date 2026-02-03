@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { Collaborator, Role } from '../types';
 import { useAppContext } from '../context/AppContext';
-import { DollarSign, User, Shield, Percent, Palette } from 'lucide-react';
+import { DollarSign, User, Shield, Percent, Palette, CreditCard } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -20,7 +20,10 @@ export const CollaboratorModal: React.FC<Props> = ({ isOpen, onClose, collaborat
     role: 'Nhân viên',
     commissionRate: 0,
     baseSalary: 0,
-    color: '#3b82f6'
+    color: '#3b82f6',
+    bankId: '',
+    accountNo: '',
+    accountName: ''
   });
 
   useEffect(() => {
@@ -34,7 +37,10 @@ export const CollaboratorModal: React.FC<Props> = ({ isOpen, onClose, collaborat
         role: 'Nhân viên',
         commissionRate: 0,
         baseSalary: 0,
-        color: '#3b82f6'
+        color: '#3b82f6',
+        bankId: '',
+        accountNo: '',
+        accountName: ''
       });
     }
   }, [collaborator, isOpen]);
@@ -57,7 +63,10 @@ export const CollaboratorModal: React.FC<Props> = ({ isOpen, onClose, collaborat
       manageFacilities: form.manageFacilities || '[]',
       color: form.color || '#3b82f6',
       baseSalary: Number(form.baseSalary || 0),
-      commissionRate: Number(form.commissionRate || 0)
+      commissionRate: Number(form.commissionRate || 0),
+      bankId: (form.bankId || '').toUpperCase(),
+      accountNo: form.accountNo || '',
+      accountName: (form.accountName || '').toUpperCase()
     } as Collaborator;
 
     if (collaborator) updateCollaborator(data);
@@ -97,6 +106,7 @@ export const CollaboratorModal: React.FC<Props> = ({ isOpen, onClose, collaborat
            </div>
         </div>
 
+        {/* Salary & Commission */}
         <div className="bg-brand-50/50 p-5 rounded-2xl border border-brand-100 space-y-5">
             <h4 className="text-[11px] font-black text-brand-700 uppercase tracking-[0.2em] flex items-center gap-2">
                 <DollarSign size={16}/> Chế độ lương & Thưởng
@@ -120,6 +130,42 @@ export const CollaboratorModal: React.FC<Props> = ({ isOpen, onClose, collaborat
                       value={form.commissionRate} 
                       onChange={e => setForm({...form, commissionRate: Number(e.target.value)})} 
                       placeholder="0" 
+                    />
+               </div>
+            </div>
+        </div>
+
+        {/* New Bank Info Section */}
+        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-5">
+            <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                <CreditCard size={16}/> Thông tin thanh toán (VietQR)
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+               <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngân hàng (MB, VCB...)</label>
+                    <input 
+                      className="w-full border-2 border-white rounded-xl p-3 bg-white text-slate-900 font-bold uppercase focus:border-brand-500 transition-all outline-none shadow-sm" 
+                      value={form.bankId} 
+                      onChange={e => setForm({...form, bankId: e.target.value.toUpperCase()})} 
+                      placeholder="VD: MB" 
+                    />
+               </div>
+               <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Số tài khoản</label>
+                    <input 
+                      className="w-full border-2 border-white rounded-xl p-3 bg-white text-slate-900 font-mono font-bold focus:border-brand-500 transition-all outline-none shadow-sm" 
+                      value={form.accountNo} 
+                      onChange={e => setForm({...form, accountNo: e.target.value})} 
+                      placeholder="0123456789" 
+                    />
+               </div>
+               <div className="md:col-span-2 space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tên chủ tài khoản</label>
+                    <input 
+                      className="w-full border-2 border-white rounded-xl p-3 bg-white text-slate-900 font-bold uppercase focus:border-brand-500 transition-all outline-none shadow-sm" 
+                      value={form.accountName} 
+                      onChange={e => setForm({...form, accountName: e.target.value.toUpperCase()})} 
+                      placeholder="NGUYEN VAN A" 
                     />
                </div>
             </div>

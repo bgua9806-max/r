@@ -41,6 +41,10 @@ export interface Collaborator {
   commissionRate: number;
   baseSalary: number;
   commission?: number;
+  // Payroll / VietQR fields
+  bankId?: string; // MB, VCB, TCB...
+  accountNo?: string;
+  accountName?: string;
 }
 
 export interface TimeLog {

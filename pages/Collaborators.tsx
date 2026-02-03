@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Collaborator, ShiftSchedule, AttendanceAdjustment, LeaveRequest, TimeLog } from '../types';
@@ -5,13 +6,14 @@ import { CollaboratorModal } from '../components/CollaboratorModal';
 import { 
   Pencil, Trash2, Plus, Search, ClipboardList,
   ChevronLeft, ChevronRight, Calendar, Edit2, FileDown, Wallet, DollarSign, Sun, Moon, 
-  CheckCircle, AlertCircle, Send, User, Cake, HeartPulse, ShieldCheck, CalendarDays, Palmtree, UserCheck, Loader2, X, Check, Clock, MapPin, ToggleLeft, ToggleRight, List
+  CheckCircle, AlertCircle, Send, User, Cake, HeartPulse, ShieldCheck, CalendarDays, Palmtree, UserCheck, Loader2, X, Check, Clock, MapPin, QrCode
 } from 'lucide-react';
 import { HRTabs, HRTabType } from '../components/HRTabs';
 import { ListFilter, FilterOption } from '../components/ListFilter';
 import { ShiftScheduleModal } from '../components/ShiftScheduleModal';
 import { AttendanceAdjustmentModal } from '../components/AttendanceAdjustmentModal';
-import { format, addDays, isSameDay, isWithinInterval, parseISO, startOfWeek, isSameMonth } from 'date-fns';
+import { PayrollQrModal } from '../components/PayrollQrModal';
+import { format, addDays, isSameDay, isWithinInterval, parseISO, isSameMonth } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { Modal } from '../components/Modal';
 
@@ -39,6 +41,10 @@ export const Collaborators: React.FC = () => {
 
   const [isAdjModalOpen, setAdjModalOpen] = useState(false);
   const [selectedAdjStaff, setSelectedAdjStaff] = useState<Collaborator | null>(null);
+
+  // Payroll QR Modal State
+  const [isPayrollModalOpen, setPayrollModalOpen] = useState(false);
+  const [selectedPayrollStaff, setSelectedPayrollStaff] = useState<{staff: Collaborator, amount: number} | null>(null);
 
   // Leave Request States
   const [isLeaveModalOpen, setLeaveModalOpen] = useState(false);
@@ -233,6 +239,11 @@ export const Collaborators: React.FC = () => {
   const openAdjustment = (staff: Collaborator) => {
       setSelectedAdjStaff(staff);
       setAdjModalOpen(true);
+  };
+
+  const handleOpenPayroll = (staff: Collaborator, amount: number) => {
+      setSelectedPayrollStaff({ staff, amount });
+      setPayrollModalOpen(true);
   };
 
   const submitLeaveRequest = async () => {
@@ -1120,7 +1131,10 @@ export const Collaborators: React.FC = () => {
                          </div>
                       </td>
                       <td className="p-4 text-center">
-                         <button onClick={() => openAdjustment(row.staff)} className="p-2 text-slate-400 hover:text-brand-600 transition-all"><Edit2 size={18} /></button>
+                         <div className="flex items-center justify-center gap-1">
+                             <button onClick={() => openAdjustment(row.staff)} className="p-2 text-slate-400 hover:text-brand-600 transition-all bg-slate-50 rounded-lg hover:bg-brand-50" title="Sửa công"><Edit2 size={16} /></button>
+                             <button onClick={() => handleOpenPayroll(row.staff, row.calculatedSalary)} className="p-2 text-emerald-600 hover:text-emerald-700 transition-all bg-emerald-50 rounded-lg hover:bg-emerald-100" title="Thanh toán QR"><QrCode size={16} /></button>
+                         </div>
                       </td>
                     </tr>
                   ))}
@@ -1143,9 +1157,14 @@ export const Collaborators: React.FC = () => {
                                 <div className="text-[10px] text-slate-400 font-medium uppercase">{row.staff.role}</div>
                             </div>
                          </div>
-                         <button onClick={() => openAdjustment(row.staff)} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">
-                             Điều chỉnh
-                         </button>
+                         <div className="flex gap-2">
+                             <button onClick={() => openAdjustment(row.staff)} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">
+                                 Sửa công
+                             </button>
+                             <button onClick={() => handleOpenPayroll(row.staff, row.calculatedSalary)} className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center gap-1">
+                                 <QrCode size={12}/> Pay
+                             </button>
+                         </div>
                      </div>
                      
                      <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
@@ -1286,6 +1305,16 @@ export const Collaborators: React.FC = () => {
             staff={selectedAdjStaff}
             month={selectedMonthStr}
             adjustment={adjustments.find(a => a.staff_id === selectedAdjStaff.id && a.month === selectedMonthStr)}
+          />
+      )}
+
+      {selectedPayrollStaff && (
+          <PayrollQrModal
+              isOpen={isPayrollModalOpen}
+              onClose={() => setPayrollModalOpen(false)}
+              staff={selectedPayrollStaff.staff}
+              amount={selectedPayrollStaff.amount}
+              month={format(currentDate, 'MM/yyyy')}
           />
       )}
     </div>

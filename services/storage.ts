@@ -487,17 +487,65 @@ export const storageService = {
   
   // Collaborators
   getCollaborators: async (): Promise<Collaborator[]> => {
-    return safeFetch(supabase.from('collaborators').select('*'), MOCK_COLLABORATORS, 'collaborators');
+    const rawData = await safeFetch(supabase.from('collaborators').select('*'), MOCK_COLLABORATORS, 'collaborators');
+    return rawData.map((c: any) => ({
+      ...c,
+      // Map DB snake_case to App camelCase
+      bankId: c.bank_id,
+      accountNo: c.account_no,
+      accountName: c.account_name
+    }));
   },
   addCollaborator: async (item: Collaborator) => {
     if (IS_USING_MOCK) return;
-    const { error } = await supabase.from('collaborators').insert(item);
-    if (error) logError('Error adding collaborator', error);
+    
+    // Map App camelCase to DB snake_case
+    const payload = {
+        ...item,
+        bank_id: item.bankId,
+        account_no: item.accountNo,
+        account_name: item.accountName
+    };
+    // Cleanup old keys to avoid errors if strict schema
+    delete (payload as any).bankId;
+    delete (payload as any).accountNo;
+    delete (payload as any).accountName;
+
+    const { error } = await supabase.from('collaborators').insert(payload);
+    if (error) {
+        // Fallback for old schema
+        if (isColumnMissingError(error)) {
+            const { bank_id, account_no, account_name, ...legacyPayload } = payload;
+            const { error: retryError } = await supabase.from('collaborators').insert(legacyPayload);
+            if (retryError) logError('Error adding collaborator (Legacy)', retryError);
+        } else {
+            logError('Error adding collaborator', error);
+        }
+    }
   },
   updateCollaborator: async (item: Collaborator) => {
     if (IS_USING_MOCK) return;
-    const { error } = await supabase.from('collaborators').update(item).eq('id', item.id);
-    if (error) logError('Error updating collaborator', error);
+    
+    const payload = {
+        ...item,
+        bank_id: item.bankId,
+        account_no: item.accountNo,
+        account_name: item.accountName
+    };
+    delete (payload as any).bankId;
+    delete (payload as any).accountNo;
+    delete (payload as any).accountName;
+
+    const { error } = await supabase.from('collaborators').update(payload).eq('id', item.id);
+    if (error) {
+        if (isColumnMissingError(error)) {
+            const { bank_id, account_no, account_name, ...legacyPayload } = payload;
+            const { error: retryError } = await supabase.from('collaborators').update(legacyPayload).eq('id', item.id);
+            if (retryError) logError('Error updating collaborator (Legacy)', retryError);
+        } else {
+            logError('Error updating collaborator', error);
+        }
+    }
   },
   deleteCollaborator: async (id: string) => {
     if (IS_USING_MOCK) return { error: null };
