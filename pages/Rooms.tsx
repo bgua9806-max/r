@@ -7,8 +7,11 @@ import { FacilityModal } from '../components/FacilityModal';
 import { RoomModal } from '../components/RoomModal';
 
 export const Rooms: React.FC = () => {
-  const { facilities, rooms, updateFacility, deleteFacility, notify, upsertRoom, deleteRoom, syncHousekeepingTasks, housekeepingTasks } = useAppContext();
+  const { facilities, rooms, updateFacility, deleteFacility, notify, upsertRoom, deleteRoom, syncHousekeepingTasks, housekeepingTasks, currentUser } = useAppContext();
   
+  // Check read-only permission for 'Nhân viên' or 'Buồng phòng'
+  const isReadOnly = currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng';
+
   // Facility Modal State
   const [isFacilityModalOpen, setFacilityModalOpen] = useState(false);
   const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
@@ -185,9 +188,11 @@ export const Rooms: React.FC = () => {
             <h1 className="text-2xl font-bold text-gray-800">Quản lý Phòng & Cơ sở</h1>
             <p className="text-sm text-gray-500">Phân hạng phòng, view và diện tích chi tiết.</p>
           </div>
-          <button onClick={handleAddFacility} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-brand-700 transition-colors shadow-sm font-medium">
-            <Plus size={20} /> <span className="hidden md:inline">Thêm cơ sở</span>
-          </button>
+          {!isReadOnly && (
+            <button onClick={handleAddFacility} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-brand-700 transition-colors shadow-sm font-medium">
+              <Plus size={20} /> <span className="hidden md:inline">Thêm cơ sở</span>
+            </button>
+          )}
        </div>
 
        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -210,14 +215,16 @@ export const Rooms: React.FC = () => {
                           <DollarSign size={12}/> Giá chuẩn: {f.facilityPrice.toLocaleString()} ₫
                        </p>
                     </div>
-                    <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                       <button onClick={() => handleEditFacility(f)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="Sửa thông tin cơ sở">
-                         <Settings2 size={16} />
-                       </button>
-                       <button onClick={() => { if(confirm(`Xóa cơ sở "${f.facilityName}" và toàn bộ phòng bên trong?`)) deleteFacility(f.id); }} className="p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors" title="Xóa cơ sở (Đóng cửa)">
-                         <Trash2 size={16} />
-                       </button>
-                    </div>
+                    {!isReadOnly && (
+                        <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                           <button onClick={() => handleEditFacility(f)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="Sửa thông tin cơ sở">
+                             <Settings2 size={16} />
+                           </button>
+                           <button onClick={() => { if(confirm(`Xóa cơ sở "${f.facilityName}" và toàn bộ phòng bên trong?`)) deleteFacility(f.id); }} className="p-2 text-red-500 hover:bg-red-100 rounded-lg transition-colors" title="Xóa cơ sở (Đóng cửa)">
+                             <Trash2 size={16} />
+                           </button>
+                        </div>
+                    )}
                  </div>
                  
                  {/* Room List */}
@@ -275,42 +282,46 @@ export const Rooms: React.FC = () => {
                                         </span>
 
                                         {/* MOBILE ACTIONS (In-flow, Bottom Right) */}
-                                        <div className="flex gap-2 lg:hidden">
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); openEditRoom(r); }}
-                                                className="bg-blue-50 text-blue-600 rounded-lg p-2 shadow-sm hover:bg-blue-100 transition-colors"
-                                                title="Cấu hình"
-                                            >
-                                                <Pencil size={14} />
-                                            </button>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); removeRoom(r.id, r.name); }}
-                                                className="bg-red-50 text-red-500 rounded-lg p-2 shadow-sm hover:bg-red-100 transition-colors"
-                                                title="Xóa"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
+                                        {!isReadOnly && (
+                                            <div className="flex gap-2 lg:hidden">
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); openEditRoom(r); }}
+                                                    className="bg-blue-50 text-blue-600 rounded-lg p-2 shadow-sm hover:bg-blue-100 transition-colors"
+                                                    title="Cấu hình"
+                                                >
+                                                    <Pencil size={14} />
+                                                </button>
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); removeRoom(r.id, r.name); }}
+                                                    className="bg-red-50 text-red-500 rounded-lg p-2 shadow-sm hover:bg-red-100 transition-colors"
+                                                    title="Xóa"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 
                                 {/* DESKTOP ACTIONS (Absolute, Hover Only) */}
-                                <div className="hidden lg:flex absolute top-2 right-2 gap-1 opacity-0 group-hover/room:opacity-100 transition-all z-10 scale-90 lg:scale-100">
-                                    <button 
-                                    onClick={(e) => { e.stopPropagation(); openEditRoom(r); }}
-                                    className="bg-blue-500 text-white rounded-lg w-7 h-7 flex items-center justify-center shadow-md hover:bg-blue-600 transition-colors"
-                                    title="Cấu hình chi tiết"
-                                    >
-                                    <Pencil size={12} />
-                                    </button>
-                                    <button 
-                                    onClick={(e) => { e.stopPropagation(); removeRoom(r.id, r.name); }}
-                                    className="bg-white border border-red-200 text-red-500 rounded-lg w-7 h-7 flex items-center justify-center shadow-md hover:bg-red-50 transition-colors"
-                                    title="Xóa phòng"
-                                    >
-                                    <Trash2 size={12} />
-                                    </button>
-                                </div>
+                                {!isReadOnly && (
+                                    <div className="hidden lg:flex absolute top-2 right-2 gap-1 opacity-0 group-hover/room:opacity-100 transition-all z-10 scale-90 lg:scale-100">
+                                        <button 
+                                        onClick={(e) => { e.stopPropagation(); openEditRoom(r); }}
+                                        className="bg-blue-500 text-white rounded-lg w-7 h-7 flex items-center justify-center shadow-md hover:bg-blue-600 transition-colors"
+                                        title="Cấu hình chi tiết"
+                                        >
+                                        <Pencil size={12} />
+                                        </button>
+                                        <button 
+                                        onClick={(e) => { e.stopPropagation(); removeRoom(r.id, r.name); }}
+                                        className="bg-white border border-red-200 text-red-500 rounded-lg w-7 h-7 flex items-center justify-center shadow-md hover:bg-red-50 transition-colors"
+                                        title="Xóa phòng"
+                                        >
+                                        <Trash2 size={12} />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         )})}
                         </div>
@@ -318,46 +329,50 @@ export const Rooms: React.FC = () => {
                  </div>
 
                  {/* Inline Add Room Form */}
-                 <div className="p-3 bg-gray-50 border-t mt-auto">
-                    <div className="flex flex-col md:flex-row gap-2">
-                       <input 
-                         type="text" 
-                         className="flex-1 border rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none bg-white text-slate-900" 
-                         placeholder="Mã P..."
-                         value={newRoomCodes[f.id] || ''}
-                         onChange={(e) => setNewRoomCodes(prev => ({ ...prev, [f.id]: e.target.value }))}
-                         onKeyDown={(e) => e.key === 'Enter' && addRoomToFacility(f)}
-                       />
-                       <div className="flex gap-2">
+                 {!isReadOnly && (
+                     <div className="p-3 bg-gray-50 border-t mt-auto">
+                        <div className="flex flex-col md:flex-row gap-2">
                            <input 
-                             type="number" 
-                             className="w-full md:w-24 border rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none bg-white text-slate-900" 
-                             placeholder="Giá..."
-                             title="Để trống sẽ lấy giá chuẩn"
-                             value={newRoomPrices[f.id] || ''}
-                             onChange={(e) => setNewRoomPrices(prev => ({ ...prev, [f.id]: e.target.value }))}
+                             type="text" 
+                             className="flex-1 border rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none bg-white text-slate-900" 
+                             placeholder="Mã P..."
+                             value={newRoomCodes[f.id] || ''}
+                             onChange={(e) => setNewRoomCodes(prev => ({ ...prev, [f.id]: e.target.value }))}
                              onKeyDown={(e) => e.key === 'Enter' && addRoomToFacility(f)}
                            />
-                           <button 
-                             onClick={() => addRoomToFacility(f)}
-                             className="bg-brand-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-brand-700 whitespace-nowrap"
-                           >
-                             Thêm
-                           </button>
-                       </div>
-                    </div>
-                 </div>
+                           <div className="flex gap-2">
+                               <input 
+                                 type="number" 
+                                 className="w-full md:w-24 border rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none bg-white text-slate-900" 
+                                 placeholder="Giá..."
+                                 title="Để trống sẽ lấy giá chuẩn"
+                                 value={newRoomPrices[f.id] || ''}
+                                 onChange={(e) => setNewRoomPrices(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                 onKeyDown={(e) => e.key === 'Enter' && addRoomToFacility(f)}
+                               />
+                               <button 
+                                 onClick={() => addRoomToFacility(f)}
+                                 className="bg-brand-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-brand-700 whitespace-nowrap"
+                               >
+                                 Thêm
+                               </button>
+                           </div>
+                        </div>
+                     </div>
+                 )}
               </div>
             )
           })}
           
           {/* Add Facility Card Placeholder */}
-          <button onClick={handleAddFacility} className="border-2 border-dashed border-gray-300 rounded-xl p-8 flex flex-col items-center justify-center text-gray-400 hover:border-brand-500 hover:text-brand-500 hover:bg-brand-50 transition-all min-h-[200px] group">
-             <div className="bg-gray-100 p-4 rounded-full group-hover:bg-brand-100 transition-colors mb-3">
-                 <Plus size={32} className="opacity-50 group-hover:opacity-100" />
-             </div>
-             <span className="font-medium">Thêm cơ sở mới</span>
-          </button>
+          {!isReadOnly && (
+              <button onClick={handleAddFacility} className="border-2 border-dashed border-gray-300 rounded-xl p-8 flex flex-col items-center justify-center text-gray-400 hover:border-brand-500 hover:text-brand-500 hover:bg-brand-50 transition-all min-h-[200px] group">
+                 <div className="bg-gray-100 p-4 rounded-full group-hover:bg-brand-100 transition-colors mb-3">
+                     <Plus size={32} className="opacity-50 group-hover:opacity-100" />
+                 </div>
+                 <span className="font-medium">Thêm cơ sở mới</span>
+              </button>
+          )}
        </div>
 
        {/* MODALS */}

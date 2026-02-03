@@ -45,6 +45,8 @@ export const Login: React.FC = () => {
           
           if (user.role === 'Buồng phòng') {
              navigate('/staff-portal');
+          } else if (user.role === 'Nhân viên') {
+             navigate('/bookings');
           } else {
              navigate('/dashboard');
           }

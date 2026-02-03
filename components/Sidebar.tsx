@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -21,7 +22,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
   // This matches the "Cần xử lý" tab logic in OtaOrders page
   const pendingOtaCount = otaOrders.filter(o => 
       o.status === 'Pending' || 
-      (o.status === 'Cancelled' && o.appConfirmStatus !== 'CONFIRMED')
+      o.status === 'Cancelled'
   ).length;
 
   // Check if currently clocked in
@@ -91,18 +92,20 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
               )}
           </button>
 
-          {/* SHIFT BUTTON */}
-          <button 
-             onClick={() => setShiftModalOpen(true)}
-             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg
-                ${currentShift ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 hover:bg-blue-600/20' : 'bg-brand-600 text-white hover:bg-brand-500'}
-             `}
-          >
-              <Clock size={18} className="shrink-0"/>
-              <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
-                  {currentShift ? 'Giao Ca / Quỹ' : 'Mở Ca Mới'}
-              </span>
-          </button>
+          {/* SHIFT BUTTON - HIDDEN FOR 'Buồng phòng' */}
+          {currentUser?.role !== 'Buồng phòng' && (
+            <button 
+               onClick={() => setShiftModalOpen(true)}
+               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg
+                  ${currentShift ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 hover:bg-blue-600/20' : 'bg-brand-600 text-white hover:bg-brand-500'}
+               `}
+            >
+                <Clock size={18} className="shrink-0"/>
+                <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
+                    {currentShift ? 'Giao Ca / Quỹ' : 'Mở Ca Mới'}
+                </span>
+            </button>
+          )}
       </div>
 
       <nav className="flex-1 px-2 space-y-1 overflow-y-auto custom-scrollbar">
@@ -151,26 +154,28 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
           );
         })}
 
-        {/* EXTERNAL LINK: EXPORT DECLARATION */}
-        <a 
-          href="https://script.google.com/macros/s/AKfycbzzj8UTLO47QNbZungZO_sXxbB1SXZg9PC7X1ljssrCC9EiN7_Y8zLDRWNoFGSxX9QBzQ/exec"
-          target="_blank"
-          rel="noopener noreferrer"
-          title={!isOpen ? 'Xuất file khai báo' : ''}
-          className="relative flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group mb-1 hover:bg-slate-800/80 hover:text-white text-slate-400"
-        >
-            <div className="relative shrink-0">
-                <FileUp size={20} className="transition-colors text-slate-400 group-hover:text-white" />
-            </div>
-            <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 text-sm flex-1 flex items-center justify-between ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
-                Xuất file khai báo
-            </span>
-            {(!isOpen && window.innerWidth >= 768) && (
-                <div className="absolute left-full ml-4 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap shadow-xl">
+        {/* EXTERNAL LINK: EXPORT DECLARATION - Hide for 'Nhân viên' OR 'Buồng phòng' */}
+        {currentUser?.role !== 'Nhân viên' && currentUser?.role !== 'Buồng phòng' && (
+          <a 
+            href="https://script.google.com/macros/s/AKfycbzzj8UTLO47QNbZungZO_sXxbB1SXZg9PC7X1ljssrCC9EiN7_Y8zLDRWNoFGSxX9QBzQ/exec"
+            target="_blank"
+            rel="noopener noreferrer"
+            title={!isOpen ? 'Xuất file khai báo' : ''}
+            className="relative flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group mb-1 hover:bg-slate-800/80 hover:text-white text-slate-400"
+          >
+              <div className="relative shrink-0">
+                  <FileUp size={20} className="transition-colors text-slate-400 group-hover:text-white" />
+              </div>
+              <span className={`whitespace-nowrap overflow-hidden transition-all duration-200 text-sm flex-1 flex items-center justify-between ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
                   Xuất file khai báo
-                </div>
-            )}
-        </a>
+              </span>
+              {(!isOpen && window.innerWidth >= 768) && (
+                  <div className="absolute left-full ml-4 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap shadow-xl">
+                    Xuất file khai báo
+                  </div>
+              )}
+          </a>
+        )}
       </nav>
 
       <div className="p-3 border-t border-slate-800/80 bg-[#020617]">

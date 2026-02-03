@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router-dom';
@@ -447,7 +448,11 @@ export const StaffPortal: React.FC = () => {
                 </div>
             </div>
             <div className="flex gap-2">
-                <button onClick={() => navigate('/dashboard')} className="p-2 text-slate-400 hover:text-brand-600 transition-colors" title="Về Dashboard">
+                <button 
+                    onClick={() => (currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng') ? navigate('/bookings') : navigate('/dashboard')} 
+                    className="p-2 text-slate-400 hover:text-brand-600 transition-colors" 
+                    title={(currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng') ? "Về Lịch đặt phòng" : "Về Dashboard"}
+                >
                     <LayoutDashboard size={20} />
                 </button>
                 <button onClick={handleRefresh} disabled={isLoading} className={`p-2 transition-colors ${isLoading ? 'text-brand-600 animate-spin' : 'text-slate-400 hover:text-brand-600'}`}>

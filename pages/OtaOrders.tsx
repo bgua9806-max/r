@@ -83,14 +83,16 @@ const processOtaGroups = (orders: OtaOrder[]) => {
 };
 
 export const OtaOrders: React.FC = () => {
-  const { otaOrders, syncOtaOrders, queryOtaOrders, isLoading: isSyncing, deleteOtaOrder, bookings, updateBooking, notify, confirmOtaCancellation, triggerWebhook } = useAppContext();
+  const { otaOrders, syncOtaOrders, queryOtaOrders, isLoading: isSyncing, deleteOtaOrder, bookings, updateBooking, notify, confirmOtaCancellation, triggerWebhook, currentUser } = useAppContext();
   
+  const isReadOnly = currentUser?.role === 'Buồng phòng';
+
   // -- LOCAL STATE FOR SERVER-SIDE DATA --
   const [listData, setListData] = useState<OtaOrder[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(0);
   const [isFetching, setIsFetching] = useState(false);
-  const observerTarget = useRef<HTMLDivElement>(null);
+  const observerTarget = useRef<HTMLTableRowElement>(null);
 
   // -- FILTERS --
   const [activeTab, setActiveTab] = useState<'Pending' | 'Today' | 'Processed' | 'Cancelled'>('Pending');
@@ -337,14 +339,16 @@ export const OtaOrders: React.FC = () => {
                         />
                     </div>
 
-                    <button 
-                        onClick={handleSyncAndNotify}
-                        disabled={isSyncing}
-                        className="bg-brand-600 text-white border border-brand-600 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-brand-700 transition-all shadow-md shadow-brand-200 active:scale-95 disabled:opacity-50 shrink-0"
-                    >
-                        <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
-                        <span className="hidden md:inline">{isSyncing ? 'Đang tải...' : 'Đồng bộ'}</span>
-                    </button>
+                    {!isReadOnly && (
+                        <button 
+                            onClick={handleSyncAndNotify}
+                            disabled={isSyncing}
+                            className="bg-brand-600 text-white border border-brand-600 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-brand-700 transition-all shadow-md shadow-brand-200 active:scale-95 disabled:opacity-50 shrink-0"
+                        >
+                            <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+                            <span className="hidden md:inline">{isSyncing ? 'Đang tải...' : 'Đồng bộ'}</span>
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -543,6 +547,7 @@ export const OtaOrders: React.FC = () => {
                                             {isCancelled ? (
                                                 /* CANCELLED STATE ACTION */
                                                 order.assignedRoom ? (
+                                                    !isReadOnly && (
                                                     <button 
                                                         onClick={() => handleResolveConflict(order)}
                                                         className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5 animate-pulse"
@@ -550,13 +555,16 @@ export const OtaOrders: React.FC = () => {
                                                         <span>XÁC NHẬN HỦY</span>
                                                         <span className="opacity-80">(Giải phóng phòng)</span>
                                                     </button>
+                                                    )
                                                 ) : (
+                                                    !isReadOnly && (
                                                     <button 
                                                         onClick={() => handleConfirmCancel(order)}
                                                         className="w-full bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
                                                     >
                                                         <Trash2 size={14}/> Xác nhận Hủy
                                                     </button>
+                                                    )
                                                 )
                                             ) : isConfirmed ? (
                                                 /* CONFIRMED (HISTORY) STATE */
@@ -570,12 +578,14 @@ export const OtaOrders: React.FC = () => {
                                                 </span>
                                             ) : (
                                                 /* PENDING STATE ACTION */
+                                                !isReadOnly && (
                                                 <button 
                                                     onClick={() => handleAssignRoom(order)}
                                                     className="w-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95"
                                                 >
                                                     Xếp phòng
                                                 </button>
+                                                )
                                             )}
                                         </td>
                                     </tr>
@@ -682,19 +692,23 @@ export const OtaOrders: React.FC = () => {
                                 {/* ACTION BUTTONS MOBILE */}
                                 {isCancelled ? (
                                     order.assignedRoom ? (
+                                        !isReadOnly && (
                                         <button 
                                             onClick={() => handleResolveConflict(order)}
                                             className="bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-700 transition-colors animate-pulse"
                                         >
                                             XÁC NHẬN HỦY
                                         </button>
+                                        )
                                     ) : (
+                                        !isReadOnly && (
                                         <button 
                                             onClick={() => handleConfirmCancel(order)}
                                             className="bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-red-50 transition-colors"
                                         >
                                             Xác nhận Hủy
                                         </button>
+                                        )
                                     )
                                 ) : isConfirmed ? (
                                     <span className="px-3 py-1 rounded text-[10px] font-black border uppercase bg-slate-100 text-slate-500 border-slate-200">
@@ -705,12 +719,14 @@ export const OtaOrders: React.FC = () => {
                                         Đã xếp
                                     </span>
                                 ) : (
+                                    !isReadOnly && (
                                     <button 
                                         onClick={() => handleAssignRoom(order)}
                                         className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-brand-600 transition-colors"
                                     >
                                         Xếp phòng
                                     </button>
+                                    )
                                 )}
                             </div>
                         </div>

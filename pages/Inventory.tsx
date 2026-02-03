@@ -17,6 +17,8 @@ export const Inventory: React.FC = () => {
     inventoryTransactions, addInventoryTransaction, currentUser, rooms
   } = useAppContext();
 
+  const isReadOnly = currentUser?.role === 'Buồng phòng';
+
   const [activeTab, setActiveTab] = useState<'Overview' | 'Consumable' | 'Linen' | 'Service' | 'History'>('Overview');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -423,7 +425,9 @@ export const Inventory: React.FC = () => {
                                             </td>
                                             <td className="p-3 text-center text-slate-400">{item.minStock}</td>
                                             <td className="p-3 text-right">
+                                                {!isReadOnly && (
                                                 <button onClick={() => openTransaction(item, 'Purchase')} className="text-[10px] font-bold bg-brand-50 text-brand-700 px-2 py-1 rounded hover:bg-brand-100 transition-colors">NHẬP NGAY</button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -448,7 +452,9 @@ export const Inventory: React.FC = () => {
                                       <span>Tối thiểu: {item.minStock}</span>
                                       <span className="uppercase">{item.category}</span>
                                   </div>
+                                  {!isReadOnly && (
                                   <button onClick={() => openTransaction(item, 'Purchase')} className="w-full bg-white border border-slate-300 text-slate-700 text-xs font-bold py-2.5 rounded-lg shadow-sm active:scale-95 transition-all">NHẬP NGAY</button>
+                                  )}
                               </div>
                           ))}
                       </div>
@@ -493,9 +499,11 @@ export const Inventory: React.FC = () => {
             <p className="text-slate-500 text-sm font-medium">Quy trình tự động hóa: Check-in trừ kho, Checkout trả kho bẩn.</p>
         </div>
         <div className="flex gap-2 w-full md:w-auto">
+            {!isReadOnly && (
             <button onClick={() => setAddModalOpen(true)} className="bg-brand-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-brand-700 transition-all shadow-lg shadow-brand-100 flex-1 md:flex-none">
                 <Plus size={20}/> <span className="inline">Thêm vật tư</span>
             </button>
+            )}
             <button onClick={() => refreshData()} disabled={isLoading} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-brand-600 transition-all">
                 <RefreshCw size={20} className={isLoading ? 'animate-spin' : ''}/>
             </button>
@@ -745,7 +753,7 @@ export const Inventory: React.FC = () => {
                                         <td className="p-5 text-center bg-rose-50/20">
                                             <div className="flex flex-col items-center">
                                                 <span className="text-rose-700 font-black text-base">{item.laundryStock || 0}</span>
-                                                {item.laundryStock! > 0 && (
+                                                {item.laundryStock! > 0 && !isReadOnly && (
                                                     <button onClick={() => openTransaction(item, 'ReceiveLaundry')} className="text-[9px] font-black text-rose-500 hover:underline flex items-center gap-0.5 mt-1 bg-white px-2 py-1 rounded shadow-sm border border-rose-100 hover:bg-rose-50">
                                                         <ArrowDownCircle size={10}/> NHẬP GIẶT
                                                     </button>
@@ -777,10 +785,14 @@ export const Inventory: React.FC = () => {
                                         </td>
                                         <td className="p-5 text-center">
                                             <div className="flex justify-center gap-2">
+                                                {!isReadOnly && (
+                                                <>
                                                 <button onClick={() => openTransaction(item, 'Purchase')} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Nhập hàng mới / Tăng tài sản"><Plus size={18}/></button>
                                                 <button onClick={() => openTransaction(item, 'SendLaundry')} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Gửi đồ đi giặt (Sạch -> Bẩn)"><Repeat size={18}/></button>
                                                 <button onClick={() => openTransaction(item, 'Liquidate')} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Thanh lý / Hủy / Vỡ"><Trash2 size={18}/></button>
                                                 <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"><Pencil size={18}/></button>
+                                                </>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -811,9 +823,13 @@ export const Inventory: React.FC = () => {
                                         </td>
                                         <td className="p-5 text-center">
                                             <div className="flex justify-center gap-2">
+                                                {!isReadOnly && (
+                                                <>
                                                 <button onClick={() => openTransaction(item, 'Purchase')} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Nhập hàng"><Plus size={18}/></button>
                                                 <button onClick={() => openTransaction(item, 'Liquidate')} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Hủy / Hết hạn"><Trash2 size={18}/></button>
                                                 <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"><Pencil size={18}/></button>
+                                                </>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -845,9 +861,11 @@ export const Inventory: React.FC = () => {
                                        <div className="font-bold text-slate-800 text-lg line-clamp-1">{item.name}</div>
                                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase mt-1 inline-block">{item.category}</span>
                                    </div>
+                                   {!isReadOnly && (
                                    <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg">
                                        <Pencil size={18}/>
                                    </button>
+                                   )}
                                </div>
                                
                                {/* Visual Stock Bar */}
@@ -897,6 +915,7 @@ export const Inventory: React.FC = () => {
                                )}
 
                                {/* Action Grid Buttons */}
+                               {!isReadOnly && (
                                <div className="grid grid-cols-3 gap-2">
                                    <button onClick={() => openTransaction(item, 'Purchase')} className="py-3 bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-100 font-bold text-xs rounded-xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all">
                                        <Plus size={18} strokeWidth={2.5}/> Nhập
@@ -915,6 +934,7 @@ export const Inventory: React.FC = () => {
                                        <Trash2 size={18} strokeWidth={2.5}/> Hủy
                                    </button>
                                 </div>
+                               )}
                            </div>
                        );
                    })}

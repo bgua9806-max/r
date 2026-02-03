@@ -4,11 +4,12 @@ import { Settings, Facility, Collaborator, Booking, Expense, ServiceItem, Room, 
 // --- PERMISSION MATRIX ---
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
   'Admin': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'], 
-  'Quản lý': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/customers', '/collaborators', '/expenses', '/settings', '/staff-portal'],
-  'Nhân viên': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal', '/collaborators'],
+  'Quản lý': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/collaborators', '/expenses', '/staff-portal'],
+  // UPDATED: Nhân viên removed /dashboard and /customers
+  'Nhân viên': ['/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/staff-portal', '/collaborators'],
   'Nhà đầu tư': ['/dashboard'],
-  // UPDATED: Buồng phòng có quyền giống Nhân viên
-  'Buồng phòng': ['/dashboard', '/bookings', '/ota-orders', '/rooms', '/housekeeping', '/customers', '/inventory', '/staff-portal', '/collaborators']
+  // UPDATED: Buồng phòng removed /dashboard and /customers
+  'Buồng phòng': ['/bookings', '/ota-orders', '/rooms', '/housekeeping', '/inventory', '/staff-portal', '/collaborators']
 };
 
 export const DEFAULT_SETTINGS: Settings = {
