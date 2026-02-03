@@ -1140,16 +1140,23 @@ If a field is not visible, return empty string "".`;
          await handleInventoryDeduction(usedServices);
          await handleLendingDeduction(lendingList);
 
+         // NEW LOGIC: Audit Log for Check-in
+         const now = new Date();
+         const actorName = currentUser?.collaboratorName || 'Unknown';
+         const logEntry = `\n✅ [${format(now, 'HH:mm dd/MM')}] Check-in bởi ${actorName}`;
+         const updatedNote = (formData.note || '') + logEntry;
+
          const updatedBooking: Booking = { 
              ...(formData as Booking), 
              status: 'CheckedIn', 
-             actualCheckIn: new Date().toISOString(),
+             actualCheckIn: now.toISOString(),
              totalRevenue: totalRevenue,
              remainingAmount: remaining,
              paymentsJson: JSON.stringify(payments),
              servicesJson: JSON.stringify(usedServices),
              lendingJson: JSON.stringify(lendingList),
-             guestsJson: JSON.stringify(guestList)
+             guestsJson: JSON.stringify(guestList),
+             note: updatedNote // Update note here
          };
          
          await updateBooking(updatedBooking);
@@ -1170,6 +1177,12 @@ If a field is not visible, return empty string "".`;
          await handleInventoryDeduction(usedServices);
          
          const now = new Date();
+
+         // NEW LOGIC: Audit Log for Check-out
+         const actorName = currentUser?.collaboratorName || 'Unknown';
+         const logEntry = `\n👋 [${format(now, 'HH:mm dd/MM')}] Check-out bởi ${actorName}. Tổng thu: ${totalRevenue.toLocaleString()}`;
+         const updatedNote = (formData.note || '') + logEntry;
+
          const updatedBooking: Booking = { 
              ...(formData as Booking), 
              status: 'CheckedOut', 
@@ -1179,7 +1192,8 @@ If a field is not visible, return empty string "".`;
              paymentsJson: JSON.stringify(payments),
              servicesJson: JSON.stringify(usedServices),
              lendingJson: JSON.stringify(lendingList),
-             guestsJson: JSON.stringify(guestList)
+             guestsJson: JSON.stringify(guestList),
+             note: updatedNote // Update note here
          };
          
          const facility = facilities.find(f => f.facilityName === formData.facilityName);
