@@ -1,12 +1,12 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Collaborator, ShiftSchedule, AttendanceAdjustment, LeaveRequest, TimeLog } from '../types';
+import { Collaborator, ShiftSchedule, AttendanceAdjustment, LeaveRequest, TimeLog, Expense } from '../types';
 import { CollaboratorModal } from '../components/CollaboratorModal';
 import { 
   Pencil, Trash2, Plus, Search, ClipboardList,
   ChevronLeft, ChevronRight, Calendar, Edit2, FileDown, Wallet, DollarSign, Sun, Moon, 
-  CheckCircle, AlertCircle, Send, User, Cake, HeartPulse, ShieldCheck, CalendarDays, Palmtree, UserCheck, Loader2, X, Check, Clock, MapPin, QrCode
+  CheckCircle, AlertCircle, Send, User, HeartPulse, ShieldCheck, UserCheck, Loader2, X, Check, Clock, MapPin, QrCode, AlertTriangle, Gavel, Banknote, PiggyBank, History
 } from 'lucide-react';
 import { HRTabs, HRTabType } from '../components/HRTabs';
 import { ListFilter, FilterOption } from '../components/ListFilter';
@@ -16,9 +16,10 @@ import { PayrollQrModal } from '../components/PayrollQrModal';
 import { format, addDays, isSameDay, isWithinInterval, parseISO, isSameMonth } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { Modal } from '../components/Modal';
+import { storageService } from '../services/storage';
 
 export const Collaborators: React.FC = () => {
-  const { collaborators, deleteCollaborator, schedules, adjustments, notify, currentUser, leaveRequests, addLeaveRequest, updateLeaveRequest, triggerWebhook, timeLogs } = useAppContext();
+  const { collaborators, deleteCollaborator, schedules, adjustments, notify, currentUser, leaveRequests, addLeaveRequest, updateLeaveRequest, triggerWebhook, timeLogs, salaryAdvances, approveAdvance, requestAdvance, addViolation, refreshData } = useAppContext();
   const [activeTab, setActiveTab] = useState<HRTabType>('overview'); // Default is Overview
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingCollab, setEditingCollab] = useState<Collaborator | null>(null);
@@ -55,8 +56,24 @@ export const Collaborators: React.FC = () => {
       end_date: new Date().toISOString().substring(0, 10)
   });
   
+  // FINE MODAL STATE
+  const [isFineModalOpen, setFineModalOpen] = useState(false);
+  const [fineStaff, setFineStaff] = useState<Collaborator | null>(null);
+  const [fineAmount, setFineAmount] = useState<number>(0);
+  const [fineReason, setFineReason] = useState('');
+  const [fineEvidence, setFineEvidence] = useState('');
+
+  // ADVANCE MODAL STATE (MANUAL & REQUEST)
+  const [isAdvanceModalOpen, setAdvanceModalOpen] = useState(false);
+  const [advanceStaff, setAdvanceStaff] = useState<Collaborator | null>(null);
+  const [advanceAmount, setAdvanceAmount] = useState<number>(0);
+  const [advanceReason, setAdvanceReason] = useState('');
+  const [isSelfRequest, setIsSelfRequest] = useState(false); // Flag to check if staff is requesting for themselves
+
   // Loading state for approval actions
   const [processingLeaveId, setProcessingLeaveId] = useState<string | null>(null);
+  const [processingAdvanceId, setProcessingAdvanceId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Permission Check Helper - UPDATED: Include 'Buồng phòng'
   const isRestricted = currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng';
@@ -123,29 +140,21 @@ export const Collaborators: React.FC = () => {
                 const hour = checkIn.getHours();
                 const minutes = checkIn.getMinutes();
                 
-                // Determine Shift based on Check-in Time
-                // Morning: 05:00 - 14:00 (Start ~06:00)
-                // Night: 14:00 - 23:00 (Start ~18:00)
-                
                 if (hour >= 14) {
                     // Night Shift
                     nightShifts += 1;
                     standardDays += 1.2;
-                    
-                    // Late Check: After 18:15
                     if (hour > 18 || (hour === 18 && minutes > 15)) {
                         lateCount++;
-                        totalLateMinutes += ((hour - 18) * 60 + (minutes - 0)); // Approximate relative to 18:00
+                        totalLateMinutes += ((hour - 18) * 60 + (minutes - 0)); 
                     }
                 } else {
                     // Morning Shift
                     dayShifts += 1;
                     standardDays += 1;
-
-                    // Late Check: After 06:15
                     if (hour > 6 || (hour === 6 && minutes > 15)) {
                         lateCount++;
-                        totalLateMinutes += ((hour - 6) * 60 + (minutes - 0)); // Approximate relative to 06:00
+                        totalLateMinutes += ((hour - 6) * 60 + (minutes - 0)); 
                     }
                 }
             });
@@ -172,6 +181,16 @@ export const Collaborators: React.FC = () => {
         };
      });
   }, [collaborators, schedules, adjustments, currentDate, selectedMonthStr, timesheetMode, timeLogs]);
+
+  // Specific stats for the currently logged in user
+  const myFinancialStats = useMemo(() => {
+      if (!currentUser) return { estimatedSalary: 0, standardDays: 0 };
+      const myData = timesheetData.find(d => d.staff.id === currentUser.id);
+      return {
+          estimatedSalary: myData?.calculatedSalary || 0,
+          standardDays: myData?.standardDays || 0
+      };
+  }, [timesheetData, currentUser]);
 
   const roleOptions: FilterOption[] = useMemo(() => {
     const counts = collaborators.reduce((acc, c) => {
@@ -208,6 +227,7 @@ export const Collaborators: React.FC = () => {
       );
 
       const pendingLeaves = leaveRequests.filter(lr => lr.status === 'Pending');
+      const pendingAdvances = salaryAdvances.filter(a => a.status === 'Pending');
       const totalSalaryEstimate = timesheetData.reduce((acc, curr) => acc + curr.calculatedSalary, 0);
 
       // Get shifts for today
@@ -215,8 +235,8 @@ export const Collaborators: React.FC = () => {
       const morningStaff = collaborators.filter(c => todayShifts.some(s => s.staff_id === c.id && s.shift_type === 'Sáng'));
       const nightStaff = collaborators.filter(c => todayShifts.some(s => s.staff_id === c.id && s.shift_type === 'Tối'));
 
-      return { totalStaff, onLeaveToday, pendingLeaves, totalSalaryEstimate, morningStaff, nightStaff };
-  }, [collaborators, leaveRequests, timesheetData, schedules]);
+      return { totalStaff, onLeaveToday, pendingLeaves, pendingAdvances, totalSalaryEstimate, morningStaff, nightStaff };
+  }, [collaborators, leaveRequests, timesheetData, schedules, salaryAdvances]);
 
   const handleEdit = (c: Collaborator) => {
     setEditingCollab(c);
@@ -246,6 +266,95 @@ export const Collaborators: React.FC = () => {
       setPayrollModalOpen(true);
   };
 
+  const handleOpenFine = (staff: Collaborator) => {
+      setFineStaff(staff);
+      setFineAmount(0);
+      setFineReason('');
+      setFineEvidence('');
+      setFineModalOpen(true);
+  };
+
+  const handleSubmitFine = async () => {
+      if (!fineStaff || fineAmount <= 0 || !fineReason) {
+          notify('error', 'Vui lòng nhập đủ thông tin phạt.');
+          return;
+      }
+      await addViolation(fineStaff.id, fineAmount, fineReason, fineEvidence);
+      setFineModalOpen(false);
+  };
+
+  // Open Advance Modal for Admin (Manual Entry)
+  const handleOpenManualAdvance = (staff: Collaborator) => {
+      setAdvanceStaff(staff);
+      setAdvanceAmount(0);
+      setAdvanceReason('');
+      setIsSelfRequest(false); // Admin mode
+      setAdvanceModalOpen(true);
+  };
+
+  // Open Advance Modal for Staff (Request)
+  const handleOpenRequestAdvance = () => {
+      if (!currentUser) return;
+      setAdvanceStaff(currentUser);
+      setAdvanceAmount(0);
+      setAdvanceReason('');
+      setIsSelfRequest(true); // Staff mode
+      setAdvanceModalOpen(true);
+  };
+
+  const handleSubmitAdvance = async () => {
+      if (!advanceStaff || advanceAmount <= 0 || !advanceReason) {
+          notify('error', 'Vui lòng nhập đủ thông tin ứng lương.');
+          return;
+      }
+
+      setIsProcessing(true);
+      try {
+          if (isSelfRequest) {
+              // Staff Request: Creates Pending Record
+              if (advanceAmount > myFinancialStats.estimatedSalary * 0.7) {
+                  if (!confirm('Số tiền ứng vượt quá 70% lương hiện tại. Vẫn tiếp tục?')) {
+                      setIsProcessing(false);
+                      return;
+                  }
+              }
+              await requestAdvance(advanceAmount, advanceReason);
+              // Notification is handled in requestAdvance
+          } else {
+              // Admin Manual: Creates Approved Record + Expense
+              // Create Advance Record
+              const item = {
+                  id: `ADV-${Date.now()}`,
+                  staff_id: advanceStaff.id,
+                  amount: advanceAmount,
+                  reason: advanceReason,
+                  status: 'Approved' as const, 
+                  request_date: new Date().toISOString(),
+                  created_at: new Date().toISOString()
+              };
+              await storageService.addSalaryAdvance(item);
+
+              // Auto Create Expense
+              const expense: Expense = {
+                  id: `EXP-ADV-${Date.now()}`,
+                  expenseDate: new Date().toISOString().substring(0, 10),
+                  facilityName: 'General', 
+                  expenseCategory: 'Lương nhân viên',
+                  expenseContent: `Ứng lương cho ${advanceStaff.collaboratorName}`,
+                  amount: advanceAmount,
+                  note: `Admin tạo thủ công: ${advanceReason}`
+              };
+              await storageService.addExpense(expense);
+
+              await refreshData();
+              notify('success', `Đã tạo phiếu ứng ${advanceAmount.toLocaleString()}đ`);
+          }
+          setAdvanceModalOpen(false);
+      } finally {
+          setIsProcessing(false);
+      }
+  };
+
   const submitLeaveRequest = async () => {
       if (!leaveForm.reason || !currentUser) {
           notify('error', 'Vui lòng nhập lý do nghỉ.');
@@ -266,10 +375,9 @@ export const Collaborators: React.FC = () => {
 
       await addLeaveRequest(req);
       setLeaveModalOpen(false);
-      setLeaveForm({ ...leaveForm, reason: '' }); // Reset partial
+      setLeaveForm({ ...leaveForm, reason: '' }); 
       notify('success', 'Đã gửi đơn xin nghỉ.');
       
-      // 1. Send Zalo Specific (Legacy)
       triggerWebhook('leave_update', {
           event: 'new_request',
           staff: req.staff_name,
@@ -279,9 +387,8 @@ export const Collaborators: React.FC = () => {
           status: 'Chờ duyệt'
       });
 
-      // 2. Send General Notification (New Feature)
       triggerWebhook('general_notification', {
-          type: 'STAFF_LEAVE', // Label for n8n Switch
+          type: 'STAFF_LEAVE',
           payload: {
               staff_name: req.staff_name,
               reason: req.reason,
@@ -292,26 +399,19 @@ export const Collaborators: React.FC = () => {
   };
 
   const handleApproveLeave = async (req: LeaveRequest, isApproved: boolean) => {
-      // SECURITY GUARD: Only Admin or Manager can approve
       if (currentUser?.role !== 'Admin' && currentUser?.role !== 'Quản lý') {
           notify('error', 'Bạn không có quyền duyệt đơn này.');
           return;
       }
 
-      // One-click action: No blocking confirm dialog
       setProcessingLeaveId(req.id);
       try {
           const status = isApproved ? 'Approved' : 'Rejected';
-          // Optimistic update: Context will update UI immediately
           await updateLeaveRequest({ ...req, status });
           
-          if (isApproved) {
-              notify('success', `Đã duyệt đơn của ${req.staff_name}.`);
-          } else {
-              notify('info', `Đã từ chối đơn của ${req.staff_name}.`);
-          }
+          if (isApproved) notify('success', `Đã duyệt đơn của ${req.staff_name}.`);
+          else notify('info', `Đã từ chối đơn của ${req.staff_name}.`);
 
-          // 1. Legacy Zalo
           triggerWebhook('leave_update', {
               event: 'status_update',
               staff: req.staff_name,
@@ -320,8 +420,6 @@ export const Collaborators: React.FC = () => {
               approver: currentUser?.collaboratorName || 'Admin'
           });
 
-          // 2. General Notification (New Feature)
-          // Also notifying on status change
           triggerWebhook('general_notification', {
               type: 'STAFF_LEAVE_UPDATE', 
               payload: {
@@ -334,6 +432,15 @@ export const Collaborators: React.FC = () => {
           notify('error', 'Có lỗi khi cập nhật trạng thái.');
       } finally {
           setProcessingLeaveId(null);
+      }
+  };
+
+  const handleApproveAdvance = async (id: string, isApproved: boolean) => {
+      setProcessingAdvanceId(id);
+      try {
+          await approveAdvance(id, isApproved);
+      } finally {
+          setProcessingAdvanceId(null);
       }
   };
 
@@ -439,7 +546,7 @@ export const Collaborators: React.FC = () => {
               {/* MAIN CONTENT GRID (3 COLUMNS) */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                   
-                  {/* COL 1: SHIFT MONITOR (Operations) */}
+                  {/* COL 1: SHIFT MONITOR */}
                   <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-[400px]">
                       <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-50">
                           <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
@@ -451,7 +558,7 @@ export const Collaborators: React.FC = () => {
                       </div>
                       
                       <div className="space-y-4 flex-1">
-                          {/* Ca Sáng */}
+                          {/* Morning */}
                           <div className="relative">
                               <div className="flex items-center gap-2 mb-2">
                                   <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center text-amber-600 shadow-sm"><Sun size={16}/></div>
@@ -477,7 +584,7 @@ export const Collaborators: React.FC = () => {
                               </div>
                           </div>
 
-                          {/* Ca Tối */}
+                          {/* Evening */}
                           <div className="relative pt-2">
                               <div className="absolute left-4 top-[-10px] bottom-full w-[2px] bg-slate-100 -z-10"></div>
                               <div className="flex items-center gap-2 mb-2">
@@ -506,16 +613,76 @@ export const Collaborators: React.FC = () => {
                       </div>
                   </div>
 
-                  {/* COL 2: LEAVE STATUS (Management) */}
+                  {/* COL 2: APPROVAL QUEUE (ADVANCES) - Replaced with dedicated tab content below */}
+                  {/* Kept here for Overview continuity or remove if redundant */}
                   <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-[400px]">
                       <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-50">
                           <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                              <UserCheck size={18} className="text-brand-600"/> Nhân sự & Duyệt đơn
+                              <Wallet size={18} className="text-brand-600"/> Duyệt Ứng Lương
+                          </h3>
+                          <span className="bg-brand-50 text-brand-600 px-2 py-0.5 rounded text-xs font-black">{overviewStats.pendingAdvances.length}</span>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto max-h-[300px] custom-scrollbar">
+                          {overviewStats.pendingAdvances.length === 0 ? (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-300">
+                                  <CheckCircle size={32} className="mb-2 opacity-50"/>
+                                  <span className="text-xs font-medium">Không có yêu cầu mới</span>
+                              </div>
+                          ) : (
+                              <div className="space-y-3">
+                                  {overviewStats.pendingAdvances.map(req => {
+                                      const staff = collaborators.find(c => c.id === req.staff_id);
+                                      return (
+                                          <div key={req.id} className="p-3 border border-slate-200 rounded-xl bg-slate-50">
+                                              <div className="flex justify-between items-start mb-2">
+                                                  <div className="flex items-center gap-2">
+                                                      <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-slate-700 font-bold text-xs shadow-sm border border-slate-100">
+                                                          {staff?.collaboratorName.charAt(0)}
+                                                      </div>
+                                                      <div>
+                                                          <div className="font-bold text-sm text-slate-800">{staff?.collaboratorName}</div>
+                                                          <div className="text-[10px] text-slate-500">{format(parseISO(req.request_date), 'dd/MM/yyyy')}</div>
+                                                      </div>
+                                                  </div>
+                                                  <div className="text-right">
+                                                      <div className="font-black text-brand-600">{req.amount.toLocaleString()} ₫</div>
+                                                  </div>
+                                              </div>
+                                              <div className="text-xs text-slate-600 italic mb-3 bg-white p-2 rounded border border-slate-100">"{req.reason}"</div>
+                                              <div className="flex gap-2">
+                                                  <button 
+                                                      onClick={() => handleApproveAdvance(req.id, false)}
+                                                      disabled={processingAdvanceId === req.id}
+                                                      className="flex-1 py-1.5 bg-white border border-rose-200 text-rose-600 text-[10px] font-bold uppercase rounded-lg hover:bg-rose-50"
+                                                  >
+                                                      Từ chối
+                                                  </button>
+                                                  <button 
+                                                      onClick={() => handleApproveAdvance(req.id, true)}
+                                                      disabled={processingAdvanceId === req.id}
+                                                      className="flex-1 py-1.5 bg-brand-600 text-white text-[10px] font-bold uppercase rounded-lg hover:bg-brand-700 shadow-sm flex items-center justify-center gap-1"
+                                                  >
+                                                      {processingAdvanceId === req.id ? <Loader2 size={12} className="animate-spin"/> : <Check size={12}/>} Duyệt
+                                                  </button>
+                                              </div>
+                                          </div>
+                                      );
+                                  })}
+                              </div>
+                          )}
+                      </div>
+                  </div>
+                  
+                  {/* COL 3: LEAVE STATUS */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-full min-h-[400px]">
+                      <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-50">
+                          <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                              <UserCheck size={18} className="text-brand-600"/> Nhân sự nghỉ phép
                           </h3>
                       </div>
 
                       <div className="flex-1 flex flex-col gap-4">
-                          {/* Current Leaves */}
                           <div>
                               <div className="text-[10px] font-bold text-slate-400 uppercase mb-2">Đang nghỉ hôm nay</div>
                               {overviewStats.onLeaveToday.length === 0 ? (
@@ -542,10 +709,9 @@ export const Collaborators: React.FC = () => {
                               )}
                           </div>
 
-                          {/* Pending Requests */}
                           <div className="flex-1 flex flex-col">
                               <div className="text-[10px] font-bold text-slate-400 uppercase mb-2 flex justify-between items-center">
-                                  <span>Cần duyệt ({overviewStats.pendingLeaves.length})</span>
+                                  <span>Đơn nghỉ chờ duyệt ({overviewStats.pendingLeaves.length})</span>
                                   {overviewStats.pendingLeaves.length > 0 && <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>}
                               </div>
                               
@@ -564,7 +730,6 @@ export const Collaborators: React.FC = () => {
                                                       <span className="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded font-medium">{format(parseISO(req.start_date), 'dd/MM')}</span>
                                                   </div>
                                                   <div className="text-[10px] text-slate-500 mt-1 line-clamp-1">{req.leave_type}: {req.reason}</div>
-                                                  <div className="mt-2 text-[10px] text-brand-600 font-bold group-hover:underline">Xem chi tiết &rarr;</div>
                                               </div>
                                           ))}
                                       </div>
@@ -573,56 +738,11 @@ export const Collaborators: React.FC = () => {
                           </div>
                       </div>
                   </div>
-                  
-                  {/* COL 3: UTILITIES (Birthday & Quick Actions) */}
-                  <div className="space-y-6 flex flex-col h-full">
-                      {/* Birthdays */}
-                      <div className="bg-gradient-to-br from-purple-600 to-indigo-600 p-6 rounded-2xl shadow-xl text-white relative overflow-hidden flex-1 min-h-[180px] flex flex-col justify-center">
-                          <div className="absolute top-0 right-0 p-12 bg-white/10 rounded-full -mr-10 -mt-10 blur-2xl"></div>
-                          <div className="bg-white/20 p-3 rounded-xl w-fit mb-4 backdrop-blur-sm shadow-inner border border-white/10">
-                              <Cake size={24} />
-                          </div>
-                          <h3 className="font-bold text-lg mb-1">Sinh nhật tháng {format(currentDate, 'MM')}</h3>
-                          <p className="text-purple-100 text-xs mb-4 leading-relaxed opacity-90 font-medium">
-                              Đừng quên gửi lời chúc mừng đến các thành viên có sinh nhật!
-                          </p>
-                          
-                          {/* Placeholder for Birthdays */}
-                          <div className="bg-white/10 rounded-xl p-3 backdrop-blur-md border border-white/10 flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">?</div>
-                              <span className="text-xs font-bold opacity-80">Không có sinh nhật nào sắp tới.</span>
-                          </div>
-                      </div>
-
-                      {/* QUICK ACTIONS */}
-                      <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex-1">
-                          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Lối tắt quản lý</h4>
-                          <div className="space-y-3">
-                              <button onClick={() => { setActiveTab('shifts'); }} className="w-full text-left px-4 py-3 rounded-xl bg-blue-50 hover:bg-blue-100 transition-all text-xs font-bold text-slate-700 flex items-center gap-3 border border-blue-100 hover:border-blue-200 group">
-                                  <div className="p-1.5 rounded-lg bg-blue-200 text-blue-700 group-hover:bg-blue-600 group-hover:text-white transition-colors"><CalendarDays size={16}/></div> 
-                                  <span>Xem lịch phân ca</span>
-                              </button>
-                              
-                              {/* HIDE SENSITIVE ACTIONS FOR STAFF */}
-                              {!isRestricted && (
-                                  <button onClick={() => { setActiveTab('timesheet'); }} className="w-full text-left px-4 py-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 transition-all text-xs font-bold text-slate-700 flex items-center gap-3 border border-emerald-100 hover:border-emerald-200 group">
-                                      <div className="p-1.5 rounded-lg bg-emerald-200 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><ClipboardList size={16}/></div> 
-                                      <span>Bảng công & Lương</span>
-                                  </button>
-                              )}
-
-                              <button onClick={() => { setLeaveModalOpen(true); }} className="w-full text-left px-4 py-3 rounded-xl bg-purple-50 hover:bg-purple-100 transition-all text-xs font-bold text-slate-700 flex items-center gap-3 border border-purple-100 hover:border-purple-200 group">
-                                  <div className="p-1.5 rounded-lg bg-purple-200 text-purple-700 group-hover:bg-purple-600 group-hover:text-white transition-colors"><Palmtree size={16}/></div> 
-                                  <span>Tạo đơn nghỉ phép</span>
-                              </button>
-                          </div>
-                      </div>
-                  </div>
               </div>
           </div>
       )}
 
-      {/* --- TAB 2: EMPLOYEE LIST (RESTRICTED FOR STAFF) --- */}
+      {/* --- TAB 2: EMPLOYEE LIST --- */}
       {activeTab === 'employees' && !isRestricted && (
         <div className="animate-in fade-in">
           <ListFilter 
@@ -672,8 +792,10 @@ export const Collaborators: React.FC = () => {
                       </td>
                       <td className="p-lg text-center">
                         <div className="flex items-center justify-center gap-sm">
+                          <button onClick={() => handleOpenManualAdvance(c)} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Ứng lương"><Banknote size={18}/></button>
+                          <button onClick={() => handleOpenFine(c)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-all" title="Phạt"><AlertTriangle size={18}/></button>
                           <button onClick={() => handleEdit(c)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Sửa"><Pencil size={18} /></button>
-                          <button onClick={() => { if(confirm('Xóa nhân viên?')) deleteCollaborator(c.id); }} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Xóa"><Trash2 size={18} /></button>
+                          <button onClick={() => { if(confirm('Xóa nhân viên?')) deleteCollaborator(c.id); }} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg transition-all" title="Xóa"><Trash2 size={18} /></button>
                         </div>
                       </td>
                     </tr>
@@ -698,29 +820,152 @@ export const Collaborators: React.FC = () => {
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${getRoleBadgeColor(c.role)}`}>
                                         {c.role}
                                     </span>
-                                    <span className="text-xs text-slate-400">@{c.username}</span>
                                 </div>
                             </div>
                          </div>
                      </div>
                      
-                     <div className="bg-slate-50 p-3 rounded-xl flex items-center justify-between">
-                         <span className="text-xs font-bold text-slate-500 uppercase">Lương cứng</span>
-                         <span className="font-black text-slate-800 text-lg">{(Number(c.baseSalary) || 0).toLocaleString()} <span className="text-xs font-bold text-slate-400">đ</span></span>
-                     </div>
-
-                     <div className="grid grid-cols-2 gap-3 pt-1">
-                         <button onClick={() => handleEdit(c)} className="py-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-100 flex items-center justify-center gap-2">
-                             <Pencil size={16}/> Chỉnh sửa
+                     <div className="grid grid-cols-4 gap-2 pt-1">
+                         <button onClick={() => handleOpenManualAdvance(c)} className="py-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-sm hover:bg-emerald-100 flex items-center justify-center gap-2 border border-emerald-100">
+                             <Banknote size={16}/>
                          </button>
-                         <button onClick={() => { if(confirm('Xóa nhân viên?')) deleteCollaborator(c.id); }} className="py-3 bg-rose-50 text-rose-600 rounded-xl font-bold text-sm hover:bg-rose-100 flex items-center justify-center gap-2">
-                             <Trash2 size={16}/> Xóa
+                         <button onClick={() => handleOpenFine(c)} className="py-3 bg-rose-50 text-rose-600 rounded-xl font-bold text-sm hover:bg-rose-100 flex items-center justify-center gap-2 border border-rose-100">
+                             <AlertTriangle size={16}/>
+                         </button>
+                         <button onClick={() => handleEdit(c)} className="py-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-100 flex items-center justify-center gap-2 border border-blue-100">
+                             <Pencil size={16}/>
+                         </button>
+                         <button onClick={() => { if(confirm('Xóa nhân viên?')) deleteCollaborator(c.id); }} className="py-3 bg-white border-2 border-slate-100 text-slate-400 rounded-xl font-bold text-sm hover:bg-slate-50 flex items-center justify-center gap-2">
+                             <Trash2 size={16}/>
                          </button>
                      </div>
                  </div>
              ))}
           </div>
         </div>
+      )}
+
+      {/* --- TAB: ADVANCE (UNG LUONG) --- */}
+      {activeTab === 'advance' && (
+          <div className="animate-in fade-in space-y-6">
+              {/* STAFF VIEW: REQUEST ADVANCE */}
+              <div className="space-y-6">
+                  {/* Card for Current User Estimate */}
+                  <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div className="relative z-10">
+                          <div className="flex items-center gap-2 mb-1 opacity-80 text-xs font-bold uppercase tracking-widest">
+                              <Wallet size={16}/> Lương Tạm Tính (T{format(currentDate, 'MM')})
+                          </div>
+                          <div className="text-3xl font-black mb-2">{myFinancialStats.estimatedSalary.toLocaleString()} ₫</div>
+                          <div className="text-[10px] bg-white/20 w-fit px-2 py-1 rounded font-bold">
+                              {myFinancialStats.standardDays.toFixed(1)} công chuẩn
+                          </div>
+                      </div>
+                      <div className="relative z-10 w-full md:w-auto">
+                          <button 
+                              onClick={handleOpenRequestAdvance}
+                              className="w-full md:w-auto bg-white text-indigo-600 px-6 py-3 rounded-xl font-black shadow-md hover:bg-indigo-50 transition-all flex items-center justify-center gap-2"
+                          >
+                              <PiggyBank size={20}/> Xin Ứng Lương
+                          </button>
+                      </div>
+                      <div className="absolute right-0 top-0 p-4 opacity-10"><DollarSign size={100}/></div>
+                  </div>
+
+                  {/* ADMIN VIEW: PENDING REQUESTS */}
+                  {!isRestricted && (
+                      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                          <div className="p-4 bg-orange-50 border-b border-orange-100 flex justify-between items-center">
+                              <h3 className="font-bold text-orange-800 text-sm flex items-center gap-2"><Wallet size={18}/> Yêu cầu chờ duyệt</h3>
+                              <span className="bg-white text-orange-600 px-2 py-0.5 rounded text-xs font-black">{overviewStats.pendingAdvances.length}</span>
+                          </div>
+                          
+                          <div className="divide-y divide-slate-50 max-h-[300px] overflow-y-auto">
+                              {overviewStats.pendingAdvances.length === 0 ? (
+                                  <div className="p-8 text-center text-slate-400 text-sm italic">Không có yêu cầu nào.</div>
+                              ) : (
+                                  overviewStats.pendingAdvances.map(req => {
+                                      const staff = collaborators.find(c => c.id === req.staff_id);
+                                      return (
+                                          <div key={req.id} className="p-4 hover:bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                              <div className="flex items-center gap-4">
+                                                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold">
+                                                      {staff?.collaboratorName.charAt(0)}
+                                                  </div>
+                                                  <div>
+                                                      <div className="font-bold text-slate-800">{staff?.collaboratorName}</div>
+                                                      <div className="text-sm font-black text-brand-600">{req.amount.toLocaleString()} ₫</div>
+                                                      <div className="text-xs text-slate-500 italic">"{req.reason}"</div>
+                                                  </div>
+                                              </div>
+                                              
+                                              <div className="flex items-center gap-3 w-full md:w-auto">
+                                                  <span className="text-[10px] text-slate-400 font-medium mr-2">{format(parseISO(req.request_date), 'dd/MM HH:mm')}</span>
+                                                  <button 
+                                                      onClick={() => handleApproveAdvance(req.id, false)}
+                                                      disabled={processingAdvanceId === req.id}
+                                                      className="flex-1 md:flex-none py-2 px-4 bg-white border border-rose-200 text-rose-600 text-xs font-bold uppercase rounded-lg hover:bg-rose-50"
+                                                  >
+                                                      Từ chối
+                                                  </button>
+                                                  <button 
+                                                      onClick={() => handleApproveAdvance(req.id, true)}
+                                                      disabled={processingAdvanceId === req.id}
+                                                      className="flex-1 md:flex-none py-2 px-4 bg-brand-600 text-white text-xs font-bold uppercase rounded-lg hover:bg-brand-700 shadow-sm flex items-center justify-center gap-1"
+                                                  >
+                                                      {processingAdvanceId === req.id ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>} Duyệt
+                                                  </button>
+                                              </div>
+                                          </div>
+                                      );
+                                  })
+                              )}
+                          </div>
+                      </div>
+                  )}
+
+                  {/* HISTORY LIST (MY ADVANCES) */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                      <div className="p-4 bg-slate-50 border-b border-slate-200">
+                          <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                              <History size={16}/> Lịch sử ứng lương {isRestricted ? '(Của tôi)' : '(Toàn bộ)'}
+                          </h3>
+                      </div>
+                      <div className="divide-y divide-slate-50 max-h-[400px] overflow-y-auto">
+                          {salaryAdvances
+                            .filter(a => isRestricted ? a.staff_id === currentUser?.id : true)
+                            .map(adv => {
+                                const staff = collaborators.find(c => c.id === adv.staff_id);
+                                return (
+                                  <div key={adv.id} className="p-4 flex items-center justify-between hover:bg-slate-50">
+                                      <div>
+                                          <div className="flex items-center gap-2">
+                                              {!isRestricted && <span className="font-bold text-slate-700 text-sm mr-2">{staff?.collaboratorName}</span>}
+                                              <span className="font-black text-slate-800 text-sm">{adv.amount.toLocaleString()} ₫</span>
+                                              <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-black border
+                                                  ${adv.status === 'Approved' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                                                    adv.status === 'Rejected' ? 'bg-rose-50 text-rose-600 border-rose-100' : 
+                                                    'bg-amber-50 text-amber-600 border-amber-100'}
+                                              `}>
+                                                  {adv.status === 'Approved' ? 'Đã duyệt' : adv.status === 'Rejected' ? 'Từ chối' : 'Chờ duyệt'}
+                                              </span>
+                                          </div>
+                                          <div className="text-xs text-slate-500 mt-1 italic">
+                                              "{adv.reason}"
+                                          </div>
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 font-medium">
+                                          {format(parseISO(adv.request_date), 'dd/MM HH:mm')}
+                                      </div>
+                                  </div>
+                              )})}
+                          {salaryAdvances.filter(a => isRestricted ? a.staff_id === currentUser?.id : true).length === 0 && (
+                              <div className="p-8 text-center text-slate-400 text-sm italic">Chưa có lịch sử ứng lương.</div>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          </div>
       )}
 
       {/* --- TAB 3: SHIFT SCHEDULE --- */}
@@ -814,16 +1059,10 @@ export const Collaborators: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center gap-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest overflow-x-auto">
-               <span className="flex items-center gap-1.5 whitespace-nowrap"><Sun size={14} className="text-amber-500"/> Ca Sáng (Ngày)</span>
-               <span className="flex items-center gap-1.5 whitespace-nowrap"><Moon size={14} className="text-indigo-700"/> Ca Tối (Đêm)</span>
-               <span className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-3 h-3 rounded-full bg-slate-200"></div> Ngày Nghỉ (OFF)</span>
-            </div>
           </div>
 
           {/* MOBILE AGENDA VIEW */}
           <div className="md:hidden space-y-4">
-              {/* Horizontal Date Picker */}
               <div className="flex overflow-x-auto gap-2 pb-2 no-scrollbar px-1">
                   {weekDays.map(day => {
                       const isSelected = isSameDay(day, mobileSelectedDate);
@@ -847,9 +1086,7 @@ export const Collaborators: React.FC = () => {
                   })}
               </div>
 
-              {/* Agenda Body */}
               <div className="space-y-4">
-                  {/* CA SÁNG */}
                   <div className="bg-amber-50/50 rounded-2xl p-4 border border-amber-100">
                       <div className="flex items-center gap-2 mb-3 text-amber-800 font-black uppercase text-xs tracking-widest">
                           <Sun size={16}/> Ca Sáng (Ngày)
@@ -870,7 +1107,6 @@ export const Collaborators: React.FC = () => {
                       </div>
                   </div>
 
-                  {/* CA TỐI */}
                   <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-100">
                       <div className="flex items-center gap-2 mb-3 text-indigo-800 font-black uppercase text-xs tracking-widest">
                           <Moon size={16}/> Ca Tối (Đêm)
@@ -886,24 +1122,6 @@ export const Collaborators: React.FC = () => {
                                       <div className="font-bold text-slate-800">{c.collaboratorName}</div>
                                       <div className="text-xs text-slate-400 font-bold uppercase">{c.role}</div>
                                   </div>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* CHƯA PHÂN CA / OFF */}
-                  <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                      <div className="flex items-center gap-2 mb-3 text-slate-500 font-black uppercase text-xs tracking-widest">
-                          Chưa phân ca / Nghỉ
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                          {collaborators.filter(c => {
-                              const s = schedules.find(sch => sch.staff_id === c.id && sch.date === format(mobileSelectedDate, 'yyyy-MM-dd'));
-                              return !s || s.shift_type === 'OFF';
-                          }).map(c => (
-                              <div key={c.id} onClick={() => !isRestricted && openScheduleSlot(c, mobileSelectedDate)} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity">
-                                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: c.color }}>{c.collaboratorName.charAt(0)}</div>
-                                  <div className="truncate text-xs font-bold text-slate-600">{c.collaboratorName}</div>
                               </div>
                           ))}
                       </div>
@@ -950,12 +1168,11 @@ export const Collaborators: React.FC = () => {
                                           <div className="text-xs text-slate-500 italic">" {req.reason} "</div>
                                       </div>
                                       
-                                      {/* ACTION BUTTONS: Redesigned */}
                                       <div className="flex items-center gap-3">
                                           <button 
                                             onClick={() => handleApproveLeave(req, false)} 
                                             disabled={processingLeaveId === req.id}
-                                            className="group relative flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 transition-all active:scale-90 disabled:opacity-50"
+                                            className="group relative flex items-center justify-center w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-500 transition-all active:scale-95 disabled:opacity-50"
                                             title="Từ chối"
                                           >
                                               {processingLeaveId === req.id ? <Loader2 size={14} className="animate-spin"/> : <X size={16} strokeWidth={3}/>}
@@ -1014,7 +1231,7 @@ export const Collaborators: React.FC = () => {
           </div>
       )}
 
-      {/* --- TAB 5: TIMESHEET (RESTRICTED FOR STAFF) --- */}
+      {/* --- TAB 5: TIMESHEET --- */}
       {activeTab === 'timesheet' && !isRestricted && (
         <div className="animate-in fade-in space-y-6">
           <div className="flex flex-col md:flex-row justify-between items-center bg-white p-5 rounded-2xl border border-slate-100 shadow-soft gap-4">
@@ -1027,7 +1244,6 @@ export const Collaborators: React.FC = () => {
              </div>
 
              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-                 {/* NEW TOGGLE SWITCH */}
                  <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
                      <button 
                         onClick={() => setTimesheetMode('schedule')}
@@ -1064,22 +1280,7 @@ export const Collaborators: React.FC = () => {
                 <thead className="bg-slate-50 border-b border-slate-100">
                   <tr>
                     <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest">Họ tên nhân viên</th>
-                    {timesheetMode === 'schedule' ? (
-                        <>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Lượt ca Sáng</th>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Lượt ca Tối</th>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công quy đổi</th>
-                        </>
-                    ) : (
-                        <>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Ca Sáng (GPS)</th>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Ca Tối (GPS)</th>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">
-                                Đi Muộn <span className="text-red-500 font-bold">(&gt;15p)</span>
-                            </th>
-                            <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công thực tế</th>
-                        </>
-                    )}
+                    <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Tổng công</th>
                     <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-right">Lương tạm tính</th>
                     <th className="p-4 font-black text-[10px] text-slate-400 uppercase tracking-widest text-center">Thao tác</th>
                   </tr>
@@ -1098,28 +1299,6 @@ export const Collaborators: React.FC = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="p-4 text-center">
-                         <div className="text-base font-black text-slate-700">{row.dayShifts}</div>
-                      </td>
-                      <td className="p-4 text-center">
-                         <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-black border border-indigo-100 uppercase">
-                             {row.nightShifts} buổi
-                         </span>
-                      </td>
-                      
-                      {timesheetMode === 'realtime' && (
-                          <td className="p-4 text-center">
-                              {row.lateCount > 0 ? (
-                                  <div className="flex flex-col items-center">
-                                      <span className="text-red-600 font-black">{row.lateCount} lần</span>
-                                      <span className="text-[9px] text-red-400">({row.totalLateMinutes} phút)</span>
-                                  </div>
-                              ) : (
-                                  <span className="text-emerald-500 font-bold text-xs">--</span>
-                              )}
-                          </td>
-                      )}
-
                       <td className="p-4 text-center">
                          <div className="text-lg font-black text-brand-700 underline decoration-brand-200 underline-offset-4">{row.standardDays.toFixed(1)}</div>
                          <div className="text-[9px] text-slate-400 font-bold uppercase">{timesheetMode === 'schedule' ? 'Công kế hoạch' : 'Công thực tế'}</div>
@@ -1142,62 +1321,6 @@ export const Collaborators: React.FC = () => {
               </table>
             </div>
           </div>
-
-          {/* Mobile Salary Summary Cards */}
-          <div className="md:hidden space-y-3">
-             {timesheetData.map(row => (
-                 <div key={row.staff.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col gap-3">
-                     <div className="flex justify-between items-start">
-                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-black shadow-md" style={{ backgroundColor: row.staff.color || '#3b82f6' }}>
-                                {(row.staff.collaboratorName || '?').charAt(0)}
-                            </div>
-                            <div>
-                                <div className="font-bold text-slate-800 text-sm">{row.staff.collaboratorName}</div>
-                                <div className="text-[10px] text-slate-400 font-medium uppercase">{row.staff.role}</div>
-                            </div>
-                         </div>
-                         <div className="flex gap-2">
-                             <button onClick={() => openAdjustment(row.staff)} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">
-                                 Sửa công
-                             </button>
-                             <button onClick={() => handleOpenPayroll(row.staff, row.calculatedSalary)} className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center gap-1">
-                                 <QrCode size={12}/> Pay
-                             </button>
-                         </div>
-                     </div>
-                     
-                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                         {timesheetMode === 'realtime' && (
-                             <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-200">
-                                 <span className="text-[10px] font-bold text-slate-500 uppercase">Đi muộn</span>
-                                 <span className={`text-xs font-black ${row.lateCount > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                                     {row.lateCount > 0 ? `${row.lateCount} lần (${row.totalLateMinutes}p)` : 'Không'}
-                                 </span>
-                             </div>
-                         )}
-                         <div className="flex justify-between items-end mb-2">
-                             <span className="text-xs font-bold text-slate-500 uppercase">{timesheetMode === 'schedule' ? 'Tổng công' : 'Công thực tế'}</span>
-                             <span className="text-xl font-black text-slate-800">{row.standardDays.toFixed(1)} <span className="text-xs font-medium text-slate-400">ngày</span></span>
-                         </div>
-                         {/* Progress Bar Visual */}
-                         <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                             <div className="bg-brand-500 h-2 rounded-full" style={{ width: `${Math.min(100, (row.standardDays / 26) * 100)}%` }}></div>
-                         </div>
-                         <div className="flex justify-between text-[9px] text-slate-400 mt-1 uppercase font-bold">
-                             <span>0</span>
-                             <span>26 (Chuẩn)</span>
-                         </div>
-                     </div>
-
-                     <div className="flex justify-between items-center pt-2 border-t border-slate-50">
-                         <span className="text-xs font-bold text-slate-400 uppercase">Lương tạm tính</span>
-                         <span className="font-black text-lg text-emerald-600">{row.calculatedSalary.toLocaleString()} ₫</span>
-                     </div>
-                 </div>
-             ))}
-          </div>
-
         </div>
       )}
 
@@ -1222,7 +1345,6 @@ export const Collaborators: React.FC = () => {
                             setLeaveForm(prev => ({
                                 ...prev, 
                                 start_date: newStart,
-                                // Nếu ngày kết thúc nhỏ hơn ngày bắt đầu mới -> Cập nhật ngày kết thúc bằng ngày bắt đầu
                                 end_date: (prev.end_date && prev.end_date < newStart) ? newStart : prev.end_date
                             }));
                         }} 
@@ -1244,31 +1366,13 @@ export const Collaborators: React.FC = () => {
                   <select 
                     className="w-full border rounded-lg p-2.5 text-sm" 
                     value={leaveForm.leave_type} 
-                    onChange={e => {
-                        const newType = e.target.value as any;
-                        const today = format(new Date(), 'yyyy-MM-dd');
-                        let newStart = leaveForm.start_date || today;
-                        let newEnd = leaveForm.end_date || today;
-
-                        // Nếu chuyển từ 'Nghỉ ốm' sang loại khác mà ngày đang chọn là quá khứ -> Reset về hôm nay
-                        if (newType !== 'Nghỉ ốm' && newStart < today) {
-                            newStart = today;
-                            if (newEnd < newStart) newEnd = newStart;
-                        }
-
-                        setLeaveForm({
-                            ...leaveForm, 
-                            leave_type: newType,
-                            start_date: newStart,
-                            end_date: newEnd
-                        });
-                    }}
+                    onChange={e => setLeaveForm({...leaveForm, leave_type: e.target.value as any})}
                   >
                       <option value="Nghỉ phép năm">Nghỉ phép năm</option>
                       <option value="Nghỉ ốm">Nghỉ ốm</option>
-                      <option value="Việc riêng">Việc riêng (Có lương/Trừ phép)</option>
+                      <option value="Việc riêng">Việc riêng</option>
                       <option value="Không lương">Không lương</option>
-                      <option value="Chế độ">Chế độ (Hiếu/Hỉ/Thai sản)</option>
+                      <option value="Chế độ">Chế độ</option>
                   </select>
               </div>
               <div className="space-y-1">
@@ -1278,6 +1382,112 @@ export const Collaborators: React.FC = () => {
               <div className="flex gap-2 pt-2">
                   <button onClick={() => setLeaveModalOpen(false)} className="flex-1 py-3 text-slate-500 bg-slate-100 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-200">Hủy</button>
                   <button onClick={submitLeaveRequest} className="flex-[2] py-3 bg-brand-600 text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-brand-700 shadow-lg">Gửi Đơn</button>
+              </div>
+          </div>
+      </Modal>
+
+      {/* FINE MODAL */}
+      <Modal isOpen={isFineModalOpen} onClose={() => setFineModalOpen(false)} title="Tạo Phiếu Phạt Vi Phạm" size="sm">
+          <div className="space-y-4">
+              <div className="bg-rose-50 p-3 rounded-lg border border-rose-100 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-rose-500 shadow-sm border border-rose-100 font-bold">
+                      {fineStaff?.collaboratorName.charAt(0)}
+                  </div>
+                  <div>
+                      <div className="text-sm font-bold text-rose-800">Phạt: {fineStaff?.collaboratorName}</div>
+                      <div className="text-xs text-rose-600">Số tiền sẽ trừ vào kỳ lương này.</div>
+                  </div>
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Số tiền phạt</label>
+                  <input 
+                      type="number" 
+                      className="w-full border-2 border-slate-200 rounded-xl p-3 text-lg font-black text-rose-600 outline-none focus:border-rose-500" 
+                      placeholder="0"
+                      value={fineAmount}
+                      onChange={e => setFineAmount(Number(e.target.value))}
+                  />
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Lý do / Lỗi vi phạm</label>
+                  <textarea 
+                      className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm h-24 outline-none focus:border-rose-500" 
+                      placeholder="VD: Đi muộn, làm vỡ đồ..."
+                      value={fineReason}
+                      onChange={e => setFineReason(e.target.value)}
+                  ></textarea>
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Link ảnh bằng chứng (nếu có)</label>
+                  <input 
+                      type="text" 
+                      className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-rose-500" 
+                      placeholder="https://..."
+                      value={fineEvidence}
+                      onChange={e => setFineEvidence(e.target.value)}
+                  />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                  <button onClick={() => setFineModalOpen(false)} className="flex-1 py-3 text-slate-500 bg-slate-100 rounded-xl font-bold text-xs uppercase hover:bg-slate-200">Hủy</button>
+                  <button onClick={handleSubmitFine} className="flex-[2] py-3 bg-rose-600 text-white rounded-xl font-bold text-xs uppercase hover:bg-rose-700 shadow-lg flex items-center justify-center gap-2">
+                      <Gavel size={16}/> Xác Nhận Phạt
+                  </button>
+              </div>
+          </div>
+      </Modal>
+
+      {/* ADVANCE MODAL (SHARED FOR REQUEST & ADMIN) */}
+      <Modal isOpen={isAdvanceModalOpen} onClose={() => setAdvanceModalOpen(false)} title={isSelfRequest ? "Xin Ứng Lương" : "Tạo Phiếu Ứng Lương"} size="sm">
+          <div className="space-y-4">
+              {isSelfRequest && (
+                  <div className="bg-brand-50 border border-brand-200 rounded-xl p-3">
+                      <p className="text-xs text-brand-800 font-medium">Lương ước tính hiện tại: <b>{myFinancialStats.estimatedSalary.toLocaleString()} ₫</b></p>
+                  </div>
+              )}
+              
+              {!isSelfRequest && advanceStaff && (
+                  <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-emerald-500 shadow-sm border border-emerald-100 font-bold">
+                          {advanceStaff.collaboratorName.charAt(0)}
+                      </div>
+                      <div>
+                          <div className="text-sm font-bold text-emerald-800">Ứng lương: {advanceStaff.collaboratorName}</div>
+                          <div className="text-xs text-emerald-600">Số tiền sẽ được ghi nhận là Đã Ứng.</div>
+                      </div>
+                  </div>
+              )}
+
+              <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Số tiền ứng</label>
+                  <input 
+                      type="number" 
+                      className="w-full border-2 border-slate-200 rounded-xl p-3 text-lg font-black text-emerald-600 outline-none focus:border-emerald-500" 
+                      placeholder="0"
+                      value={advanceAmount}
+                      onChange={e => setAdvanceAmount(Number(e.target.value))}
+                  />
+              </div>
+
+              <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Lý do</label>
+                  <textarea 
+                      className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm h-24 outline-none focus:border-emerald-500" 
+                      placeholder="VD: Cần tiền gấp..."
+                      value={advanceReason}
+                      onChange={e => setAdvanceReason(e.target.value)}
+                  ></textarea>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                  <button onClick={() => setAdvanceModalOpen(false)} disabled={isProcessing} className="flex-1 py-3 text-slate-500 bg-slate-100 rounded-xl font-bold text-xs uppercase hover:bg-slate-200">Hủy</button>
+                  <button onClick={handleSubmitAdvance} disabled={isProcessing} className="flex-[2] py-3 bg-emerald-600 text-white rounded-xl font-bold text-xs uppercase hover:bg-emerald-700 shadow-lg flex items-center justify-center gap-2">
+                      {isProcessing ? <Loader2 size={16} className="animate-spin"/> : isSelfRequest ? <Send size={16}/> : <Banknote size={16}/>} 
+                      {isSelfRequest ? 'Gửi Yêu Cầu' : 'Xác Nhận Ứng'}
+                  </button>
               </div>
           </div>
       </Modal>

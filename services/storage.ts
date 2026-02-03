@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { Facility, Room, Booking, Collaborator, Expense, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount, TimeLog } from '../types';
+import { Facility, Room, Booking, Collaborator, Expense, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount, TimeLog, SalaryAdvance, Violation } from '../types';
 import { MOCK_FACILITIES, MOCK_ROOMS, MOCK_COLLABORATORS, MOCK_BOOKINGS, MOCK_SERVICES, DEFAULT_SETTINGS, ROOM_RECIPES, MOCK_TIME_LOGS } from '../constants';
 
 const logError = (message: string, error: any) => {
@@ -611,6 +611,42 @@ export const storageService = {
       if (IS_USING_MOCK) return { error: null };
       const { error } = await supabase.from('leave_requests').update(item).eq('id', item.id);
       if (error && !isTableMissingError(error)) logError('Error updating leave request', error);
+      return { error };
+  },
+
+  // Salary Advances (Phase 2)
+  getSalaryAdvances: async (): Promise<SalaryAdvance[]> => {
+      const limitDate = getDataStartDate();
+      return safeFetch(
+          supabase.from('salary_advances').select('*').gte('request_date', limitDate).order('request_date', { ascending: false }),
+          [], 'salary_advances'
+      );
+  },
+  addSalaryAdvance: async (item: SalaryAdvance) => {
+      if (IS_USING_MOCK) return { error: null };
+      const { error } = await supabase.from('salary_advances').insert(item);
+      if (error && !isTableMissingError(error)) logError('Error adding salary advance', error);
+      return { error };
+  },
+  updateSalaryAdvance: async (item: SalaryAdvance) => {
+      if (IS_USING_MOCK) return { error: null };
+      const { error } = await supabase.from('salary_advances').update(item).eq('id', item.id);
+      if (error && !isTableMissingError(error)) logError('Error updating salary advance', error);
+      return { error };
+  },
+
+  // Violations (Phase 2)
+  getViolations: async (): Promise<Violation[]> => {
+      const limitDate = getDataStartDate();
+      return safeFetch(
+          supabase.from('violations').select('*').gte('date', limitDate).order('date', { ascending: false }),
+          [], 'violations'
+      );
+  },
+  addViolation: async (item: Violation) => {
+      if (IS_USING_MOCK) return { error: null };
+      const { error } = await supabase.from('violations').insert(item);
+      if (error && !isTableMissingError(error)) logError('Error adding violation', error);
       return { error };
   },
 

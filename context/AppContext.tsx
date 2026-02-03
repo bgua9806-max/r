@@ -5,7 +5,7 @@ import {
   Shift, ShiftSchedule, AttendanceAdjustment, LeaveRequest, 
   HousekeepingTask, WebhookConfig, InventoryTransaction, 
   Settings, RoomRecipe, BankAccount, TimeLog, OtaOrder, 
-  ToastMessage, GuestProfile, LendingItem
+  ToastMessage, GuestProfile, LendingItem, SalaryAdvance, Violation
 } from '../types';
 import { ROLE_PERMISSIONS, DEFAULT_SETTINGS } from '../constants';
 import { storageService } from '../services/storage';
@@ -32,6 +32,8 @@ interface AppContextType {
   otaOrders: OtaOrder[];
   timeLogs: TimeLog[];
   bankAccounts: BankAccount[];
+  salaryAdvances: SalaryAdvance[];
+  violations: Violation[];
   
   settings: Settings;
   roomRecipes: Record<string, RoomRecipe>;
@@ -81,6 +83,11 @@ interface AppContextType {
   addLeaveRequest: (item: LeaveRequest) => Promise<void>;
   updateLeaveRequest: (item: LeaveRequest) => Promise<void>;
   
+  // Phase 2: Salary Advances & Violations
+  requestAdvance: (amount: number, reason: string) => Promise<void>;
+  approveAdvance: (advanceId: string, isApproved: boolean) => Promise<void>;
+  addViolation: (staffId: string, amount: number, reason: string, evidence?: string) => Promise<void>;
+
   upsertSchedule: (item: ShiftSchedule) => Promise<void>;
   deleteSchedule: (id: string) => Promise<void>;
   upsertAdjustment: (item: AttendanceAdjustment) => Promise<void>;
@@ -169,6 +176,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [otaOrders, setOtaOrders] = useState<OtaOrder[]>([]);
   const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
+  const [violations, setViolations] = useState<Violation[]>([]);
   
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>({});
@@ -214,7 +223,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
           const [
-              facs, rms, bks, svcs, exps, collabs, tasks, trans, shfts, schs, adjs, leaves, logs, whs
+              facs, rms, bks, svcs, exps, collabs, tasks, trans, shfts, schs, adjs, leaves, logs, whs, advs, vios
           ] = await Promise.all([
               storageService.getFacilities(),
               storageService.getRooms(),
@@ -229,7 +238,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               storageService.getAdjustments(),
               storageService.getLeaveRequests(),
               storageService.getTimeLogs(),
-              storageService.getWebhooks()
+              storageService.getWebhooks(),
+              storageService.getSalaryAdvances(),
+              storageService.getViolations()
           ]);
 
           setFacilities(facs);
@@ -246,6 +257,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setLeaveRequests(leaves);
           setTimeLogs(logs);
           setWebhooks(whs);
+          setSalaryAdvances(advs);
+          setViolations(vios);
           
           if (full) {
               await syncOtaOrders(undefined, true);
@@ -362,6 +375,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addLeaveRequest = async (item: LeaveRequest) => { await storageService.addLeaveRequest(item); refreshData(); };
   const updateLeaveRequest = async (item: LeaveRequest) => { await storageService.updateLeaveRequest(item); refreshData(); };
+
+  // --- PHASE 2: SALARY ADVANCE & VIOLATIONS ---
+  const requestAdvance = async (amount: number, reason: string) => {
+      if (!currentUser) return;
+      const item: SalaryAdvance = {
+          id: `ADV-${Date.now()}`,
+          staff_id: currentUser.id,
+          amount,
+          reason,
+          status: 'Pending',
+          request_date: new Date().toISOString(),
+          created_at: new Date().toISOString()
+      };
+      await storageService.addSalaryAdvance(item);
+      refreshData();
+      notify('success', 'Đã gửi yêu cầu ứng lương.');
+  };
+
+  const approveAdvance = async (advanceId: string, isApproved: boolean) => {
+      const advance = salaryAdvances.find(a => a.id === advanceId);
+      if (!advance) return;
+
+      const newStatus = isApproved ? 'Approved' : 'Rejected';
+      await storageService.updateSalaryAdvance({ ...advance, status: newStatus });
+
+      if (isApproved) {
+          // Auto-create Expense (Business Logic)
+          const staffName = collaborators.find(c => c.id === advance.staff_id)?.collaboratorName || 'N/A';
+          const expense: Expense = {
+              id: `EXP-ADV-${Date.now()}`,
+              expenseDate: new Date().toISOString().substring(0, 10), // Today YYYY-MM-DD
+              facilityName: facilities[0]?.facilityName || 'General', // Fallback to first facility
+              expenseCategory: 'Lương nhân viên',
+              expenseContent: `Chi ứng lương cho ${staffName}`,
+              amount: advance.amount,
+              note: `Tự động tạo từ yêu cầu ứng lương ${advance.id}`
+          };
+          await storageService.addExpense(expense);
+          notify('success', `Đã duyệt và tạo phiếu chi ${advance.amount.toLocaleString()}đ`);
+      } else {
+          notify('info', 'Đã từ chối yêu cầu ứng lương.');
+      }
+      refreshData();
+  };
+
+  const addViolation = async (staffId: string, amount: number, reason: string, evidence?: string) => {
+      const item: Violation = {
+          id: `VIO-${Date.now()}`,
+          staff_id: staffId,
+          type: 'Manual',
+          violation_name: reason,
+          fine_amount: amount,
+          evidence_url: evidence,
+          status: 'Pending_Deduction',
+          date: new Date().toISOString(),
+          created_at: new Date().toISOString()
+      };
+      await storageService.addViolation(item);
+      refreshData();
+      notify('success', 'Đã ghi nhận lỗi vi phạm.');
+  };
 
   const upsertSchedule = async (item: ShiftSchedule) => { await storageService.upsertSchedule(item); refreshData(); };
   const deleteSchedule = async (id: string) => { await storageService.deleteSchedule(id); refreshData(); };
@@ -609,7 +683,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser, setCurrentUser, isLoading, isInitialized,
       facilities, rooms, bookings, services, expenses, collaborators,
       housekeepingTasks, inventoryTransactions, shifts, schedules, adjustments,
-      leaveRequests, otaOrders, timeLogs, bankAccounts,
+      leaveRequests, otaOrders, timeLogs, bankAccounts, salaryAdvances, violations,
       settings, roomRecipes, webhooks, currentShift, toasts,
       
       refreshData, canAccess, notify, removeToast,
@@ -622,6 +696,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncHousekeepingTasks, addInventoryTransaction,
       openShift, closeShift, clockIn, clockOut,
       addLeaveRequest, updateLeaveRequest,
+      requestAdvance, approveAdvance, addViolation,
       upsertSchedule, deleteSchedule, upsertAdjustment,
       updateSettings, updateRoomRecipe, deleteRoomRecipe,
       addWebhook, updateWebhook, deleteWebhook, triggerWebhook,

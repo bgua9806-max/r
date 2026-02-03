@@ -1,9 +1,9 @@
 
 import React from 'react';
-import { Users, CalendarDays, ClipboardList, LayoutDashboard, Palmtree } from 'lucide-react';
+import { Users, CalendarDays, ClipboardList, LayoutDashboard, Palmtree, Wallet } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
-export type HRTabType = 'overview' | 'employees' | 'shifts' | 'timesheet' | 'leave';
+export type HRTabType = 'overview' | 'employees' | 'shifts' | 'timesheet' | 'leave' | 'advance';
 
 interface HRTabsProps {
   activeTab: HRTabType;
@@ -19,6 +19,7 @@ export const HRTabs: React.FC<HRTabsProps> = ({ activeTab, onTabChange }) => {
     { id: 'employees' as HRTabType, label: 'Nhân Sự', icon: Users },
     { id: 'shifts' as HRTabType, label: 'Lịch Ca', icon: CalendarDays },
     { id: 'leave' as HRTabType, label: 'Nghỉ Phép', icon: Palmtree },
+    { id: 'advance' as HRTabType, label: 'Ứng Lương', icon: Wallet },
     { id: 'timesheet' as HRTabType, label: 'Công & Lương', icon: ClipboardList },
   ];
 
@@ -26,6 +27,7 @@ export const HRTabs: React.FC<HRTabsProps> = ({ activeTab, onTabChange }) => {
   const visibleTabs = allTabs.filter(tab => {
       // Hide sensitive tabs for 'Nhân viên' AND 'Buồng phòng'
       if (currentUser?.role === 'Nhân viên' || currentUser?.role === 'Buồng phòng') {
+          // Staff can see Advance tab now
           return tab.id !== 'employees' && tab.id !== 'timesheet';
       }
       // Other roles (Admin, Quản lý) see everything

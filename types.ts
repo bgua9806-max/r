@@ -108,6 +108,30 @@ export interface LeaveRequest {
   approver_note?: string;
 }
 
+// New Interface for Salary Advances (Phase 2)
+export interface SalaryAdvance {
+  id: string;
+  staff_id: string;
+  amount: number;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Paid';
+  request_date: string;
+  created_at: string;
+}
+
+// New Interface for Violations (Phase 2)
+export interface Violation {
+  id: string;
+  staff_id: string;
+  type: 'Manual' | 'System';
+  violation_name: string;
+  fine_amount: number;
+  evidence_url?: string;
+  status: 'Pending_Deduction' | 'Deducted';
+  date: string;
+  created_at: string;
+}
+
 export interface Payment {
   ngayThanhToan: string;
   soTien: number;

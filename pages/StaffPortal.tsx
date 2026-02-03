@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   LogOut, CheckCircle, Clock, MapPin, 
   ChevronRight, CheckSquare, Square, 
-  ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard, AlertTriangle,
+  ArrowLeft, ListChecks, Info, Shirt, Loader2, Beer, Package, Plus, Minus, RefreshCw, ArchiveRestore, LayoutDashboard,
   BedDouble, Brush
 } from 'lucide-react';
 import { format, parseISO, differenceInMinutes, isValid } from 'date-fns';
@@ -30,7 +30,7 @@ export const StaffPortal: React.FC = () => {
   const { 
     facilities, rooms, housekeepingTasks, syncHousekeepingTasks, services, bookings,
     currentUser, setCurrentUser, notify, upsertRoom, 
-    refreshData, isLoading, handleLinenExchange, processMinibarUsage, processCheckoutLinenReturn, processRoomRestock
+    refreshData, isLoading, processMinibarUsage, processRoomRestock
   } = useAppContext();
   
   const [activeTask, setActiveTask] = useState<(HousekeepingTask & { facilityName: string, roomType?: string }) | null>(null);
@@ -39,7 +39,6 @@ export const StaffPortal: React.FC = () => {
   const [consumedItems, setConsumedItems] = useState<Record<string, number>>({});
   const [returnedLinenCounts, setReturnedLinenCounts] = useState<Record<string, number>>({});
 
-  // NEW: Tab State
   const [activeTab, setActiveTab] = useState<'Checkout' | 'Stayover' | 'Others'>('Checkout');
 
   const navigate = useNavigate();
@@ -65,8 +64,6 @@ export const StaffPortal: React.FC = () => {
     const taskList: (HousekeepingTask & { facilityName: string, roomStatus: string, roomType: string })[] = [];
 
     // ANTI-GHOST LOGIC:
-    // Tạo danh sách các phòng vừa được dọn xong gần đây (trong 2 tiếng)
-    // Để tránh hiển thị lại task "Bẩn" hoặc "Stayover" (Virtual Task) nếu DB chưa kịp cập nhật hoặc vừa làm xong.
     const recentDoneMap = new Map<string, number>();
     housekeepingTasks.forEach(t => {
         if (t.status === 'Done') {
@@ -111,14 +108,12 @@ export const StaffPortal: React.FC = () => {
         }
 
         // PRIORITY 2: Auto-Generate Virtual Tasks
-        
-        // Anti-Ghost: If task was done recently (< 2h), don't auto-generate again
         const lastDoneTime = recentDoneMap.get(uniqueKey);
         if (lastDoneTime && differenceInMinutes(today, new Date(lastDoneTime)) < 120) {
             return; 
         }
 
-        // A. Dirty Room (Priority High)
+        // A. Dirty Room
         if (room.status === 'Bẩn' || room.status === 'Đang dọn') {
              taskList.push({
                 id: `VIRTUAL_${uniqueKey}`,
@@ -137,7 +132,7 @@ export const StaffPortal: React.FC = () => {
             return;
         }
 
-        // B. Stayover (Active Guest) - NEW LOGIC
+        // B. Stayover
         const activeBooking = bookings.find(b => 
             b.facilityName === facility.facilityName && 
             b.roomCode === room.name && 
@@ -148,9 +143,6 @@ export const StaffPortal: React.FC = () => {
             const checkIn = format(parseISO(activeBooking.checkinDate), 'yyyy-MM-dd');
             const checkOut = format(parseISO(activeBooking.checkoutDate), 'yyyy-MM-dd');
             
-            // Logic: Stayover is strictly between CheckIn and CheckOut days.
-            // Don't show on Arrival Day (usually handled by Dirty status before guest arrives)
-            // Don't show on Departure Day (handled by Checkout status)
             if (todayStr > checkIn && todayStr < checkOut) {
                  taskList.push({
                     id: `AUTO_STAYOVER_${uniqueKey}`,
@@ -184,12 +176,11 @@ export const StaffPortal: React.FC = () => {
     return { total, completed, pending: total - completed };
   }, [myTasks]);
 
-  // NEW: Filtered Tasks and Tab Counts
   const tabCounts = useMemo(() => {
       const counts = { Checkout: 0, Stayover: 0, Others: 0 };
       if (myTasks) {
           myTasks.forEach(t => {
-              if (t.status === 'Done') return; // Don't count done tasks in badges
+              if (t.status === 'Done') return; 
               if (t.task_type === 'Checkout') counts.Checkout++;
               else if (t.task_type === 'Stayover') counts.Stayover++;
               else if (t.task_type === 'Dirty' || t.task_type === 'Vacant') counts.Others++;
@@ -208,7 +199,6 @@ export const StaffPortal: React.FC = () => {
       });
   }, [myTasks, activeTab]);
 
-  // ... (Recipe Logic unchanged) ...
   const recipeItems = useMemo(() => {
       if (!activeTask || !activeTask.roomType) return [];
       const recipe = ROOM_RECIPES[activeTask.roomType];
@@ -225,7 +215,6 @@ export const StaffPortal: React.FC = () => {
 
   const checkoutReturnList = useMemo(() => {
       if (!activeTask) return [];
-      
       const combinedMap = new Map<string, { id: string, name: string, totalQty: number, standardQty: number, lendingQty: number }>();
 
       if (activeTask.task_type === 'Checkout') {
@@ -282,17 +271,13 @@ export const StaffPortal: React.FC = () => {
               });
           } catch(e) { }
       }
-
       return Array.from(combinedMap.values());
   }, [activeTask, recipeItems, bookings]);
 
-  // ... (Effect and Handlers unchanged) ...
   useEffect(() => {
       if (activeTask?.task_type === 'Checkout' && checkoutReturnList.length > 0) {
           const initialCounts: Record<string, number> = {};
-          checkoutReturnList.forEach(item => {
-              initialCounts[item.id] = item.totalQty; 
-          });
+          checkoutReturnList.forEach(item => { initialCounts[item.id] = item.totalQty; });
           setReturnedLinenCounts(initialCounts);
       } else {
           setReturnedLinenCounts({});
@@ -411,20 +396,13 @@ export const StaffPortal: React.FC = () => {
             note: (activeTask.note || '') + linenNote
         };
 
-        // DUAL WRITE: Update Task AND Room Status simultaneously
-        const updates: Promise<any>[] = [
-            syncHousekeepingTasks([updatedTask])
-        ];
-
-        // Update Room status to Clean ONLY if it's a Checkout or Dirty task. 
-        // Stayover usually keeps room status as Occupied/CheckedIn conceptually, but system uses 'Đã dọn' to indicate readiness.
+        const updates: Promise<any>[] = [syncHousekeepingTasks([updatedTask])];
         const roomObj = rooms.find(r => r.facility_id === activeTask.facility_id && r.name === activeTask.room_code);
         if (roomObj) {
             updates.push(upsertRoom({ ...roomObj, status: 'Đã dọn' }));
         }
 
         await Promise.all(updates);
-        
         notify('success', `Hoàn thành P.${activeTask.room_code}.`);
         setActiveTask(null);
       } catch (e) {
@@ -482,39 +460,39 @@ export const StaffPortal: React.FC = () => {
 
         {/* TAB SWITCHER */}
         <div className="px-4 pb-2 sticky top-[73px] z-40 bg-slate-50 pt-2">
-            <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200">
+            <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto no-scrollbar">
                 <button
                     onClick={() => setActiveTab('Checkout')}
-                    className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1
+                    className={`flex-1 min-w-[70px] py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1 shrink-0
                         ${activeTab === 'Checkout' ? 'bg-red-50 text-red-600 shadow-sm border border-red-100' : 'text-slate-400 hover:bg-slate-50'}
                     `}
                 >
                     <div className="flex items-center gap-1.5">
-                        <LogOut size={14}/> Trả Phòng
+                        <LogOut size={14}/> Trả
                     </div>
                     {tabCounts.Checkout > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 rounded-full">{tabCounts.Checkout}</span>}
                 </button>
                 
                 <button
                     onClick={() => setActiveTab('Stayover')}
-                    className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1
+                    className={`flex-1 min-w-[70px] py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1 shrink-0
                         ${activeTab === 'Stayover' ? 'bg-blue-50 text-blue-600 shadow-sm border border-blue-100' : 'text-slate-400 hover:bg-slate-50'}
                     `}
                 >
                     <div className="flex items-center gap-1.5">
-                        <BedDouble size={14}/> Dọn Ở
+                        <BedDouble size={14}/> Ở
                     </div>
                     {tabCounts.Stayover > 0 && <span className="bg-blue-500 text-white text-[9px] px-1.5 rounded-full">{tabCounts.Stayover}</span>}
                 </button>
 
                 <button
                     onClick={() => setActiveTab('Others')}
-                    className={`flex-1 py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1
+                    className={`flex-1 min-w-[70px] py-2.5 rounded-lg text-xs font-black uppercase transition-all flex flex-col items-center gap-1 shrink-0
                         ${activeTab === 'Others' ? 'bg-amber-50 text-amber-600 shadow-sm border border-amber-100' : 'text-slate-400 hover:bg-slate-50'}
                     `}
                 >
                     <div className="flex items-center gap-1.5">
-                        <Brush size={14}/> Bẩn/Trống
+                        <Brush size={14}/> Bẩn
                     </div>
                     {tabCounts.Others > 0 && <span className="bg-amber-500 text-white text-[9px] px-1.5 rounded-full">{tabCounts.Others}</span>}
                 </button>
@@ -572,6 +550,7 @@ export const StaffPortal: React.FC = () => {
             )}
         </div>
 
+        {/* TASK DETAIL OVERLAY */}
         {activeTask && (
             <div className="fixed inset-0 z-[100] bg-white animate-in slide-in-from-bottom duration-300 flex flex-col">
                 <div className="bg-white border-b border-slate-100 p-4 flex items-center gap-4 shrink-0">
@@ -594,7 +573,7 @@ export const StaffPortal: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* SECTION 1: Checklist Công Việc */}
+                    {/* SECTION 1: Checklist */}
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
                             <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -612,7 +591,7 @@ export const StaffPortal: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* SECTION 2: Báo Cáo Minibar & Đồ Vải (Only when Active) */}
+                    {/* SECTION 2 & 3: Minibar & Linen (Only if In Progress) */}
                     {activeTask.status === 'In Progress' && (
                         <>
                             <div className="h-px bg-slate-100 my-4"></div>
@@ -620,19 +599,15 @@ export const StaffPortal: React.FC = () => {
                             <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-4">
                                 <Beer size={18} className="text-orange-500"/> 2. Kiểm tra Minibar & Đồ dùng
                             </h3>
-                            <p className="text-[10px] text-slate-400 mb-2 italic">Hãy nhập số lượng khách đã dùng/bóc vỏ để tính tiền.</p>
-
                             <div className="space-y-3">
                                 {recipeItems.filter(i => i.category === 'Minibar' || i.category === 'Amenity').map((item, idx) => {
                                     const consumed = consumedItems[item.id || item.fallbackName] || 0;
-                                    const isMinibar = item.category === 'Minibar';
-                                    
                                     return (
                                         <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
                                             <div>
                                                 <div className="font-bold text-slate-700 text-sm">{item.name || item.fallbackName}</div>
                                                 <div className="text-[10px] text-slate-400 mt-0.5 font-medium uppercase">
-                                                    Setup chuẩn: {item.requiredQty} {item.unit} {isMinibar && <span className="text-orange-500 font-bold ml-1">(Có phí)</span>}
+                                                    Setup chuẩn: {item.requiredQty} {item.unit} {item.category === 'Minibar' && <span className="text-orange-500 font-bold ml-1">(Có phí)</span>}
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-3">
@@ -658,7 +633,6 @@ export const StaffPortal: React.FC = () => {
                                     {checkoutReturnList.map((item, idx) => {
                                         const actual = returnedLinenCounts[item.id] ?? item.totalQty;
                                         const diff = actual - item.totalQty;
-                                        
                                         return (
                                         <div key={idx} className={`flex items-center justify-between bg-white p-3 rounded-xl border shadow-sm ${diff < 0 ? 'border-red-200 bg-red-50' : 'border-blue-100'}`}>
                                             <div className="flex items-center gap-3">
@@ -671,7 +645,6 @@ export const StaffPortal: React.FC = () => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            
                                             <div className="flex items-center gap-3">
                                                 <button onClick={() => updateReturnedLinen(item.id, -1)} className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 active:scale-90 transition-transform"><Minus size={16}/></button>
                                                 <div className="flex flex-col items-center w-12">
@@ -687,11 +660,10 @@ export const StaffPortal: React.FC = () => {
                                         </div>
                                         );
                                     })}
-                                    {checkoutReturnList.length === 0 && <div className="text-center text-xs text-slate-400 italic">Không có đồ vải cần thu hồi.</div>}
                                 </div>
                             ) : (
                                 <div className="space-y-3">
-                                    <p className="text-[10px] text-slate-400 mb-2 italic">Stayover: Nhập số lượng đồ bẩn bạn mang ra khỏi phòng (để đổi sạch).</p>
+                                    <p className="text-[10px] text-slate-400 mb-2 italic">Stayover: Nhập số lượng đồ bẩn bạn mang ra khỏi phòng.</p>
                                     {recipeItems.filter(i => i.category === 'Linen').map((item, idx) => {
                                         const consumed = consumedItems[item.id || item.fallbackName] || 0;
                                         return (
