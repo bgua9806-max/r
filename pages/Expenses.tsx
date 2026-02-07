@@ -1,190 +1,346 @@
 
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Expense } from '../types';
-import { format, isSameMonth } from 'date-fns';
-import { ExpenseModal } from '../components/ExpenseModal';
-import { Plus, Pencil, Trash2, Calendar, Search } from 'lucide-react';
+import { FinanceTransaction } from '../types';
+import { 
+  format, isSameMonth, parseISO, startOfWeek, endOfWeek, 
+  isWithinInterval, isSameDay, addDays, addWeeks, addMonths, 
+  startOfMonth, endOfMonth 
+} from 'date-fns';
+import { vi } from 'date-fns/locale';
+import { TransactionModal } from '../components/TransactionModal';
+import { Plus, Pencil, Trash2, Calendar, Search, History, Wallet, ArrowDownCircle, ArrowUpCircle, Filter, ChevronLeft, ChevronRight, CheckCircle2, User, Lock, AlertTriangle } from 'lucide-react';
 import { ListFilter, FilterOption } from '../components/ListFilter';
 
+type FilterMode = 'day' | 'week' | 'month';
+
 export const Expenses: React.FC = () => {
-  const { expenses, deleteExpense, settings } = useAppContext();
+  const { transactions, deleteTransaction, settings, shifts } = useAppContext();
+  const [activeTab, setActiveTab] = useState<'transactions' | 'shifts'>('transactions');
+  
+  // --- TRANSACTION LOGIC ---
   const [isModalOpen, setModalOpen] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All');
-  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [typeFilter, setTypeFilter] = useState<'All' | 'REVENUE' | 'EXPENSE'>('All');
+  
+  const [filterMode, setFilterMode] = useState<FilterMode>('month');
+  const [currentDate, setCurrentDate] = useState(new Date());
 
-  const categoryOptions: FilterOption[] = useMemo(() => {
-    return [
-      { label: 'Tất cả mục chi', value: 'All' },
-      ...settings.expense_categories.map(cat => ({
-        label: cat,
-        value: cat
-      }))
-    ];
-  }, [settings.expense_categories]);
+  const typeOptions: FilterOption[] = [
+      { label: 'Tất cả', value: 'All' },
+      { label: 'Phiếu Thu', value: 'REVENUE' },
+      { label: 'Phiếu Chi', value: 'EXPENSE' }
+  ];
 
-  const filteredExpenses = useMemo(() => {
-     const [year, month] = selectedMonth.split('-').map(Number);
-     const filterDate = new Date(year, month - 1);
+  const handleNavigate = (direction: number) => {
+      if (filterMode === 'day') setCurrentDate(prev => addDays(prev, direction));
+      else if (filterMode === 'week') setCurrentDate(prev => addWeeks(prev, direction));
+      else setCurrentDate(prev => addMonths(prev, direction));
+  };
+
+  const getRangeLabel = () => {
+      if (filterMode === 'day') return format(currentDate, 'dd/MM/yyyy');
+      if (filterMode === 'month') return `Tháng ${format(currentDate, 'MM/yyyy')}`;
+      const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+      const end = endOfWeek(currentDate, { weekStartsOn: 1 });
+      return `${format(start, 'dd/MM')} - ${format(end, 'dd/MM/yyyy')}`;
+  };
+
+  const filteredTransactions = useMemo(() => {
+     let start: Date, end: Date;
+
+     if (filterMode === 'day') {
+         start = new Date(currentDate); start.setHours(0,0,0,0);
+         end = new Date(currentDate); end.setHours(23,59,59,999);
+     } else if (filterMode === 'week') {
+         start = startOfWeek(currentDate, { weekStartsOn: 1 });
+         end = endOfWeek(currentDate, { weekStartsOn: 1 });
+     } else {
+         start = startOfMonth(currentDate);
+         end = endOfMonth(currentDate);
+     }
      
-     return expenses.filter(e => {
-        const eDate = new Date(e.expenseDate);
-        const matchesMonth = isSameMonth(eDate, filterDate) && eDate.getFullYear() === year;
-        const matchesCategory = categoryFilter === 'All' || e.expenseCategory === categoryFilter;
-        const matchesSearch = e.expenseContent.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              e.facilityName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              (e.note || '').toLowerCase().includes(searchTerm.toLowerCase());
+     return transactions.filter(t => {
+        const tDate = parseISO(t.transactionDate);
         
-        return matchesMonth && matchesCategory && matchesSearch;
-     });
-  }, [expenses, selectedMonth, categoryFilter, searchTerm]);
+        let matchesTime = false;
+        if (filterMode === 'day') matchesTime = isSameDay(tDate, currentDate);
+        else matchesTime = isWithinInterval(tDate, { start, end });
 
-  const totalExpense = useMemo(() => {
-    return filteredExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  }, [filteredExpenses]);
+        const matchesType = typeFilter === 'All' || t.type === typeFilter;
+        
+        const matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              (t.facilityName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              (t.category || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              (t.note || '').toLowerCase().includes(searchTerm.toLowerCase());
+        
+        return matchesTime && matchesType && matchesSearch;
+     });
+  }, [transactions, currentDate, filterMode, typeFilter, searchTerm]);
+
+  const stats = useMemo(() => {
+      const revenue = filteredTransactions.filter(t => t.type === 'REVENUE').reduce((sum, t) => sum + Number(t.amount), 0);
+      const expense = filteredTransactions.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + Number(t.amount), 0);
+      return { revenue, expense, profit: revenue - expense };
+  }, [filteredTransactions]);
 
   const handleAdd = () => {
-    setEditingExpense(null);
+    setEditingTransaction(null);
     setModalOpen(true);
   };
 
-  const handleEdit = (e: Expense) => {
-    setEditingExpense(e);
+  const handleEdit = (t: FinanceTransaction) => {
+    setEditingTransaction(t);
     setModalOpen(true);
   };
 
   return (
-    <div className="space-y-6 animate-enter">
+    <div className="space-y-6 animate-enter pb-10">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Chi phí & Tài chính</h1>
-            <div className="flex items-center gap-2 mt-1">
-                <span className="text-slate-500 text-sm font-medium">Tổng chi tháng {selectedMonth.split('-')[1]}/{selectedMonth.split('-')[0]}:</span>
-                <span className="text-rose-600 font-black text-xl">{totalExpense.toLocaleString()} ₫</span>
-            </div>
+            <h1 className="text-2xl font-bold text-slate-900">Sổ Quỹ & Dòng Tiền</h1>
+            <p className="text-sm text-slate-500">Quản lý thu chi và lịch sử giao ca.</p>
          </div>
          
-         <div className="flex items-center gap-3 w-full md:w-auto">
-             <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm flex-1 md:flex-none">
-                <Calendar size={16} className="text-slate-400"/>
-                <input 
-                    type="month" 
-                    value={selectedMonth} 
-                    onChange={e => setSelectedMonth(e.target.value)}
-                    className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-full"
-                />
-             </div>
-             <button onClick={handleAdd} className="bg-brand-600 text-white px-3 md:px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-brand-700 transition-all shadow-md active:scale-95 whitespace-nowrap">
-                <Plus size={20} /> <span className="hidden md:inline">Thêm chi phí</span>
+         <div className="flex bg-slate-100 p-1 rounded-xl w-full md:w-auto">
+             <button 
+                onClick={() => setActiveTab('transactions')}
+                className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'transactions' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+             >
+                 <Wallet size={16}/> Sổ Quỹ
+             </button>
+             <button 
+                onClick={() => setActiveTab('shifts')}
+                className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'shifts' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+             >
+                 <History size={16}/> Lịch sử Giao Ca
              </button>
          </div>
       </div>
 
-      <ListFilter 
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        options={categoryOptions}
-        selectedFilter={categoryFilter}
-        onFilterChange={setCategoryFilter}
-        placeholder="Tìm theo nội dung, cơ sở, ghi chú..."
-      />
+      {activeTab === 'transactions' && (
+        <div className="animate-in fade-in slide-in-from-bottom-2 space-y-6">
+            {/* STATS HEADER */}
+            <div className="flex flex-col xl:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                <div className="flex gap-4 w-full xl:w-auto overflow-x-auto">
+                    <div className="flex items-center gap-2 pr-4 border-r border-slate-100">
+                        <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600 border border-emerald-100"><ArrowUpCircle size={20}/></div>
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tổng Thu</div>
+                            <div className="text-lg font-black text-emerald-600">{stats.revenue.toLocaleString()} ₫</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 pr-4 border-r border-slate-100">
+                        <div className="p-2 bg-red-50 rounded-lg text-red-600 border border-red-100"><ArrowDownCircle size={20}/></div>
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tổng Chi</div>
+                            <div className="text-lg font-black text-red-600">{stats.expense.toLocaleString()} ₫</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className={`p-2 rounded-lg border ${stats.profit >= 0 ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-orange-50 text-orange-600 border-orange-100'}`}>
+                            <Wallet size={20}/>
+                        </div>
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lợi Nhuận (Kỳ)</div>
+                            <div className={`text-lg font-black ${stats.profit >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>{stats.profit.toLocaleString()} ₫</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
+                    <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                        <button onClick={() => setFilterMode('day')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterMode === 'day' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>Ngày</button>
+                        <button onClick={() => setFilterMode('week')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterMode === 'week' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>Tuần</button>
+                        <button onClick={() => setFilterMode('month')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${filterMode === 'month' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}>Tháng</button>
+                    </div>
 
-      {/* Desktop Table */}
-      <div className="hidden md:block bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
-         <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-               <thead className="bg-slate-50/50 border-b border-slate-100 text-slate-500 uppercase font-extrabold text-[10px] tracking-widest">
-                  <tr>
-                     <th className="p-lg">Ngày chi</th>
-                     <th className="p-lg">Cơ sở / Phân loại</th>
-                     <th className="p-lg">Nội dung</th>
-                     <th className="p-lg text-right">Số tiền</th>
-                     <th className="p-lg text-center">Thao tác</th>
-                  </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-50">
-                  {filteredExpenses.sort((a,b) => new Date(b.expenseDate).getTime() - new Date(a.expenseDate).getTime()).map(e => (
-                     <tr key={e.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="p-lg">
-                           <div className="font-bold text-slate-700">{format(new Date(e.expenseDate), 'dd/MM/yyyy')}</div>
-                           <div className="text-[10px] text-slate-400 font-medium">ID: {e.id}</div>
-                        </td>
-                        <td className="p-lg">
-                           <div className="text-slate-800 font-bold text-xs">{e.facilityName}</div>
-                           <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500 border border-slate-200 uppercase mt-1 inline-block tracking-wider">
-                              {e.expenseCategory}
-                           </span>
-                        </td>
-                        <td className="p-lg">
-                           <div className="text-slate-800 font-bold">{e.expenseContent}</div>
-                           {e.note && <div className="text-xs text-slate-400 mt-1 italic line-clamp-1">{e.note}</div>}
-                        </td>
-                        <td className="p-lg text-right font-black text-rose-600 text-lg">
-                           -{Number(e.amount).toLocaleString()} ₫
-                        </td>
-                        <td className="p-lg text-center">
-                           <div className="flex items-center justify-center gap-2">
-                              <button onClick={() => handleEdit(e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Sửa">
-                                 <Pencil size={18} />
-                              </button>
-                              <button onClick={() => { if(confirm('Bạn có chắc muốn xóa khoản chi này?')) deleteExpense(e.id); }} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Xóa">
-                                 <Trash2 size={18} />
-                              </button>
-                           </div>
-                        </td>
-                     </tr>
-                  ))}
-                  {filteredExpenses.length === 0 && (
-                     <tr>
-                        <td colSpan={5} className="p-2xl text-center">
-                           <div className="flex flex-col items-center gap-md text-slate-400">
-                             <Search size={48} strokeWidth={1} />
-                             <p className="font-bold">Không tìm thấy chi phí phù hợp.</p>
-                           </div>
-                        </td>
-                     </tr>
-                  )}
-               </tbody>
-            </table>
-         </div>
-      </div>
+                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden shadow-inner">
+                        <button onClick={() => handleNavigate(-1)} className="p-2 hover:bg-white text-slate-500 border-r border-slate-200 transition-colors"><ChevronLeft size={18}/></button>
+                        <div className="px-4 py-2 text-sm font-bold text-slate-700 min-w-[140px] text-center flex items-center justify-center gap-2">
+                            <Calendar size={14} className="text-slate-400"/>
+                            {getRangeLabel()}
+                        </div>
+                        <button onClick={() => handleNavigate(1)} className="p-2 hover:bg-white text-slate-500 border-l border-slate-200 transition-colors"><ChevronRight size={18}/></button>
+                    </div>
 
-      {/* Mobile Card List */}
-      <div className="md:hidden space-y-3">
-         {filteredExpenses.sort((a,b) => new Date(b.expenseDate).getTime() - new Date(a.expenseDate).getTime()).map(e => (
-             <div key={e.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                 <div className="flex justify-between items-start mb-2">
-                     <div>
-                         <div className="font-bold text-slate-800">{e.expenseContent}</div>
-                         <div className="text-xs text-slate-500">{format(new Date(e.expenseDate), 'dd/MM/yyyy')} - {e.facilityName}</div>
-                     </div>
-                     <span className="font-black text-rose-600">-{Number(e.amount).toLocaleString()}</span>
-                 </div>
-                 <div className="flex justify-between items-center mt-2">
-                     <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500 border border-slate-200 uppercase">
-                        {e.expenseCategory}
-                     </span>
-                     <div className="flex gap-2">
-                         <button onClick={() => handleEdit(e)} className="p-2 text-blue-600 bg-blue-50 rounded-lg"><Pencil size={16}/></button>
-                         <button onClick={() => { if(confirm('Xóa?')) deleteExpense(e.id); }} className="p-2 text-rose-600 bg-rose-50 rounded-lg"><Trash2 size={16}/></button>
-                     </div>
-                 </div>
-             </div>
-         ))}
-         {filteredExpenses.length === 0 && (
-             <div className="text-center py-10 text-slate-400">
-                 <Search size={32} className="mx-auto mb-2 opacity-50" />
-                 <p className="text-sm">Không tìm thấy chi phí.</p>
-             </div>
-         )}
-      </div>
+                    <button onClick={handleAdd} className="w-full md:w-auto bg-brand-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-brand-700 transition-all shadow-lg shadow-brand-100 active:scale-95 whitespace-nowrap">
+                        <Plus size={20} /> <span className="hidden md:inline">Tạo giao dịch</span>
+                    </button>
+                </div>
+            </div>
 
-      <ExpenseModal 
+            <ListFilter 
+                searchTerm={searchTerm}
+                onSearchChange={setSearchTerm}
+                options={typeOptions}
+                selectedFilter={typeFilter}
+                onFilterChange={setTypeFilter as any}
+                placeholder="Tìm kiếm giao dịch..."
+            />
+
+            {/* TRANSACTION LIST */}
+            <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50/50 border-b border-slate-100 text-slate-500 uppercase font-extrabold text-[10px] tracking-widest">
+                        <tr>
+                            <th className="p-4">Ngày</th>
+                            <th className="p-4 text-center">Loại</th>
+                            <th className="p-4">Danh mục / Cơ sở</th>
+                            <th className="p-4">Nội dung</th>
+                            <th className="p-4 text-right">Số tiền</th>
+                            <th className="p-4 text-center">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                        {filteredTransactions.sort((a,b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()).map(t => (
+                            <tr key={t.id} className="hover:bg-slate-50/50 transition-colors group">
+                                <td className="p-4">
+                                    <div className="font-bold text-slate-700">{format(parseISO(t.transactionDate), 'dd/MM/yyyy')}</div>
+                                    <div className="text-[10px] text-slate-400 font-medium">ID: {t.id}</div>
+                                </td>
+                                <td className="p-4 text-center">
+                                    {t.type === 'REVENUE' ? (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black border border-emerald-100">
+                                            <ArrowUpCircle size={10}/> THU
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 text-red-600 rounded-full text-[10px] font-black border border-red-100">
+                                            <ArrowDownCircle size={10}/> CHI
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="p-4">
+                                    <div className="text-slate-800 font-bold text-xs">{t.facilityName || 'Toàn hệ thống'}</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">{t.category}</div>
+                                </td>
+                                <td className="p-4">
+                                    <div className="text-slate-800 font-bold">{t.description}</div>
+                                    {t.note && <div className="text-xs text-slate-400 mt-1 italic line-clamp-1">{t.note}</div>}
+                                    <div className="text-[9px] text-slate-400 mt-1 flex items-center gap-1 uppercase font-bold tracking-wider">
+                                        <User size={8}/> {t.pic || t.created_by || 'System'}
+                                    </div>
+                                </td>
+                                <td className={`p-4 text-right font-black text-lg ${t.type === 'REVENUE' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {t.type === 'REVENUE' ? '+' : '-'}{Number(t.amount).toLocaleString()} ₫
+                                </td>
+                                <td className="p-4 text-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                        <button onClick={() => handleEdit(t)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Sửa">
+                                            <Pencil size={16} />
+                                        </button>
+                                        <button onClick={() => { if(confirm('Xóa giao dịch này?')) deleteTransaction(t.id); }} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Xóa">
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                        {filteredTransactions.length === 0 && (
+                            <tr>
+                                <td colSpan={6} className="p-12 text-center text-slate-400 italic">Không tìm thấy giao dịch nào.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {activeTab === 'shifts' && (
+          <div className="animate-in fade-in slide-in-from-bottom-2">
+              <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
+                  <div className="p-4 border-b border-slate-100 text-sm font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Lịch sử giao ca & Bàn giao quỹ</div>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="p-4 uppercase text-[10px] font-bold text-slate-500 tracking-wider">Thời gian (Ca)</th>
+                              <th className="p-4 uppercase text-[10px] font-bold text-slate-500 tracking-wider">Nhân sự thực hiện</th>
+                              <th className="p-4 uppercase text-[10px] font-bold text-slate-500 tracking-wider text-right">Dòng tiền trong ca</th>
+                              <th className="p-4 uppercase text-[10px] font-bold text-slate-500 tracking-wider text-right">Kết sắt (Bàn giao)</th>
+                              <th className="p-4 uppercase text-[10px] font-bold text-slate-500 tracking-wider text-center">Trạng thái</th>
+                              <th className="p-4 uppercase text-[10px] font-bold text-slate-500 tracking-wider">Ghi chú</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-sm">
+                            {shifts.filter(s => s.status === 'Closed').map(s => {
+                               const start = parseISO(s.start_time);
+                               const end = s.end_time ? parseISO(s.end_time) : new Date();
+                               const diff = (s.difference || 0);
+                               
+                               return (
+                                 <tr key={s.id} className="hover:bg-slate-50 transition-colors group">
+                                    <td className="p-4">
+                                        <div className="font-bold text-slate-700 flex items-center gap-2">
+                                            {format(start, 'HH:mm')} <span className="text-slate-400 text-[10px]">➜</span> {format(end, 'HH:mm')}
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-1 font-medium">{format(start, 'dd/MM/yyyy')}</div>
+                                    </td>
+                                    
+                                    <td className="p-4">
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <div className="p-1 bg-blue-50 text-blue-600 rounded-full"><User size={12}/></div>
+                                                <span className="text-slate-700">Mở: <span className="font-bold">{s.staff_name}</span></span>
+                                            </div>
+                                            {s.closed_by_name && (
+                                                <div className="flex items-center gap-2 text-xs opacity-70">
+                                                    <div className="p-1 bg-slate-100 text-slate-500 rounded-full"><Lock size={12}/></div>
+                                                    <span className="text-slate-600">Chốt: <span className="font-bold">{s.closed_by_name}</span></span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </td>
+
+                                    <td className="p-4 text-right">
+                                        <div className="flex flex-col gap-1">
+                                            <div className="text-emerald-600 font-bold text-xs">+ {(s.total_revenue_cash || 0).toLocaleString()}</div>
+                                            <div className="text-red-500 font-bold text-xs">- {(s.total_expense_cash || 0).toLocaleString()}</div>
+                                        </div>
+                                    </td>
+
+                                    <td className="p-4 text-right">
+                                        <div className="flex flex-col gap-1 items-end">
+                                            <div className="text-[10px] text-slate-400 font-medium">Lý thuyết: {(s.end_cash_expected || 0).toLocaleString()}</div>
+                                            <div className="text-base font-black text-slate-800">{(s.end_cash_actual || 0).toLocaleString()} ₫</div>
+                                        </div>
+                                    </td>
+
+                                    <td className="p-4 text-center">
+                                        {diff === 0 ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black border border-emerald-100 uppercase tracking-wide">
+                                                <CheckCircle2 size={12}/> Khớp
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[10px] font-black border border-red-100 uppercase tracking-wide">
+                                                <AlertTriangle size={12}/> Lệch {diff > 0 ? '+' : ''}{diff.toLocaleString()}
+                                            </span>
+                                        )}
+                                    </td>
+
+                                    <td className="p-4">
+                                        <div className={`text-xs ${s.note ? 'text-slate-600' : 'text-slate-300 italic'}`}>
+                                            {s.note || 'Không có ghi chú'}
+                                        </div>
+                                    </td>
+                                 </tr>
+                               );
+                            })}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      <TransactionModal 
          isOpen={isModalOpen} 
          onClose={() => setModalOpen(false)} 
-         expense={editingExpense} 
+         transaction={editingTransaction} 
       />
     </div>
   );

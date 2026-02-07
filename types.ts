@@ -139,6 +139,25 @@ export interface Payment {
   method: 'Cash' | 'Transfer' | 'Card' | 'Other';
 }
 
+// NEW: Finance Transaction (Replaces Expense)
+export interface FinanceTransaction {
+  id: string;
+  transactionDate: string; // ISO string (Mapped from transaction_date)
+  amount: number;
+  type: 'REVENUE' | 'EXPENSE'; 
+  category: string;
+  description: string;
+  pic?: string; // Người thực hiện
+  status: 'Draft' | 'Verified'; 
+  bookingId?: string; // Link tới booking nếu có (Mapped from booking_id)
+  note?: string;
+  paymentMethod?: string; // Cash, Transfer... (Mapped from payment_method)
+  facilityId?: string; // Link với cơ sở (Mapped from facility_id)
+  facilityName?: string; // Helper for display
+  created_by?: string;
+}
+
+// Deprecated but kept for compatibility during migration if needed
 export interface Expense {
   id: string;
   expenseDate: string; 
@@ -147,6 +166,8 @@ export interface Expense {
   expenseContent: string;
   amount: number;
   note?: string;
+  created_by?: string;
+  creator_name?: string;
 }
 
 export type ItemCategory = 'Minibar' | 'Amenity' | 'Linen' | 'Voucher' | 'Service' | 'Asset';
@@ -160,11 +181,22 @@ export interface ServiceItem {
   stock: number; // Kho Sạch: Sẵn sàng sử dụng
   minStock: number; 
   category: ItemCategory; 
-  laundryStock?: number; // Kho Bẩn: Đang chờ giặt/tại xưởng
+  laundryStock?: number; // Kho Bẩn: Đang chờ giặt (tại KS)
+  vendor_stock?: number; // Tại Xưởng: Đang ở nhà giặt (Công nợ)
   in_circulation?: number; // Đang trong phòng (Theo định mức hoặc khách mượn)
-  totalassets?: number; // Tổng tài sản (Sạch + Bẩn + Đang trong phòng)
+  totalassets?: number; // Tổng tài sản
   default_qty?: number; // Định mức chuẩn cho mỗi phòng (vd: 2 khăn/phòng)
   created_at?: string;
+}
+
+// Interface for Bulk Import
+export interface BulkImportItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  currentStock: number;
+  importQuantity: number;
+  importPrice: number;
 }
 
 export interface RoomRecipeItem {
@@ -292,6 +324,9 @@ export interface Shift {
   difference?: number; 
   note?: string;
   status: 'Open' | 'Closed';
+  // Audit Trail
+  closed_by_id?: string;
+  closed_by_name?: string;
 }
 
 // NEW: Bank Account Interface

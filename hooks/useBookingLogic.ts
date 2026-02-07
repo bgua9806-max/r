@@ -259,12 +259,29 @@ export const useBookingLogic = () => {
                   }
               }
 
+              // 5. Check Lending & Services (for badges)
+              let hasLending = false;
+              let hasService = false;
+              if (activeBooking) {
+                  try {
+                      const lending = activeBooking.lendingJson ? JSON.parse(activeBooking.lendingJson) : [];
+                      if (Array.isArray(lending) && lending.length > 0) hasLending = true;
+                  } catch (e) {}
+                  
+                  try {
+                      const services = activeBooking.servicesJson ? JSON.parse(activeBooking.servicesJson) : [];
+                      if (Array.isArray(services) && services.length > 0) hasService = true;
+                  } catch (e) {}
+              }
+
               return {
                   ...room,
                   currentStatus: status,
                   booking: activeBooking,
                   nextBooking,
-                  task: activeTask
+                  task: activeTask,
+                  hasLending,
+                  hasService
               };
           });
 

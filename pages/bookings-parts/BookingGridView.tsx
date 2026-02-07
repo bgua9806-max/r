@@ -1,13 +1,20 @@
 
 import React from 'react';
-import { ArrowRightLeft, Brush, CheckCircle, LogOut, ShieldCheck, ShoppingCart, Sparkles, Users, XCircle, BedDouble } from 'lucide-react';
+import { ArrowRightLeft, Brush, CheckCircle, LogOut, ShieldCheck, ShoppingCart, Sparkles, Users, XCircle, BedDouble, Shirt, Utensils } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import { Booking, Guest, Room } from '../../types';
 
 interface BookingGridViewProps {
   roomMapData: {
       facility: { id: string; facilityName: string };
-      rooms: (Room & { currentStatus: string; booking?: Booking; nextBooking?: Booking; task?: any })[];
+      rooms: (Room & { 
+          currentStatus: string; 
+          booking?: Booking; 
+          nextBooking?: Booking; 
+          task?: any;
+          hasLending?: boolean;
+          hasService?: boolean;
+      })[];
   }[];
   now: Date;
   handleRoomClick: (room: any, facilityName: string) => void;
@@ -105,7 +112,23 @@ export const BookingGridView: React.FC<BookingGridViewProps> = ({
                                        )}
 
                                        <div className={b?.groupName ? 'mt-2 md:mt-3' : ''}>
-                                           <div className="text-lg md:text-2xl font-black leading-none">{room.name}</div>
+                                           <div className="flex items-center gap-2">
+                                              <div className="text-lg md:text-2xl font-black leading-none">{room.name}</div>
+                                              {(room.hasLending || room.hasService) && (
+                                                  <div className="flex items-center gap-1">
+                                                      {room.hasLending && (
+                                                          <div className="bg-blue-50 text-blue-600 p-1 rounded-md shadow-sm border border-blue-100" title="Đang mượn đồ">
+                                                              <Shirt size={12} strokeWidth={2.5}/>
+                                                          </div>
+                                                      )}
+                                                      {room.hasService && (
+                                                          <div className="bg-orange-50 text-orange-600 p-1 rounded-md shadow-sm border border-orange-100" title="Có dùng dịch vụ">
+                                                              <Utensils size={12} strokeWidth={2.5}/>
+                                                          </div>
+                                                      )}
+                                                  </div>
+                                              )}
+                                           </div>
                                            <div className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest opacity-80 mt-1 flex items-center gap-1 whitespace-nowrap">
                                                {statusLabel}
                                                {b?.isDeclared && <ShieldCheck size={10} fill="currentColor" className="text-white hidden md:block"/>}

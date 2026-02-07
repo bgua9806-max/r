@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Collaborator, ShiftSchedule, AttendanceAdjustment, LeaveRequest, TimeLog, Expense } from '../types';
@@ -6,7 +5,7 @@ import { CollaboratorModal } from '../components/CollaboratorModal';
 import { 
   Pencil, Trash2, Plus, Search, ClipboardList,
   ChevronLeft, ChevronRight, Calendar, Edit2, FileDown, Wallet, DollarSign, Sun, Moon, 
-  CheckCircle, AlertCircle, Send, User, HeartPulse, ShieldCheck, UserCheck, Loader2, X, Check, Clock, MapPin, QrCode, AlertTriangle, Gavel, Banknote, PiggyBank, History
+  CheckCircle, AlertCircle, Send, User, HeartPulse, ShieldCheck, UserCheck, Loader2, X, Check, Clock, MapPin, QrCode, AlertTriangle, Gavel, Banknote, PiggyBank, History, CalendarDays, Palmtree
 } from 'lucide-react';
 import { HRTabs, HRTabType } from '../components/HRTabs';
 import { ListFilter, FilterOption } from '../components/ListFilter';
@@ -230,13 +229,58 @@ export const Collaborators: React.FC = () => {
       const pendingAdvances = salaryAdvances.filter(a => a.status === 'Pending');
       const totalSalaryEstimate = timesheetData.reduce((acc, curr) => acc + curr.calculatedSalary, 0);
 
-      // Get shifts for today
-      const todayShifts = schedules.filter(s => s.date === todayStr);
-      const morningStaff = collaborators.filter(c => todayShifts.some(s => s.staff_id === c.id && s.shift_type === 'Sáng'));
-      const nightStaff = collaborators.filter(c => todayShifts.some(s => s.staff_id === c.id && s.shift_type === 'Tối'));
+      // --- LOGIC CA TRỰC HYBRID (Schedule + GPS) ---
+      const todayLogs = timeLogs.filter(l => isSameDay(parseISO(l.check_in_time), today));
+
+      const morningStaff: (Collaborator & { isWorking: boolean })[] = [];
+      const nightStaff: (Collaborator & { isWorking: boolean })[] = [];
+
+      collaborators.forEach(c => {
+          // Lấy tất cả logs của user trong hôm nay
+          const userLogs = todayLogs.filter(l => l.staff_id === c.id);
+          
+          // Kiểm tra xem user đã "hoàn thành" ca làm việc chưa (tất cả lần đó đều đã check-out)
+          // Nếu đã check-in ít nhất 1 lần VÀ tất cả lần đó đều đã check-out -> Ẩn khỏi danh sách
+          const hasLogs = userLogs.length > 0;
+          const allCheckedOut = hasLogs && userLogs.every(l => !!l.check_out_time);
+          
+          if (allCheckedOut) return; // Hide user if finished working
+
+          // Check active log (Working now)
+          const activeLog = userLogs.find(l => !l.check_out_time);
+          const isWorking = !!activeLog;
+
+          // Check schedule
+          const schedule = schedules.find(s => s.staff_id === c.id && s.date === todayStr);
+          
+          let shiftType = '';
+
+          if (isWorking && activeLog) {
+              // Priority: User is working (GPS). Determine shift based on Time or Schedule.
+              if (schedule) {
+                  shiftType = schedule.shift_type;
+              } else {
+                  // Unscheduled work: Determine by time
+                  const hour = parseISO(activeLog.check_in_time).getHours();
+                  shiftType = hour < 14 ? 'Sáng' : 'Tối';
+              }
+          } else if (schedule) {
+              // Not working yet, but scheduled -> Show as Waiting
+              shiftType = schedule.shift_type;
+          }
+
+          if (shiftType) {
+              const staffWithStatus = { ...c, isWorking };
+              if (shiftType === 'Sáng' || shiftType === 'Chiều' as any) {
+                  morningStaff.push(staffWithStatus);
+              } else if (shiftType === 'Tối') {
+                  nightStaff.push(staffWithStatus);
+              }
+          }
+      });
 
       return { totalStaff, onLeaveToday, pendingLeaves, pendingAdvances, totalSalaryEstimate, morningStaff, nightStaff };
-  }, [collaborators, leaveRequests, timesheetData, schedules, salaryAdvances]);
+  }, [collaborators, leaveRequests, timesheetData, schedules, salaryAdvances, timeLogs]);
 
   const handleEdit = (c: Collaborator) => {
     setEditingCollab(c);
@@ -570,10 +614,15 @@ export const Collaborators: React.FC = () => {
                               <div className="bg-amber-50/30 rounded-xl p-3 border border-amber-100 space-y-2 min-h-[80px]">
                                   {overviewStats.morningStaff.length > 0 ? (
                                       overviewStats.morningStaff.map(s => (
-                                          <div key={s.id} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-amber-50/50 shadow-sm">
-                                              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm" style={{backgroundColor: s.color}}>{s.collaboratorName.charAt(0)}</div>
+                                          <div key={s.id} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-amber-50/50 shadow-sm relative">
+                                              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm relative" style={{backgroundColor: s.color}}>
+                                                  {s.collaboratorName.charAt(0)}
+                                                  {s.isWorking && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full animate-pulse" title="Đang làm việc"></div>}
+                                              </div>
                                               <div>
-                                                  <div className="text-xs font-bold text-slate-700">{s.collaboratorName}</div>
+                                                  <div className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                                                      {s.collaboratorName}
+                                                  </div>
                                                   <div className="text-[9px] text-slate-400 uppercase font-medium">{s.role}</div>
                                               </div>
                                           </div>
@@ -597,10 +646,15 @@ export const Collaborators: React.FC = () => {
                               <div className="bg-indigo-50/30 rounded-xl p-3 border border-indigo-100 space-y-2 min-h-[80px]">
                                   {overviewStats.nightStaff.length > 0 ? (
                                       overviewStats.nightStaff.map(s => (
-                                          <div key={s.id} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-indigo-50/50 shadow-sm">
-                                              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm" style={{backgroundColor: s.color}}>{s.collaboratorName.charAt(0)}</div>
+                                          <div key={s.id} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-indigo-50/50 shadow-sm relative">
+                                              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm relative" style={{backgroundColor: s.color}}>
+                                                  {s.collaboratorName.charAt(0)}
+                                                  {s.isWorking && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full animate-pulse" title="Đang làm việc"></div>}
+                                              </div>
                                               <div>
-                                                  <div className="text-xs font-bold text-slate-700">{s.collaboratorName}</div>
+                                                  <div className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                                                      {s.collaboratorName}
+                                                  </div>
                                                   <div className="text-[9px] text-slate-400 uppercase font-medium">{s.role}</div>
                                               </div>
                                           </div>
@@ -1247,13 +1301,13 @@ export const Collaborators: React.FC = () => {
                  <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
                      <button 
                         onClick={() => setTimesheetMode('schedule')}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${timesheetMode === 'schedule' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'}`}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${timesheetMode === 'schedule' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500'} `}
                      >
                          <Calendar size={14}/> Theo Lịch
                      </button>
                      <button 
                         onClick={() => setTimesheetMode('realtime')}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${timesheetMode === 'realtime' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500'}`}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${timesheetMode === 'realtime' ? 'bg-white shadow-sm text-brand-700' : 'text-slate-500'} `}
                      >
                          <MapPin size={14}/> Theo GPS (Thực tế)
                      </button>
@@ -1320,6 +1374,49 @@ export const Collaborators: React.FC = () => {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* Mobile Card List */}
+          <div className="md:hidden space-y-4">
+              {timesheetData.map(row => (
+                  <div key={row.staff.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                      <div className="flex items-center gap-3 mb-3 pb-3 border-b border-slate-100">
+                          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-black shadow-sm" style={{ backgroundColor: row.staff.color || '#3b82f6' }}>
+                              {(row.staff.collaboratorName || '?').charAt(0)}
+                          </div>
+                          <div>
+                              <div className="font-bold text-slate-800">{row.staff.collaboratorName}</div>
+                              <div className="text-[10px] text-slate-400 font-black uppercase tracking-wider">{row.staff.role}</div>
+                          </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                              <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Tổng công</div>
+                              <div className="text-lg font-black text-brand-700">{row.standardDays.toFixed(1)}</div>
+                          </div>
+                          <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100">
+                              <div className="text-[10px] text-emerald-600 font-bold uppercase mb-1">Lương tạm tính</div>
+                              <div className="text-lg font-black text-emerald-700">{row.calculatedSalary.toLocaleString(undefined, {maximumFractionDigits: 0})} ₫</div>
+                          </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                          <button 
+                              onClick={() => openAdjustment(row.staff)} 
+                              className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase hover:bg-slate-50 flex items-center justify-center gap-2"
+                          >
+                              <Edit2 size={16}/> Sửa công
+                          </button>
+                          <button 
+                              onClick={() => handleOpenPayroll(row.staff, row.calculatedSalary)} 
+                              className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg text-xs font-bold uppercase hover:bg-brand-700 shadow-lg shadow-brand-200 flex items-center justify-center gap-2"
+                          >
+                              <QrCode size={16}/> TT Lương
+                          </button>
+                      </div>
+                  </div>
+              ))}
           </div>
         </div>
       )}

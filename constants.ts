@@ -158,22 +158,6 @@ export const ROOM_RECIPES: Record<string, RoomRecipe> = {
             { itemId: 'A_TUIGIAT', quantity: 1 },
             { itemId: 'A_NUOCSUOI', quantity: 4 }
         ]
-    },
-    '2GM6 + SOFA': {
-        roomType: '2GM6 + SOFA',
-        description: '2 Giường 1m6 + Sofa (37m2)',
-        items: [
-            { itemId: 'L_GA18', quantity: 2 },
-            { itemId: 'L_BOC18', quantity: 2 },
-            { itemId: 'L_GOI', quantity: 4 },
-            { itemId: 'L_AO', quantity: 2 },
-            { itemId: 'A_BANCHAI', quantity: 4 },
-            { itemId: 'A_DAOCAO', quantity: 1 },
-            { itemId: 'A_LUOC', quantity: 1 },
-            { itemId: 'A_CHUPTOC', quantity: 1 },
-            { itemId: 'A_TUIGIAT', quantity: 1 },
-            { itemId: 'A_NUOCSUOI', quantity: 4 }
-        ]
     }
 };
 

@@ -1,22 +1,24 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2, RotateCw, Calculator, TrendingUp, TrendingDown, Equal, BedDouble } from 'lucide-react';
 import { Settings as SettingsType, ServiceItem, ItemCategory, WebhookConfig, RoomRecipe, BankAccount } from '../types';
 import { MOCK_SERVICES } from '../constants';
 import { storageService } from '../services/storage';
 import { RecipeModal } from '../components/RecipeModal';
 import { Modal } from '../components/Modal';
+import { useStandardInventory } from '../hooks/useStandardInventory';
 
 export const Settings: React.FC = () => {
   const { 
       settings, updateSettings, services, addService, deleteService, notify, refreshData, 
       webhooks, addWebhook, deleteWebhook, updateWebhook, triggerWebhook, 
       getGeminiApiKey, setAppConfig, roomRecipes, deleteRoomRecipe,
-      bankAccounts, addBankAccount, updateBankAccount, deleteBankAccount
+      bankAccounts, addBankAccount, updateBankAccount, deleteBankAccount, isLoading,
+      rooms // Added rooms to context for calculation
   } = useAppContext();
   
   const [localSettings, setLocalSettings] = useState(settings);
+  const inventoryAnalysis = useStandardInventory();
   
   // State for adding simple strings
   const [addingSection, setAddingSection] = useState<keyof SettingsType | null>(null);
@@ -50,6 +52,16 @@ export const Settings: React.FC = () => {
   // State for Gemini Key
   const [geminiKey, setGeminiKey] = useState('');
   const [isSavingKey, setIsSavingKey] = useState(false);
+
+  // --- CALCULATE ROOM TYPE COUNTS ---
+  const roomTypeStats = useMemo(() => {
+      const stats: Record<string, number> = {};
+      rooms.forEach(r => {
+          const type = r.type || 'Chưa phân loại';
+          stats[type] = (stats[type] || 0) + 1;
+      });
+      return stats;
+  }, [rooms]);
 
   useEffect(() => {
       // Load current key on mount (masked for security if needed, but here simple retrieval)
@@ -393,14 +405,32 @@ export const Settings: React.FC = () => {
                 </button>
              </div>
 
+             {/* Room Type Statistics Summary */}
+             <div className="flex flex-wrap gap-2 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-100 animate-in fade-in">
+                 <div className="flex items-center gap-2 pr-3 border-r border-slate-200">
+                     <span className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><BedDouble size={14}/> Tổng:</span>
+                     <span className="text-sm font-black text-slate-800">{rooms.length} phòng</span>
+                 </div>
+                 {Object.entries(roomTypeStats).sort((a,b) => Number(b[1]) - Number(a[1])).map(([type, count]) => (
+                     <div key={type} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 text-[10px] font-medium shadow-sm">
+                         <span className="text-slate-600">{type}:</span>
+                         <span className="font-black text-brand-600">{count}</span>
+                     </div>
+                 ))}
+             </div>
+
              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                  {Object.entries(roomRecipes).map(([key, rawRecipe]) => {
                      const recipe = rawRecipe as RoomRecipe;
+                     const roomCount = roomTypeStats[key] || 0;
                      return (
                      <div key={key} className="bg-slate-50 rounded-xl border border-slate-200 p-4 hover:border-brand-300 transition-all hover:shadow-md group">
                          <div className="flex justify-between items-start mb-3">
                              <div>
-                                 <div className="text-lg font-black text-slate-800">{key}</div>
+                                 <div className="text-lg font-black text-slate-800 flex items-center gap-2">
+                                     {key}
+                                     {roomCount > 0 && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-blue-200">{roomCount} phòng</span>}
+                                 </div>
                                  <div className="text-xs text-slate-500 font-medium">{recipe.description}</div>
                              </div>
                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -421,20 +451,93 @@ export const Settings: React.FC = () => {
                          
                          {/* Item Summary */}
                          <div className="flex flex-wrap gap-1.5">
-                             {recipe.items.slice(0, 5).map((item, idx) => (
+                             {(recipe.items || []).slice(0, 5).map((item, idx) => (
                                  <span key={idx} className="text-[10px] bg-white border border-slate-100 px-2 py-1 rounded text-slate-600 font-medium">
                                      {item.itemId} <b className="text-brand-600">x{item.quantity}</b>
                                  </span>
                              ))}
-                             {recipe.items.length > 5 && (
-                                 <span className="text-[10px] bg-slate-200 px-2 py-1 rounded text-slate-500 font-bold">
-                                     +{recipe.items.length - 5}
+                             {(recipe.items?.length ?? 0) > 5 && (
+                                 <span className="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded text-slate-500 font-bold">
+                                     +{((recipe.items?.length ?? 0) - 5)}
                                  </span>
                              )}
                          </div>
                      </div>
                      );
                  })}
+             </div>
+         </div>
+
+         {/* --- STANDARD INVENTORY ANALYSIS SECTION (NEW) --- */}
+         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
+             <div className="flex justify-between items-center mb-6">
+                <div>
+                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Calculator size={20}/> Kiểm Tra Cân Đối Kho & Định Mức</h3>
+                   <p className="text-xs text-slate-500 mt-1">So sánh tổng nhu cầu (dựa trên số lượng phòng và công thức) với tài sản thực tế.</p>
+                </div>
+                <button 
+                    onClick={() => refreshData()}
+                    disabled={isLoading}
+                    className="flex items-center gap-2 bg-slate-50 text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold transition-colors"
+                >
+                    <RotateCw size={14} className={isLoading ? 'animate-spin' : ''}/> Làm mới dữ liệu
+                </button>
+             </div>
+
+             <div className="overflow-x-auto custom-scrollbar">
+                 <table className="w-full text-left text-sm border-collapse">
+                     <thead className="bg-slate-50 text-slate-500 font-black uppercase text-[10px] tracking-widest border-b border-slate-200">
+                         <tr>
+                             <th className="p-4 w-[30%]">Tên Vật Tư</th>
+                             <th className="p-4 text-center">Phân loại</th>
+                             <th className="p-4 text-center bg-blue-50/50 text-blue-700">Định Mức Tổng (Calculated)</th>
+                             <th className="p-4 text-center bg-slate-100/50 text-slate-700">Tổng Tài Sản (Database)</th>
+                             <th className="p-4 text-center w-[15%]">Trạng Thái</th>
+                         </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-50">
+                         {inventoryAnalysis.map((item) => (
+                             <tr key={item.itemId} className="hover:bg-slate-50 transition-colors group">
+                                 <td className="p-4">
+                                     <div className="font-bold text-slate-800">{item.itemName}</div>
+                                     <div className="text-[10px] text-slate-400 font-mono mt-0.5">{item.itemId}</div>
+                                 </td>
+                                 <td className="p-4 text-center">
+                                     <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-bold uppercase border border-slate-200">{item.category}</span>
+                                 </td>
+                                 <td className="p-4 text-center bg-blue-50/20">
+                                     <div className="font-bold text-blue-700">{item.requiredStandard}</div>
+                                     <div className="text-[9px] text-blue-400 font-medium">({item.unit})</div>
+                                 </td>
+                                 <td className="p-4 text-center bg-slate-50/30">
+                                     <div className="font-bold text-slate-700">{item.currentTotalAssets}</div>
+                                 </td>
+                                 <td className="p-4 text-center">
+                                     {item.status === 'Thieu' ? (
+                                         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-600 border border-red-100 text-xs font-bold animate-pulse">
+                                             <TrendingDown size={14}/> Thiếu {Math.abs(item.variance)}
+                                         </div>
+                                     ) : item.status === 'Du' ? (
+                                         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-bold">
+                                             <TrendingUp size={14}/> Dư {item.variance}
+                                         </div>
+                                     ) : (
+                                         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 border border-blue-100 text-xs font-bold">
+                                             <Equal size={14}/> Chuẩn
+                                         </div>
+                                     )}
+                                 </td>
+                             </tr>
+                         ))}
+                         {inventoryAnalysis.length === 0 && (
+                             <tr>
+                                 <td colSpan={5} className="p-8 text-center text-slate-400 italic text-xs">
+                                     Chưa có dữ liệu phân tích. Hãy đảm bảo đã cấu hình Phòng và Định mức (Recipes).
+                                 </td>
+                             </tr>
+                         )}
+                     </tbody>
+                 </table>
              </div>
          </div>
 

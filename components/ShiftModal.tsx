@@ -96,7 +96,7 @@ export const ShiftModal: React.FC<Props> = ({ isOpen, onClose }) => {
       if (confirm('Xác nhận kết thúc ca làm việc và chốt sổ?')) {
           setIsSubmitting(true);
           try {
-            await closeShift(endCashActual, note);
+            await closeShift(endCashActual, note, shiftStats);
             onClose();
           } finally {
             setIsSubmitting(false);

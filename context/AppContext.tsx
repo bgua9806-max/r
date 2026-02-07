@@ -1,11 +1,11 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
-  Collaborator, Facility, Room, Booking, ServiceItem, Expense, 
+  Collaborator, Facility, Room, Booking, ServiceItem, Expense, FinanceTransaction,
   Shift, ShiftSchedule, AttendanceAdjustment, LeaveRequest, 
   HousekeepingTask, WebhookConfig, InventoryTransaction, 
   Settings, RoomRecipe, BankAccount, TimeLog, OtaOrder, 
-  ToastMessage, GuestProfile, LendingItem, SalaryAdvance, Violation
+  ToastMessage, GuestProfile, LendingItem, SalaryAdvance, Violation, BulkImportItem, Payment
 } from '../types';
 import { ROLE_PERMISSIONS, DEFAULT_SETTINGS } from '../constants';
 import { storageService } from '../services/storage';
@@ -21,7 +21,8 @@ interface AppContextType {
   rooms: Room[];
   bookings: Booking[];
   services: ServiceItem[];
-  expenses: Expense[];
+  // expenses: Expense[]; // Deprecated
+  transactions: FinanceTransaction[]; // Replaces expenses
   collaborators: Collaborator[];
   housekeepingTasks: HousekeepingTask[];
   inventoryTransactions: InventoryTransaction[];
@@ -41,13 +42,11 @@ interface AppContextType {
   currentShift: Shift | null;
   toasts: ToastMessage[];
 
-  // Methods
   refreshData: (full?: boolean) => Promise<void>;
   canAccess: (path: string) => boolean;
   notify: (type: 'success' | 'error' | 'info', message: string) => void;
   removeToast: (id: number) => void;
   
-  // CRUD
   addFacility: (item: Facility) => Promise<void>;
   updateFacility: (item: Facility) => Promise<void>;
   deleteFacility: (id: string) => Promise<void>;
@@ -63,9 +62,12 @@ interface AppContextType {
   updateService: (item: ServiceItem) => Promise<void>;
   deleteService: (id: string) => Promise<void>;
   
-  addExpense: (item: Expense) => Promise<void>;
-  updateExpense: (item: Expense) => Promise<void>;
-  deleteExpense: (id: string) => Promise<void>;
+  addTransaction: (item: FinanceTransaction) => Promise<void>;
+  updateTransaction: (item: FinanceTransaction) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
+  
+  // Legacy support wrappers if needed, but better to migrate usage
+  addExpense: (item: Expense) => Promise<void>; 
   
   addCollaborator: (item: Collaborator) => Promise<void>;
   updateCollaborator: (item: Collaborator) => Promise<void>;
@@ -73,9 +75,10 @@ interface AppContextType {
   
   syncHousekeepingTasks: (tasks: HousekeepingTask[]) => Promise<void>;
   addInventoryTransaction: (item: InventoryTransaction) => Promise<void>;
+  processBulkImport: (items: BulkImportItem[], totalAmount: number, note: string, facilityName: string, evidenceUrl?: string) => Promise<void>;
   
   openShift: (startCash: number) => Promise<void>;
-  closeShift: (endCash: number, note: string) => Promise<void>;
+  closeShift: (endCash: number, note: string, stats: { revenue: number; expense: number; expected: number }) => Promise<void>;
   
   clockIn: (facilityId: string, lat: number, lng: number) => Promise<{success: boolean, message: string}>;
   clockOut: () => Promise<{success: boolean, message: string}>;
@@ -83,7 +86,6 @@ interface AppContextType {
   addLeaveRequest: (item: LeaveRequest) => Promise<void>;
   updateLeaveRequest: (item: LeaveRequest) => Promise<void>;
   
-  // Phase 2: Salary Advances & Violations
   requestAdvance: (amount: number, reason: string) => Promise<void>;
   approveAdvance: (advanceId: string, isApproved: boolean) => Promise<void>;
   addViolation: (staffId: string, amount: number, reason: string, evidence?: string) => Promise<void>;
@@ -92,7 +94,6 @@ interface AppContextType {
   deleteSchedule: (id: string) => Promise<void>;
   upsertAdjustment: (item: AttendanceAdjustment) => Promise<void>;
   
-  // Settings & Config
   updateSettings: (s: Settings) => Promise<void>;
   updateRoomRecipe: (id: string, recipe: RoomRecipe) => Promise<void>;
   deleteRoomRecipe: (id: string) => Promise<void>;
@@ -106,24 +107,21 @@ interface AppContextType {
   
   addGuestProfile: (p: GuestProfile) => Promise<void>;
   
-  // OTA
   syncOtaOrders: (orders?: OtaOrder[], silent?: boolean) => Promise<void>;
   queryOtaOrders: (params: { page: number, pageSize: number, tab: string, search: string, dateFilter?: any }) => Promise<{ data: OtaOrder[], hasMore: boolean }>;
   updateOtaOrder: (id: string, updates: Partial<OtaOrder>) => Promise<void>;
   deleteOtaOrder: (id: string) => Promise<void>;
   confirmOtaCancellation: (order: OtaOrder) => Promise<void>;
   
-  // Bank Accounts
   addBankAccount: (b: BankAccount) => Promise<void>;
   updateBankAccount: (b: BankAccount) => Promise<void>;
   deleteBankAccount: (id: string) => Promise<void>;
 
-  // Processors
   processMinibarUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
   processLendingUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
   processRoomRestock: (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => Promise<void>;
-  processCheckoutLinenReturn: (facilityName: string, roomCode: string) => Promise<void>; // Legacy placeholder
-  handleLinenExchange: (facilityName: string, roomCode: string, items: any[]) => Promise<void>; // Legacy placeholder
+  processCheckoutLinenReturn: (facilityName: string, roomCode: string) => Promise<void>; 
+  handleLinenExchange: (facilityName: string, roomCode: string, items: any[]) => Promise<void>; 
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -154,6 +152,21 @@ const mapOtaData = (data: any[]): OtaOrder[] => {
   }));
 };
 
+const calculateTotalPaid = (booking: Booking): number => {
+    try {
+        const payments: Payment[] = JSON.parse(booking.paymentsJson || '[]');
+        return payments.reduce((sum, p) => sum + Number(p.soTien), 0);
+    } catch(e) { return 0; }
+};
+
+export const useAppContext = () => {
+  const context = useContext(AppContext);
+  if (context === undefined) {
+    throw new Error('useAppContext must be used within an AppProvider');
+  }
+  return context;
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<Collaborator | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -165,7 +178,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [transactions, setTransactions] = useState<FinanceTransaction[]>([]); // New State
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [housekeepingTasks, setHousekeepingTasks] = useState<HousekeepingTask[]>([]);
   const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>([]);
@@ -183,14 +196,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>({});
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
 
-  // Auth & Init
   useEffect(() => {
     const init = async () => {
         const user = storageService.getUser();
         if (user) setCurrentUser(user);
         
         await storageService.checkConnection();
-        // Load settings first as they are critical
         const [sets, recipes, banks] = await Promise.all([
             storageService.getSettings(),
             storageService.getRoomRecipes(),
@@ -200,7 +211,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setRoomRecipes(recipes);
         setBankAccounts(banks);
         
-        // Load data if user is logged in
         if (user) {
             await refreshData(true);
         }
@@ -223,13 +233,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
           const [
-              facs, rms, bks, svcs, exps, collabs, tasks, trans, shfts, schs, adjs, leaves, logs, whs, advs, vios
+              facs, rms, bks, svcs, trans, collabs, tasks, invTrans, shfts, schs, adjs, leaves, logs, whs, advs, vios
           ] = await Promise.all([
               storageService.getFacilities(),
               storageService.getRooms(),
               storageService.getBookings(),
               storageService.getServices(),
-              storageService.getExpenses(),
+              storageService.getTransactions(),
               storageService.getCollaborators(),
               storageService.getHousekeepingTasks(),
               storageService.getInventoryTransactions(),
@@ -247,10 +257,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setRooms(rms);
           setBookings(bks);
           setServices(svcs);
-          setExpenses(exps);
+          setTransactions(trans);
           setCollaborators(collabs);
           setHousekeepingTasks(tasks);
-          setInventoryTransactions(trans);
+          setInventoryTransactions(invTrans);
           setShifts(shfts);
           setSchedules(schs);
           setAdjustments(adjs);
@@ -277,7 +287,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return allowed.some(p => path.startsWith(p));
   };
 
-  // --- CRUD WRAPPERS ---
   const addFacility = async (item: Facility) => { await storageService.addFacility(item); refreshData(); };
   const updateFacility = async (item: Facility) => { await storageService.updateFacility(item); refreshData(); };
   const deleteFacility = async (id: string) => { await storageService.deleteFacility(id); refreshData(); };
@@ -285,16 +294,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const upsertRoom = async (item: Room) => { await storageService.upsertRoom(item); refreshData(); };
   const deleteRoom = async (id: string) => { await storageService.deleteRoom(id); refreshData(); };
 
-  const addBooking = async (item: Booking) => { await storageService.addBooking(item); refreshData(); return true; };
-  const updateBooking = async (item: Booking) => { await storageService.updateBooking(item); refreshData(); return true; };
+  const addBooking = async (item: Booking) => { 
+      // Initial payment logic is handled inside modal via Booking object construction usually
+      await storageService.addBooking(item); 
+      refreshData(); 
+      return true; 
+  };
+
+  // UPDATED: SYNC REVENUE LOGIC
+  const updateBooking = async (item: Booking) => { 
+      // 1. Calculate difference in payment to record revenue
+      const oldBooking = bookings.find(b => b.id === item.id);
+      if (oldBooking) {
+          const oldPaid = calculateTotalPaid(oldBooking);
+          const newPaid = calculateTotalPaid(item);
+          const diff = newPaid - oldPaid;
+
+          if (diff > 0) {
+              // Auto-record Revenue Transaction
+              const facilityId = facilities.find(f => f.facilityName === item.facilityName)?.id;
+              
+              await addTransaction({
+                  id: `TR-AUTO-${Date.now()}`,
+                  transactionDate: new Date().toISOString(),
+                  amount: diff,
+                  type: 'REVENUE',
+                  category: 'Doanh thu phòng',
+                  description: `Thu tiền phòng ${item.roomCode} - ${item.customerName}`,
+                  status: 'Verified',
+                  bookingId: item.id,
+                  paymentMethod: 'Cash', // Default assumption, ideally extracted from new payment item
+                  facilityId: facilityId,
+                  facilityName: item.facilityName,
+                  created_by: currentUser?.id
+              });
+          }
+      }
+
+      await storageService.updateBooking(item); 
+      refreshData(); 
+      return true; 
+  };
 
   const addService = async (item: ServiceItem) => { await storageService.addService(item); refreshData(); };
   const updateService = async (item: ServiceItem) => { await storageService.updateService(item); refreshData(); };
   const deleteService = async (id: string) => { await storageService.deleteService(id); refreshData(); };
 
-  const addExpense = async (item: Expense) => { await storageService.addExpense(item); refreshData(); };
-  const updateExpense = async (item: Expense) => { await storageService.updateExpense(item); refreshData(); };
-  const deleteExpense = async (id: string) => { await storageService.deleteExpense(id); refreshData(); };
+  // --- TRANSACTION CRUD ---
+  const addTransaction = async (item: FinanceTransaction) => {
+      const transWithUser = {
+          ...item,
+          created_by: item.created_by || currentUser?.id,
+          pic: item.pic || currentUser?.collaboratorName || 'System'
+      };
+      await storageService.addTransaction(transWithUser);
+      refreshData();
+  };
+  const updateTransaction = async (item: FinanceTransaction) => { await storageService.updateTransaction(item); refreshData(); };
+  const deleteTransaction = async (id: string) => { await storageService.deleteTransaction(id); refreshData(); };
+
+  // Compatibility Wrapper for old code using addExpense
+  const addExpense = async (item: Expense) => { 
+      const facilityId = facilities.find(f => f.facilityName === item.facilityName)?.id;
+      const trans: FinanceTransaction = {
+          id: item.id,
+          transactionDate: item.expenseDate,
+          amount: item.amount,
+          type: 'EXPENSE',
+          category: item.expenseCategory,
+          description: item.expenseContent,
+          status: 'Verified',
+          note: item.note,
+          facilityId: facilityId,
+          facilityName: item.facilityName,
+          created_by: item.created_by
+      };
+      await addTransaction(trans); 
+  };
+  
+  const updateExpense = async (item: Expense) => { 
+      // Simplified: Just re-add as update is complex with type mapping change
+      // Ideally we fetch the transaction and update it. For now, assume addExpense logic.
+      // In real migration, we update the transaction directly.
+      console.warn("Update Expense called on legacy interface");
+  };
+  const deleteExpense = async (id: string) => { await deleteTransaction(id); };
 
   const addCollaborator = async (item: Collaborator) => { await storageService.addCollaborator(item); refreshData(); };
   const updateCollaborator = async (item: Collaborator) => { await storageService.updateCollaborator(item); refreshData(); };
@@ -304,7 +388,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   
   const addInventoryTransaction = async (item: InventoryTransaction) => { await storageService.addInventoryTransaction(item); refreshData(); };
 
-  // --- SHIFTS ---
+  const processBulkImport = async (items: BulkImportItem[], totalAmount: number, note: string, facilityName: string, evidenceUrl?: string) => {
+      const batchId = `IMP-${Date.now()}`;
+      const fullNote = `${note} (Mã phiếu: ${batchId})`;
+      const facilityId = facilities.find(f => f.facilityName === facilityName)?.id;
+
+      // 1. Create Transaction (Expense)
+      if (totalAmount > 0) {
+          await addTransaction({
+              id: `EXP-${batchId}`,
+              transactionDate: new Date().toISOString(),
+              amount: totalAmount,
+              type: 'EXPENSE',
+              category: 'Nhập hàng',
+              description: `Nhập kho hàng loạt (${items.length} món)`,
+              status: 'Verified',
+              note: `Bằng chứng: ${evidenceUrl || 'N/A'}. ${fullNote}`,
+              facilityId: facilityId,
+              facilityName: facilityName,
+              created_by: currentUser?.id
+          });
+      }
+
+      // 2. Loop Items
+      for (const item of items) {
+          const service = services.find(s => s.id === item.itemId);
+          if (service) {
+              const newStock = (service.stock || 0) + item.importQuantity;
+              let newTotalAssets = service.totalassets || 0;
+              if (service.category === 'Linen' || service.category === 'Asset') {
+                   newTotalAssets = (service.totalassets || 0) + item.importQuantity;
+              } else {
+                   newTotalAssets = newStock; 
+              }
+
+              const updatedService: ServiceItem = {
+                  ...service,
+                  stock: newStock,
+                  costPrice: item.importPrice, 
+                  totalassets: newTotalAssets
+              };
+
+              await storageService.updateService(updatedService);
+
+              const trans: InventoryTransaction = {
+                  id: `TR-${batchId}-${item.itemId}`,
+                  created_at: new Date().toISOString(),
+                  staff_id: currentUser?.id || 'SYS',
+                  staff_name: currentUser?.collaboratorName || 'System',
+                  item_id: item.itemId,
+                  item_name: item.itemName,
+                  type: 'IN',
+                  quantity: item.importQuantity,
+                  price: item.importPrice,
+                  total: item.importQuantity * item.importPrice,
+                  evidence_url: evidenceUrl,
+                  note: fullNote,
+                  facility_name: facilityName
+              };
+              await storageService.addInventoryTransaction(trans);
+          }
+      }
+      
+      await refreshData();
+  };
+
   const openShift = async (startCash: number) => {
       if (!currentUser) return;
       const shift: Shift = {
@@ -322,16 +470,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshData();
   };
 
-  const closeShift = async (endCash: number, note: string) => {
+  const closeShift = async (endCash: number, note: string, stats: { revenue: number; expense: number; expected: number }) => {
       const active = shifts.find(s => s.staff_id === currentUser?.id && s.status === 'Open');
-      if (active) {
+      if (active && currentUser) {
           await storageService.updateShift({
               ...active,
               end_time: new Date().toISOString(),
               end_cash_actual: endCash,
-              difference: endCash - active.end_cash_expected,
+              total_revenue_cash: stats.revenue,
+              total_expense_cash: stats.expense,
+              end_cash_expected: stats.expected,
+              difference: endCash - stats.expected,
               note,
-              status: 'Closed'
+              status: 'Closed',
+              closed_by_id: currentUser.id,
+              closed_by_name: currentUser.collaboratorName
           });
           refreshData();
       }
@@ -339,7 +492,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const currentShift = React.useMemo(() => shifts.find(s => s.staff_id === currentUser?.id && s.status === 'Open') || null, [shifts, currentUser]);
 
-  // --- OTHER FEATURES ---
   const checkAvailability = (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => {
       const start = new Date(checkIn).getTime();
       const end = new Date(checkOut).getTime();
@@ -352,7 +504,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const bStart = new Date(b.checkinDate).getTime();
           const bEnd = new Date(b.checkoutDate).getTime();
           
-          // Check overlap
           return (start < bEnd && end > bStart);
       });
   };
@@ -376,7 +527,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addLeaveRequest = async (item: LeaveRequest) => { await storageService.addLeaveRequest(item); refreshData(); };
   const updateLeaveRequest = async (item: LeaveRequest) => { await storageService.updateLeaveRequest(item); refreshData(); };
 
-  // --- PHASE 2: SALARY ADVANCE & VIOLATIONS ---
   const requestAdvance = async (amount: number, reason: string) => {
       if (!currentUser) return;
       const item: SalaryAdvance = {
@@ -401,18 +551,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await storageService.updateSalaryAdvance({ ...advance, status: newStatus });
 
       if (isApproved) {
-          // Auto-create Expense (Business Logic)
+          // Auto-create Transaction (Expense)
           const staffName = collaborators.find(c => c.id === advance.staff_id)?.collaboratorName || 'N/A';
-          const expense: Expense = {
+          await addTransaction({
               id: `EXP-ADV-${Date.now()}`,
-              expenseDate: new Date().toISOString().substring(0, 10), // Today YYYY-MM-DD
-              facilityName: facilities[0]?.facilityName || 'General', // Fallback to first facility
-              expenseCategory: 'Lương nhân viên',
-              expenseContent: `Chi ứng lương cho ${staffName}`,
+              transactionDate: new Date().toISOString(),
               amount: advance.amount,
-              note: `Tự động tạo từ yêu cầu ứng lương ${advance.id}`
-          };
-          await storageService.addExpense(expense);
+              type: 'EXPENSE',
+              category: 'Lương nhân viên',
+              description: `Chi ứng lương cho ${staffName}`,
+              status: 'Verified',
+              note: `Tự động tạo từ yêu cầu ứng lương ${advance.id}`,
+              facilityName: 'General',
+              created_by: currentUser?.id
+          });
           notify('success', `Đã duyệt và tạo phiếu chi ${advance.amount.toLocaleString()}đ`);
       } else {
           notify('info', 'Đã từ chối yêu cầu ứng lương.');
@@ -469,12 +621,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBankAccount = async (b: BankAccount) => { await storageService.updateBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
   const deleteBankAccount = async (id: string) => { await storageService.deleteBankAccount(id); setBankAccounts(await storageService.getBankAccounts()); };
 
-  // --- OTA LOGIC (UPDATED) ---
   const syncOtaOrders = async (orders?: OtaOrder[], silent = false) => {
       if (storageService.isUsingMock()) return;
       if (!silent) setIsLoading(true);
       try {
-          // Fetch Pending or Cancelled (Active Attention Needed)
           const { data, error } = await supabase
               .from('ota_orders')
               .select('*')
@@ -501,10 +651,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       let query = supabase.from('ota_orders').select('*').order('email_date', { ascending: false });
 
-      // Filters based on new logic
       if (params.tab === 'Pending') query = query.in('status', ['Pending', 'Cancelled']);
       else if (params.tab === 'Processed') query = query.eq('status', 'Assigned');
-      else if (params.tab === 'Cancelled') query = query.eq('status', 'Confirmed'); // History tab shows confirmed cancellations
+      else if (params.tab === 'Cancelled') query = query.eq('status', 'Confirmed'); 
       else if (params.tab === 'Today') {
           const today = new Date().toISOString().substring(0, 10);
           query = query.gte('check_in', `${today}T00:00:00`).lte('check_in', `${today}T23:59:59`);
@@ -538,7 +687,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateOtaOrder = async (id: string, updates: Partial<OtaOrder>) => {
-      // Optimistic update
       setOtaOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
   };
 
@@ -549,15 +697,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const confirmOtaCancellation = async (order: OtaOrder) => {
-      // Update status to 'Confirmed'
       await supabase.from('ota_orders').update({
           status: 'Confirmed'
       }).eq('id', order.id);
       
-      // Update local state
       setOtaOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'Confirmed' } : o));
       
-      // Trigger Webhook to update Sheet
       triggerWebhook('ota_import', {
           action: 'confirm_cancel',
           bookingCode: order.bookingCode,
@@ -565,9 +710,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
   };
 
-  // --- SPECIAL PROCESSORS ---
   const processMinibarUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
-      // 1. Deduct Inventory & Create Transaction
       for (const item of items) {
           const service = services.find(s => s.id === item.itemId);
           if (service) {
@@ -581,7 +724,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   staff_name: currentUser?.collaboratorName || 'System',
                   item_id: service.id,
                   item_name: service.name,
-                  type: 'MINIBAR_SOLD',
+                  type: service.price > 0 ? 'MINIBAR_SOLD' : 'AMENITY_USED',
                   quantity: item.qty,
                   price: service.costPrice || 0,
                   total: (service.costPrice || 0) * item.qty,
@@ -591,7 +734,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
       }
 
-      // 2. Add to Booking Services (Bill)
       const booking = bookings.find(b => b.facilityName === facilityName && b.roomCode === roomCode && (b.status === 'CheckedIn' || b.status === 'Confirmed'));
       if (booking) {
           const currentServices = booking.servicesJson ? JSON.parse(booking.servicesJson) : [];
@@ -619,21 +761,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const processRoomRestock = async (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => {
-      // 1. Return Dirty: In Room -> Laundry (Dirty)
-      // 2. Restock Clean: Stock (Clean) -> In Room
-      
       for (const item of items) {
           const service = services.find(s => s.id === item.itemId);
           if (service) {
               let updatedService = { ...service };
               
-              // Return Dirty Logic
               if (item.dirtyReturnQty > 0) {
                   updatedService.in_circulation = Math.max(0, (updatedService.in_circulation || 0) - item.dirtyReturnQty);
-                  updatedService.laundryStock = (updatedService.laundryStock || 0) + item.dirtyReturnQty;
+                  
+                  if (service.category === 'Linen') {
+                      updatedService.laundryStock = (updatedService.laundryStock || 0) + item.dirtyReturnQty;
+                  } else {
+                      updatedService.stock = (updatedService.stock || 0) + item.dirtyReturnQty;
+                  }
               }
 
-              // Restock Clean Logic
               if (item.cleanRestockQty > 0) {
                   updatedService.stock = Math.max(0, (updatedService.stock || 0) - item.cleanRestockQty);
                   updatedService.in_circulation = (updatedService.in_circulation || 0) + item.cleanRestockQty;
@@ -645,7 +787,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const processLendingUsage = async (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => {
-      // Stock -> In Circulation
       for (const item of items) {
           const service = services.find(s => s.id === item.itemId);
           if (service) {
@@ -654,7 +795,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               updatedService.in_circulation = (updatedService.in_circulation || 0) + item.qty;
               await updateService(updatedService);
 
-              // LOG TRANSACTION
               const trans: InventoryTransaction = {
                   id: `TR-LEND-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                   created_at: new Date().toISOString(),
@@ -674,14 +814,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
   };
 
-  // Placeholders for legacy compatibility
   const processCheckoutLinenReturn = async () => {};
   const handleLinenExchange = async () => {};
 
   return (
     <AppContext.Provider value={{
       currentUser, setCurrentUser, isLoading, isInitialized,
-      facilities, rooms, bookings, services, expenses, collaborators,
+      facilities, rooms, bookings, services, transactions, collaborators,
       housekeepingTasks, inventoryTransactions, shifts, schedules, adjustments,
       leaveRequests, otaOrders, timeLogs, bankAccounts, salaryAdvances, violations,
       settings, roomRecipes, webhooks, currentShift, toasts,
@@ -691,7 +830,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       upsertRoom, deleteRoom,
       addBooking, updateBooking, checkAvailability,
       addService, updateService, deleteService,
-      addExpense, updateExpense, deleteExpense,
+      addTransaction, updateTransaction, deleteTransaction, addExpense,
       addCollaborator, updateCollaborator, deleteCollaborator,
       syncHousekeepingTasks, addInventoryTransaction,
       openShift, closeShift, clockIn, clockOut,
@@ -706,15 +845,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncOtaOrders, queryOtaOrders, updateOtaOrder, deleteOtaOrder, confirmOtaCancellation,
       
       processMinibarUsage, processLendingUsage, processRoomRestock,
-      processCheckoutLinenReturn, handleLinenExchange
+      processCheckoutLinenReturn, handleLinenExchange, processBulkImport
     }}>
       {children}
     </AppContext.Provider>
   );
-};
-
-export const useAppContext = () => {
-  const context = useContext(AppContext);
-  if (!context) throw new Error('useAppContext must be used within AppProvider');
-  return context;
 };

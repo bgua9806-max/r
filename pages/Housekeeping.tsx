@@ -4,7 +4,7 @@ import { useAppContext } from '../context/AppContext';
 import { format, parseISO, differenceInMinutes, isValid } from 'date-fns';
 import { 
   Brush, CheckCircle, Calculator, Copy, User, Filter, 
-  CheckSquare, Square, LogOut, BedDouble, AlertCircle, X, Zap, RotateCcw, BarChart3, Clock, RefreshCw, AlertTriangle, Flame, Star, HelpCircle, ThumbsUp, ThumbsDown, Calendar
+  CheckSquare, Square, LogOut, BedDouble, AlertCircle, X, Zap, RotateCcw, BarChart3, Clock, RefreshCw, AlertTriangle, Flame, Star, HelpCircle, ThumbsUp, ThumbsDown, Calendar, Trophy, Medal, Award
 } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { HousekeepingTask } from '../types';
@@ -22,7 +22,15 @@ type ExtendedTask = HousekeepingTask & {
     availableStaff: string[],
     isInquiry?: boolean // New flag for Stayover Inquiry
 };
-type WorkloadData = { points: number, tasks: number, salary: number };
+
+type PerformanceData = { 
+    name: string;
+    points: number; 
+    tasks: number; 
+    checkout: number;
+    stayover: number;
+    other: number;
+};
 
 export const Housekeeping: React.FC = () => {
   const { 
@@ -38,7 +46,8 @@ export const Housekeeping: React.FC = () => {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   
   const [showStats, setShowStats] = useState(false);
-  const [prices, setPrices] = useState({ checkout: 30000, stayover: 20000, dirty: 15000 });
+  const [statsTimeFilter, setStatsTimeFilter] = useState<'today' | 'month'>('today');
+  const [selectedStatsMonth, setSelectedStatsMonth] = useState(format(new Date(), 'yyyy-MM'));
 
   // Tự động làm mới dữ liệu khi vào trang để đảm bảo đồng bộ
   useEffect(() => {
@@ -249,30 +258,48 @@ export const Housekeeping: React.FC = () => {
   }, [facilities, rooms, bookings, selectedDate, housekeepingTasks, housekeepingStaffNames]);
 
   const workload = useMemo(() => {
-      const load: Record<string, WorkloadData> = {};
+      const stats: Record<string, PerformanceData> = {};
       const staffList = collaborators.filter(c => c.role === 'Buồng phòng').map(c => c.collaboratorName);
       
+      // Initialize
       staffList.forEach(name => {
-          load[name] = { points: 0, tasks: 0, salary: 0 };
+          stats[name] = { name, points: 0, tasks: 0, checkout: 0, stayover: 0, other: 0 };
       });
 
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+
       housekeepingTasks.forEach(t => {
-          if (t.status === 'Done' && t.assignee && load[t.assignee]) {
-              const points = t.points || WORKLOAD_POINTS[t.task_type] || 0;
-              load[t.assignee].points += points;
-              load[t.assignee].tasks += 1;
-              
-              let amount = 0;
-              if (t.task_type === 'Checkout') amount = prices.checkout;
-              else if (t.task_type === 'Stayover') amount = prices.stayover;
-              else if (t.task_type === 'Dirty') amount = prices.dirty;
-              
-              load[t.assignee].salary += amount;
+          if (t.status === 'Done' && t.assignee && stats[t.assignee]) {
+              const dateStr = t.completed_at || t.created_at;
+              if (!dateStr) return;
+              const taskDate = parseISO(dateStr);
+              if (!isValid(taskDate)) return;
+
+              let isMatch = false;
+              if (statsTimeFilter === 'today') {
+                  isMatch = format(taskDate, 'yyyy-MM-dd') === todayStr;
+              } else {
+                  // Compare with the specific selected month
+                  isMatch = format(taskDate, 'yyyy-MM') === selectedStatsMonth;
+              }
+
+              if (isMatch) {
+                  const points = t.points || WORKLOAD_POINTS[t.task_type] || 0;
+                  stats[t.assignee].points += points;
+                  stats[t.assignee].tasks += 1;
+                  
+                  if (t.task_type === 'Checkout') stats[t.assignee].checkout += 1;
+                  else if (t.task_type === 'Stayover') stats[t.assignee].stayover += 1;
+                  else stats[t.assignee].other += 1;
+              }
           }
       });
 
-      return { load, staffList };
-  }, [collaborators, housekeepingTasks, prices]);
+      const sortedStats = Object.values(stats).sort((a, b) => b.points - a.points);
+      const maxPoints = sortedStats.length > 0 ? sortedStats[0].points : 1;
+
+      return { sortedStats, maxPoints };
+  }, [collaborators, housekeepingTasks, statsTimeFilter, selectedStatsMonth]);
 
   const filteredTasks = useMemo(() => {
      return displayTasks.filter(t => {
@@ -453,7 +480,7 @@ export const Housekeeping: React.FC = () => {
               </div>
               <div className="flex items-center gap-2">
                   <button onClick={() => refreshData()} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors" title="Reload"><RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} /></button>
-                  <button onClick={() => setShowStats(true)} className="p-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors" title="Tính công"><Calculator size={18} /></button>
+                  <button onClick={() => setShowStats(true)} className="p-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors" title="Thống kê"><Trophy size={18} /></button>
               </div>
           </div>
 
@@ -463,7 +490,7 @@ export const Housekeeping: React.FC = () => {
                   <span className="shrink-0 text-[10px] font-black text-brand-600 bg-brand-50 px-2 py-1.5 rounded-lg border border-brand-100">{selectedTaskIds.length} chọn</span>
                   <select className="shrink-0 text-xs border border-brand-200 rounded-lg px-2 py-1.5 outline-none bg-white min-w-[100px]" onChange={(e) => handleBulkAction('Assign', e.target.value)} value="">
                       <option value="" disabled>-- Giao --</option>
-                      {workload.staffList.map(s => <option key={s} value={s}>{s}</option>)}
+                      {workload.sortedStats.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                       <option value="">(Hủy)</option>
                   </select>
                   <button onClick={() => handleBulkAction('Status', 'Done')} className="shrink-0 px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg shadow-sm">Xong</button>
@@ -493,7 +520,7 @@ export const Housekeeping: React.FC = () => {
             </div>
             <div className="flex items-center gap-2">
                <button onClick={() => refreshData()} className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-lg border border-blue-100" title="Đồng bộ lại DB"><RefreshCw size={20} className={isLoading ? 'animate-spin' : ''} /></button>
-               <button onClick={() => setShowStats(true)} className="p-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200" title="Tính công"><Calculator size={20} /></button>
+               <button onClick={() => setShowStats(true)} className="p-2.5 text-amber-600 hover:bg-amber-50 rounded-lg border border-amber-200" title="Bảng xếp hạng"><Trophy size={20} /></button>
             </div>
          </div>
          <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-100">
@@ -516,7 +543,7 @@ export const Housekeeping: React.FC = () => {
                             value=""
                         >
                             <option value="" disabled>-- Phân công --</option>
-                            {workload.staffList.map(s => <option key={s} value={s}>{s}</option>)}
+                            {workload.sortedStats.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                             <option value="">(Hủy phân công)</option>
                         </select>
                     </div>
@@ -615,19 +642,85 @@ export const Housekeeping: React.FC = () => {
          ))}
       </div>
       
-      {/* Modal Stats kept minimal for brevity */}
-      <Modal isOpen={showStats} onClose={() => setShowStats(false)} title={`Bảng Lương Dự Kiến`} size="lg">
+      {/* Modal Performance Leaderboard */}
+      <Modal isOpen={showStats} onClose={() => setShowStats(false)} title={`Bảng Xếp Hạng Năng Suất`} size="lg">
          <div className="space-y-6">
-            <table className="w-full text-sm text-left border rounded-lg overflow-hidden">
-                <thead className="bg-slate-100 font-bold text-slate-600">
-                    <tr><th className="p-3">Nhân viên</th><th className="p-3 text-center">Đã xong</th><th className="p-3 text-center">Điểm</th><th className="p-3 text-right">Lương</th></tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {Object.entries(workload.load).map(([staff, data]: [string, WorkloadData]) => (
-                        <tr key={staff}><td className="p-3 font-medium">{staff}</td><td className="p-3 text-center">{data.tasks}</td><td className="p-3 text-center font-bold text-slate-600">{data.points}</td><td className="p-3 text-right font-bold text-brand-600">{data.salary.toLocaleString()} ₫</td></tr>
-                    ))}
-                </tbody>
-            </table>
+            <div className="flex justify-center items-center bg-slate-100 p-1.5 rounded-xl w-fit mx-auto mb-6 gap-2">
+                <button 
+                    onClick={() => setStatsTimeFilter('today')} 
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${statsTimeFilter === 'today' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    Hôm nay
+                </button>
+                <div className={`flex items-center px-3 py-2 rounded-lg transition-all ${statsTimeFilter === 'month' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                    <button 
+                        onClick={() => setStatsTimeFilter('month')}
+                        className="text-sm font-bold mr-2"
+                    >
+                        Tháng
+                    </button>
+                    <input 
+                        type="month" 
+                        className="bg-transparent text-sm font-bold outline-none border-none p-0 w-[110px] cursor-pointer"
+                        value={selectedStatsMonth}
+                        onChange={(e) => {
+                            setSelectedStatsMonth(e.target.value);
+                            setStatsTimeFilter('month');
+                        }}
+                    />
+                </div>
+            </div>
+
+            <div className="overflow-hidden border border-slate-200 rounded-xl">
+                <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 font-bold text-slate-500 text-xs uppercase">
+                        <tr>
+                            <th className="p-3 text-center w-12">#</th>
+                            <th className="p-3">Nhân viên</th>
+                            <th className="p-3 text-center text-red-600 bg-red-50/50">Checkout (4đ)</th>
+                            <th className="p-3 text-center">Stayover (1đ)</th>
+                            <th className="p-3 text-center">Khác (2đ)</th>
+                            <th className="p-3 text-right">Tổng Điểm KPI</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {workload.sortedStats.map((data, index) => {
+                            let rankIcon = <span className="font-bold text-slate-400">{index + 1}</span>;
+                            if (index === 0) rankIcon = <span className="text-xl">🥇</span>;
+                            if (index === 1) rankIcon = <span className="text-xl">🥈</span>;
+                            if (index === 2) rankIcon = <span className="text-xl">🥉</span>;
+
+                            const percent = Math.round((data.points / workload.maxPoints) * 100);
+
+                            return (
+                                <tr key={data.name} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="p-3 text-center">{rankIcon}</td>
+                                    <td className="p-3 font-bold text-slate-800 flex items-center gap-2">
+                                        <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs border border-brand-200">
+                                            {data.name.charAt(0)}
+                                        </div>
+                                        {data.name}
+                                    </td>
+                                    <td className="p-3 text-center font-bold text-red-600 bg-red-50/20 text-lg">{data.checkout}</td>
+                                    <td className="p-3 text-center text-slate-600">{data.stayover}</td>
+                                    <td className="p-3 text-center text-slate-400">{data.other}</td>
+                                    <td className="p-3 text-right">
+                                        <div className="font-black text-brand-700 text-lg">{data.points}</div>
+                                        <div className="h-1.5 w-full bg-slate-100 rounded-full mt-1 overflow-hidden ml-auto max-w-[80px]">
+                                            <div className="h-full bg-brand-500" style={{ width: `${percent}%` }}></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                        {workload.sortedStats.length === 0 && (
+                            <tr>
+                                <td colSpan={6} className="p-8 text-center text-slate-400 italic">Chưa có dữ liệu cho thời gian này.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
          </div>
       </Modal>
     </div>

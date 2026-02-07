@@ -1,15 +1,13 @@
 
 import { supabase } from './supabaseClient';
-import { Facility, Room, Booking, Collaborator, Expense, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount, TimeLog, SalaryAdvance, Violation } from '../types';
+import { Facility, Room, Booking, Collaborator, FinanceTransaction, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount, TimeLog, SalaryAdvance, Violation, Expense } from '../types';
 import { MOCK_FACILITIES, MOCK_ROOMS, MOCK_COLLABORATORS, MOCK_BOOKINGS, MOCK_SERVICES, DEFAULT_SETTINGS, ROOM_RECIPES, MOCK_TIME_LOGS } from '../constants';
 
 const logError = (message: string, error: any) => {
-  // Suppress specific schema errors from cluttering console if we are handling them
   if (error?.message?.includes('Could not find the') || error?.code === 'PGRST204') {
       console.warn(`[SCHEMA MISMATCH] ${message}. Using fallback.`);
       return;
   }
-  // Suppress network errors and switch to mock mode quietly
   if (error?.message?.includes('Failed to fetch') || error?.toString().includes('TypeError: Failed to fetch')) {
       console.warn(`[NETWORK ERROR] ${message}.`);
       return;
@@ -24,7 +22,6 @@ const isTableMissingError = (error: any) => {
 };
 
 const isColumnMissingError = (error: any) => {
-    // PGRST204: Columns not found in schema cache
     return error?.code === 'PGRST204' || (error?.message && error.message.includes('Could not find the'));
 };
 
@@ -32,13 +29,9 @@ const isNetworkError = (error: any) => {
     return error?.message?.includes('Failed to fetch') || error?.toString().includes('TypeError: Failed to fetch');
 };
 
-// Helper for Retry Logic
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Biến cờ để kiểm tra xem đang dùng Mock hay Real
 export let IS_USING_MOCK = false;
-
-// Circuit breaker for connection status
 let connectionChecked = false;
 
 const safeFetch = async <T>(promise: PromiseLike<{ data: T[] | null; error: any }>, fallback: T[], tableName: string): Promise<T[]> => {
@@ -47,46 +40,37 @@ const safeFetch = async <T>(promise: PromiseLike<{ data: T[] | null; error: any 
     try {
         const { data, error } = await promise;
         if (error) {
-            // Check if error is just missing columns (schema mismatch), if so, we might get partial data or error
             if (isColumnMissingError(error)) {
                 logError(`Schema mismatch fetching ${tableName}`, error);
                 return fallback;
             }
-            // Handle Network Errors specifically
             if (isNetworkError(error)) {
-                // MODIFIED: Do NOT switch to mock immediately on a single fetch failure.
-                // Let checkConnection handle the global state transition to avoid false positives during Cold Start.
                 logError(`Failed to fetch ${tableName} (Network)`, error);
                 return fallback;
             }
             
             logError(`Failed to fetch ${tableName}`, error);
-            // Don't switch to mock for other errors (like RLS or Bad Request) unless critical
             if (isTableMissingError(error)) IS_USING_MOCK = true; 
             return fallback;
         }
         if (!data) return fallback;
-        // Successful fetch confirms connection
         if (!connectionChecked) connectionChecked = true;
         return data;
     } catch (err) {
-        // MODIFIED: Don't switch immediately on exception either.
         logError(`Network Exception fetching ${tableName}`, err);
         return fallback;
     }
 };
 
-// Helper để lấy ngày giới hạn dữ liệu (Tối ưu cho gói Free: 1 tháng gần nhất)
 const getDataStartDate = () => {
     const d = new Date();
     d.setDate(1); 
-    d.setMonth(d.getMonth() - 1); // Lấy lùi lại 1 tháng thay vì 6 tháng
+    d.setMonth(d.getMonth() - 1); 
     return d.toISOString();
 };
 
-// --- GPS UTILS (PHASE 2) ---
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3; // Earth radius in metres
+  const R = 6371e3; 
   const φ1 = lat1 * Math.PI/180; 
   const φ2 = lat2 * Math.PI/180;
   const Δφ = (lat2-lat1) * Math.PI/180;
@@ -97,55 +81,39 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
             Math.sin(Δλ/2) * Math.sin(Δλ/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
-  return R * c; // returns distance in metres
+  return R * c; 
 }
 
 export const storageService = {
-  // Check Connection Status with RETRY STRATEGY (Cold Start Fix)
   checkConnection: async () => {
       if (IS_USING_MOCK) return false;
-      
       const MAX_RETRIES = 3;
-      
       for (let i = 0; i < MAX_RETRIES; i++) {
           try {
               const { data, error } = await supabase.from('app_configs').select('count').limit(1).single();
-              
-              if (!error) return true; // Connection Successful!
-              
-              // If it's a network error, wait and retry
+              if (!error) return true; 
               if (isNetworkError(error)) {
                   console.warn(`Connection attempt ${i + 1}/${MAX_RETRIES} failed. Retrying in 1.5s...`);
                   if (i < MAX_RETRIES - 1) await delay(1500); 
               } else {
-                  // If it's another error (e.g. Table missing), we are connected but schema is wrong.
-                  // Treat as connected to avoid Red Banner.
                   return true;
               }
           } catch (e) {
               if (i < MAX_RETRIES - 1) await delay(1500);
           }
       }
-
-      // If we reach here, all retries failed. Now we are truly offline.
       IS_USING_MOCK = true;
       return false;
   },
 
-  // NEW: Check for required schema columns (Using lowercase to match Postgres standard)
   checkSchema: async () => {
       if (IS_USING_MOCK) return { missing: false };
-      
-      // Try to select the new columns (LOWERCASE). If they don't exist, Supabase returns error PGRST204.
       const { error } = await supabase.from('bookings').select('lendingjson, guestsjson, groupid').limit(1);
-      
-      // Also check for new tables
       const { error: tableError } = await supabase.from('settings').select('id').limit(1);
-      const { error: recipeError } = await supabase.from('room_recipes').select('id').limit(1);
       const { error: bankError } = await supabase.from('bank_accounts').select('id').limit(1);
-      const { error: timeLogError } = await supabase.from('time_logs').select('id').limit(1);
+      const { error: financeError } = await supabase.from('finance_transactions').select('id').limit(1);
 
-      if ((error && isColumnMissingError(error)) || (tableError && isTableMissingError(tableError)) || (recipeError && isTableMissingError(recipeError)) || (bankError && isTableMissingError(bankError))) {
+      if ((error && isColumnMissingError(error)) || (tableError && isTableMissingError(tableError)) || (bankError && isTableMissingError(bankError)) || (financeError && isTableMissingError(financeError))) {
           return { missing: true, table: 'bookings_or_settings' };
       }
       return { missing: false };
@@ -153,7 +121,6 @@ export const storageService = {
 
   isUsingMock: () => IS_USING_MOCK,
 
-  // Local Storage Helpers (Moved to top for safety)
   getUser: (): Collaborator | null => {
     try {
         const local = localStorage.getItem('currentUser');
@@ -176,7 +143,6 @@ export const storageService = {
     }
   },
 
-  // Configs (API Keys, System Settings)
   getAppConfig: async (key: string): Promise<string | null> => {
       if (IS_USING_MOCK) return null;
       try {
@@ -195,13 +161,11 @@ export const storageService = {
       return { error };
   },
 
-  // --- NEW: GLOBAL SETTINGS & RECIPES ---
   getSettings: async (): Promise<Settings> => {
       if (IS_USING_MOCK) return DEFAULT_SETTINGS;
       try {
           const { data, error } = await supabase.from('settings').select('*').eq('id', 'global').single();
           if (error || !data) return DEFAULT_SETTINGS;
-          // Merge with defaults to ensure all fields exist
           return { ...DEFAULT_SETTINGS, ...(data.raw_json as Settings) };
       } catch (e) {
           return DEFAULT_SETTINGS;
@@ -217,30 +181,24 @@ export const storageService = {
       if (error) logError('Error saving settings', error);
   },
 
-  // --- TIMEKEEPING (PHASE 2) ---
   getTimeLogs: async (staffId?: string, month?: string): Promise<TimeLog[]> => {
       const limitDate = getDataStartDate();
       let query = supabase.from('time_logs').select('*').order('created_at', { ascending: false });
-      
       if (staffId) query = query.eq('staff_id', staffId);
-      // If no explicit month filter, limit to recent data
       if (!month) query = query.gte('created_at', limitDate);
-
       const data = await safeFetch(query, MOCK_TIME_LOGS, 'time_logs');
       return data;
   },
 
   clockIn: async (staffId: string, facilityId: string, currentLat: number, currentLng: number, photoUrl?: string): Promise<{ success: boolean, message: string, data?: TimeLog }> => {
-      // 1. Get Facility Details for GPS Check
       const facilities = await storageService.getFacilities();
       const facility = facilities.find(f => f.id === facilityId);
       
       if (!facility) return { success: false, message: 'Không tìm thấy thông tin cơ sở!' };
 
-      // 2. Calculate Distance & Status
       let distance = 0;
       let status: TimeLog['status'] = 'Invalid';
-      const allowedRadius = facility.allowed_radius || 100; // default 100m
+      const allowedRadius = facility.allowed_radius || 100;
 
       if (facility.latitude && facility.longitude) {
           distance = calculateDistance(currentLat, currentLng, facility.latitude, facility.longitude);
@@ -248,12 +206,10 @@ export const storageService = {
               status = 'Valid';
           }
       } else {
-          // Fallback: If facility has no coords, assume Pending verification
           status = 'Pending';
       }
 
       const newLog: Partial<TimeLog> = {
-          // UUID generated by DB usually, but for consistency if we manually insert ID
           staff_id: staffId,
           facility_id: facilityId,
           check_in_time: new Date().toISOString(),
@@ -265,7 +221,6 @@ export const storageService = {
       };
 
       if (IS_USING_MOCK) {
-          console.log("Mock Clock In:", newLog);
           return { success: true, message: status === 'Valid' ? 'Chấm công thành công' : `Vị trí quá xa (${Math.round(distance)}m)`, data: { id: `TL-MOCK-${Date.now()}`, ...newLog } as TimeLog };
       }
 
@@ -285,11 +240,9 @@ export const storageService = {
 
   clockOut: async (staffId: string): Promise<{ success: boolean, message: string }> => {
       if (IS_USING_MOCK) {
-          console.log("Mock Clock Out for", staffId);
           return { success: true, message: 'Checkout thành công' };
       }
 
-      // Find latest open log
       const { data: activeLogs } = await supabase.from('time_logs')
           .select('*')
           .eq('staff_id', staffId)
@@ -314,13 +267,12 @@ export const storageService = {
       return { success: true, message: 'Kết thúc ca làm việc thành công.' };
   },
 
-  // --- BANK ACCOUNTS ---
   getBankAccounts: async (): Promise<BankAccount[]> => {
       if (IS_USING_MOCK) return [];
       const rawData = await safeFetch(supabase.from('bank_accounts').select('*').order('created_at', { ascending: true }), [], 'bank_accounts');
       return rawData.map((b: any) => ({
           id: b.id,
-          bankId: b.bank_id, // Map snake_case to camelCase
+          bankId: b.bank_id,
           accountNo: b.account_no,
           accountName: b.account_name,
           branch: b.branch,
@@ -332,13 +284,11 @@ export const storageService = {
 
   addBankAccount: async (account: BankAccount) => {
       if (IS_USING_MOCK) return;
-      // Auto-set is_default if it's the first account
       const existing = await storageService.getBankAccounts();
       const isDefault = existing.length === 0 ? true : account.is_default;
 
       if (isDefault) {
-          // Unset other defaults
-          await supabase.from('bank_accounts').update({ is_default: false }).neq('id', '0'); // Unset all
+          await supabase.from('bank_accounts').update({ is_default: false }).neq('id', '0'); 
       }
 
       const payload = {
@@ -359,7 +309,6 @@ export const storageService = {
       if (IS_USING_MOCK) return;
       
       if (account.is_default) {
-          // Unset other defaults first
           await supabase.from('bank_accounts').update({ is_default: false }).neq('id', account.id);
       }
 
@@ -384,15 +333,11 @@ export const storageService = {
 
   getRoomRecipes: async (): Promise<Record<string, RoomRecipe>> => {
       try {
-          // FIX: safeFetch returns the data array directly, NOT { data, error }
           const data = await safeFetch(supabase.from('room_recipes').select('*'), [], 'room_recipes');
-          
-          // Start with Defaults, then override with DB data
           const recipes: Record<string, RoomRecipe> = { ...ROOM_RECIPES };
           
           if (data && Array.isArray(data) && data.length > 0) {
               data.forEach((r: any) => {
-                  // Safe JSON parse for items
                   let items = r.items_json;
                   if (typeof items === 'string') {
                       try { items = JSON.parse(items); } catch(e) { items = []; }
@@ -428,7 +373,6 @@ export const storageService = {
       if (error) logError('Error deleting recipe', error);
   },
 
-  // Facilities
   getFacilities: async (): Promise<Facility[]> => {
     return safeFetch(supabase.from('facilities').select('*').order('id', { ascending: true }), MOCK_FACILITIES, 'facilities');
   },
@@ -452,7 +396,7 @@ export const storageService = {
         await supabase.from('rooms').delete().eq('facility_id', id);
         if (facilityName) {
             await supabase.from('bookings').delete().eq('facilityName', facilityName);
-            await supabase.from('expenses').delete().eq('facilityName', facilityName);
+            await supabase.from('finance_transactions').delete().eq('facility_id', id);
         }
         const { error } = await supabase.from('facilities').delete().eq('id', id);
         return { error: error || null };
@@ -461,23 +405,13 @@ export const storageService = {
     }
   },
 
-  // Rooms
   getRooms: async (): Promise<Room[]> => {
      return safeFetch(supabase.from('rooms').select('*'), MOCK_ROOMS, 'rooms');
   },
   upsertRoom: async (item: Room) => {
      if (IS_USING_MOCK) return;
      const { error } = await supabase.from('rooms').upsert(item);
-     if (error) {
-         // Fallback for old schema (missing type/view/area columns)
-         if (isColumnMissingError(error)) {
-             const { type, view, area, price_saturday, ...legacyPayload } = item as any;
-             const { error: retryError } = await supabase.from('rooms').upsert(legacyPayload);
-             if (retryError) logError('Error upserting room (Legacy)', retryError);
-         } else {
-             logError('Error upserting room', error);
-         }
-     }
+     if (error) logError('Error upserting room', error);
   },
   deleteRoom: async (id: string) => {
      if (IS_USING_MOCK) return { error: null };
@@ -485,12 +419,10 @@ export const storageService = {
      return { error: error || null };
   },
   
-  // Collaborators
   getCollaborators: async (): Promise<Collaborator[]> => {
     const rawData = await safeFetch(supabase.from('collaborators').select('*'), MOCK_COLLABORATORS, 'collaborators');
     return rawData.map((c: any) => ({
       ...c,
-      // Map DB snake_case to App camelCase
       bankId: c.bank_id,
       accountNo: c.account_no,
       accountName: c.account_name
@@ -498,34 +430,21 @@ export const storageService = {
   },
   addCollaborator: async (item: Collaborator) => {
     if (IS_USING_MOCK) return;
-    
-    // Map App camelCase to DB snake_case
     const payload = {
         ...item,
         bank_id: item.bankId,
         account_no: item.accountNo,
         account_name: item.accountName
     };
-    // Cleanup old keys to avoid errors if strict schema
     delete (payload as any).bankId;
     delete (payload as any).accountNo;
     delete (payload as any).accountName;
 
     const { error } = await supabase.from('collaborators').insert(payload);
-    if (error) {
-        // Fallback for old schema
-        if (isColumnMissingError(error)) {
-            const { bank_id, account_no, account_name, ...legacyPayload } = payload;
-            const { error: retryError } = await supabase.from('collaborators').insert(legacyPayload);
-            if (retryError) logError('Error adding collaborator (Legacy)', retryError);
-        } else {
-            logError('Error adding collaborator', error);
-        }
-    }
+    if (error) logError('Error adding collaborator', error);
   },
   updateCollaborator: async (item: Collaborator) => {
     if (IS_USING_MOCK) return;
-    
     const payload = {
         ...item,
         bank_id: item.bankId,
@@ -537,15 +456,7 @@ export const storageService = {
     delete (payload as any).accountName;
 
     const { error } = await supabase.from('collaborators').update(payload).eq('id', item.id);
-    if (error) {
-        if (isColumnMissingError(error)) {
-            const { bank_id, account_no, account_name, ...legacyPayload } = payload;
-            const { error: retryError } = await supabase.from('collaborators').update(legacyPayload).eq('id', item.id);
-            if (retryError) logError('Error updating collaborator (Legacy)', retryError);
-        } else {
-            logError('Error updating collaborator', error);
-        }
-    }
+    if (error) logError('Error updating collaborator', error);
   },
   deleteCollaborator: async (id: string) => {
     if (IS_USING_MOCK) return { error: null };
@@ -554,11 +465,9 @@ export const storageService = {
     return { error: error || null };
   },
 
-  // Shift Schedules
   getSchedules: async (): Promise<ShiftSchedule[]> => {
     const startYear = new Date(new Date().getFullYear(), 0, 1).toISOString();
     const data = await safeFetch(supabase.from('shift_schedules').select('*').gte('date', startYear), [], 'shift_schedules');
-    
     return data.map((s: any) => {
         let type = s.shift_type;
         if (type === 'Ca 1' || type === 'Morning') type = 'Sáng';
@@ -572,7 +481,6 @@ export const storageService = {
     const sanitized = { ...item };
     if (sanitized.shift_type === 'Ca 1' as any) sanitized.shift_type = 'Sáng';
     if (sanitized.shift_type === 'Ca 2' as any) sanitized.shift_type = 'Tối';
-    
     const { error } = await supabase.from('shift_schedules').upsert(sanitized);
     if (error) logError('Error upserting schedule', error);
     return { error };
@@ -583,7 +491,6 @@ export const storageService = {
     if (error) logError('Error deleting schedule', error);
   },
 
-  // Attendance Adjustments
   getAdjustments: async (): Promise<AttendanceAdjustment[]> => {
     return safeFetch(supabase.from('attendance_adjustments').select('*'), [], 'attendance_adjustments');
   },
@@ -593,7 +500,6 @@ export const storageService = {
     if (error) logError('Error upserting adjustment', error);
   },
 
-  // LEAVE REQUESTS (NEW)
   getLeaveRequests: async (): Promise<LeaveRequest[]> => {
       const startYear = new Date(new Date().getFullYear(), 0, 1).toISOString();
       return safeFetch(
@@ -614,7 +520,6 @@ export const storageService = {
       return { error };
   },
 
-  // Salary Advances (Phase 2)
   getSalaryAdvances: async (): Promise<SalaryAdvance[]> => {
       const limitDate = getDataStartDate();
       return safeFetch(
@@ -635,7 +540,6 @@ export const storageService = {
       return { error };
   },
 
-  // Violations (Phase 2)
   getViolations: async (): Promise<Violation[]> => {
       const limitDate = getDataStartDate();
       return safeFetch(
@@ -650,11 +554,9 @@ export const storageService = {
       return { error };
   },
 
-  // Bookings
   getBookings: async (): Promise<Booking[]> => {
     const limitDate = getDataStartDate();
     
-    // IMPORTANT: DB columns are lowercase (e.g. lendingjson). App expects CamelCase (lendingJson).
     const rawData = await safeFetch(
         supabase.from('bookings')
             .select('*')
@@ -663,7 +565,6 @@ export const storageService = {
     );
 
     return rawData.map((b: any) => {
-        // MAP DB COLUMNS (Lowercase) -> APP PROPS (CamelCase)
         const mappedBooking: Booking = {
             ...b,
             lendingJson: b.lendingjson || b.lendingJson || '[]',
@@ -672,13 +573,11 @@ export const storageService = {
             groupId: b.groupid || b.groupId,
             groupName: b.groupname || b.groupName,
             isGroupLeader: b.isgroupleader ?? b.isGroupLeader ?? false,
-            // Map legacy mismatched cases just in case
             facilityName: b.facilityName || b.facilityname,
             roomCode: b.roomCode || b.roomcode,
             customerName: b.customerName || b.customername,
         };
 
-        // Fallback cleanup for old schema
         let isDeclared = mappedBooking.isDeclared;
         if (isDeclared === undefined && mappedBooking.cleaningJson) {
             try {
@@ -696,7 +595,6 @@ export const storageService = {
     if (IS_USING_MOCK) return;
     const payload: any = { ...item };
     
-    // Clean fields
     try {
         const cleanObj = payload.cleaningJson ? JSON.parse(payload.cleaningJson) : {};
         if (payload.isDeclared) cleanObj.isDeclared = true;
@@ -707,18 +605,16 @@ export const storageService = {
     }
     delete payload.isDeclared; 
 
-    // MAP APP PROPS (CamelCase) -> DB COLUMNS (Lowercase)
     const dbPayload = {
         ...payload,
         lendingjson: payload.lendingJson,
         guestsjson: payload.guestsJson,
-        isdeclared: item.isDeclared, // Explicitly pass boolean from original item
+        isdeclared: item.isDeclared, 
         groupid: payload.groupId,
         groupname: payload.groupName,
         isgroupleader: payload.isGroupLeader
     };
     
-    // Cleanup duplicate keys to be safe (though usually ignored)
     delete dbPayload.lendingJson;
     delete dbPayload.guestsJson;
     delete dbPayload.groupId;
@@ -726,17 +622,7 @@ export const storageService = {
     delete dbPayload.isGroupLeader;
 
     const { error } = await supabase.from('bookings').insert(dbPayload);
-    if (error) {
-        // Fallback for old schema
-        if (isColumnMissingError(error)) {
-            // Strip new fields and retry
-            const { lendingjson, guestsjson, groupid, groupname, isgroupleader, isdeclared, ...legacyPayload } = dbPayload;
-            const { error: retryError } = await supabase.from('bookings').insert(legacyPayload);
-            if (retryError) logError('Error adding booking (Legacy)', retryError);
-        } else {
-            logError('Error adding booking', error);
-        }
-    }
+    if (error) logError('Error adding booking', error);
   },
 
   updateBooking: async (item: Booking) => {
@@ -752,7 +638,6 @@ export const storageService = {
     }
     delete payload.isDeclared;
 
-    // MAP APP PROPS (CamelCase) -> DB COLUMNS (Lowercase)
     const dbPayload = {
         ...payload,
         lendingjson: payload.lendingJson,
@@ -770,51 +655,133 @@ export const storageService = {
     delete dbPayload.isGroupLeader;
 
     const { error } = await supabase.from('bookings').update(dbPayload).eq('id', item.id);
-    if (error) {
-        // Fallback for old schema
-        if (isColumnMissingError(error)) {
-            const { lendingjson, guestsjson, groupid, groupname, isgroupleader, isdeclared, ...legacyPayload } = dbPayload;
-            const { error: retryError } = await supabase.from('bookings').update(legacyPayload).eq('id', item.id);
-            if (retryError) logError('Error updating booking (Legacy)', retryError);
-        } else {
-            logError('Error updating booking', error);
-        }
-    }
+    if (error) logError('Error updating booking', error);
   },
 
-  // Expenses
-  getExpenses: async (): Promise<Expense[]> => {
+  // --- REPLACED: FINANCE TRANSACTIONS ---
+  getTransactions: async (): Promise<FinanceTransaction[]> => {
     const limitDate = getDataStartDate();
-    return safeFetch(
-        supabase.from('expenses').select('*').gte('expenseDate', limitDate), 
-        [], 'expenses'
+    const rawData = await safeFetch(
+        supabase.from('finance_transactions').select('*').gte('transaction_date', limitDate).order('transaction_date', { ascending: false }),
+        [], 'finance_transactions'
     );
-  },
-  addExpense: async (item: Expense) => {
-    if (IS_USING_MOCK) return;
-    const { error } = await supabase.from('expenses').insert(item);
-    if (error) logError('Error adding expense', error);
-  },
-  updateExpense: async (item: Expense) => {
-    if (IS_USING_MOCK) return;
-    const { error } = await supabase.from('expenses').update(item).eq('id', item.id);
-    if (error) logError('Error updating expense', error);
-  },
-  deleteExpense: async (id: string) => {
-    if (IS_USING_MOCK) return { error: null };
-    const { error } = await supabase.from('expenses').delete().eq('id', id);
-    return { error: error || null };
+    
+    return rawData.map((t: any) => ({
+        id: t.id,
+        transactionDate: t.transaction_date,
+        amount: t.amount,
+        type: t.type,
+        category: t.category,
+        description: t.description,
+        pic: t.pic,
+        status: t.status,
+        bookingId: t.booking_id,
+        note: t.note,
+        paymentMethod: t.payment_method,
+        facilityId: t.facility_id,
+        created_by: t.created_by
+    }));
   },
 
-  // Services (Inventory)
+  addTransaction: async (item: FinanceTransaction) => {
+    if (IS_USING_MOCK) return;
+    const dbPayload = {
+        id: item.id,
+        transaction_date: item.transactionDate,
+        amount: item.amount,
+        type: item.type,
+        category: item.category,
+        description: item.description,
+        pic: item.pic,
+        status: item.status,
+        booking_id: item.bookingId,
+        note: item.note,
+        payment_method: item.paymentMethod,
+        facility_id: item.facilityId,
+        created_by: item.created_by
+    };
+    const { error } = await supabase.from('finance_transactions').insert(dbPayload);
+    if (error) logError('Error adding transaction', error);
+  },
+
+  updateTransaction: async (item: FinanceTransaction) => {
+    if (IS_USING_MOCK) return;
+    const dbPayload = {
+        transaction_date: item.transactionDate,
+        amount: item.amount,
+        type: item.type,
+        category: item.category,
+        description: item.description,
+        pic: item.pic,
+        status: item.status,
+        booking_id: item.bookingId,
+        note: item.note,
+        payment_method: item.paymentMethod,
+        facility_id: item.facilityId,
+        created_by: item.created_by
+    };
+    const { error } = await supabase.from('finance_transactions').update(dbPayload).eq('id', item.id);
+    if (error) logError('Error updating transaction', error);
+  },
+
+  deleteTransaction: async (id: string) => {
+    if (IS_USING_MOCK) return;
+    const { error } = await supabase.from('finance_transactions').delete().eq('id', id);
+    if (error) logError('Error deleting transaction', error);
+  },
+
+  // Legacy Expenses - kept for reference or migration fallback if needed, but not used actively
+  getExpenses: async (): Promise<Expense[]> => {
+    return []; // Return empty as we migrated
+  },
+
+  addExpense: async (item: Expense) => {
+      // Compatibility wrapper: Convert Expense to Transaction and save
+      if (IS_USING_MOCK) return;
+      const trans: FinanceTransaction = {
+          id: item.id,
+          transactionDate: item.expenseDate,
+          amount: item.amount,
+          type: 'EXPENSE',
+          category: item.expenseCategory,
+          description: item.expenseContent,
+          status: 'Verified',
+          note: item.note,
+          facilityName: item.facilityName,
+          created_by: item.created_by
+      };
+      // We use addTransaction logic here (inserting into finance_transactions)
+      const dbPayload = {
+        id: trans.id,
+        transaction_date: trans.transactionDate,
+        amount: trans.amount,
+        type: trans.type,
+        category: trans.category,
+        description: trans.description,
+        status: trans.status,
+        note: trans.note,
+        facility_name: trans.facilityName,
+        created_by: trans.created_by
+      };
+      
+      // Look up facility_id
+      if (trans.facilityName) {
+          const { data: fac } = await supabase.from('facilities').select('id').eq('facilityName', trans.facilityName).single();
+          if (fac) (dbPayload as any).facility_id = fac.id;
+      }
+
+      const { error } = await supabase.from('finance_transactions').insert(dbPayload);
+      if (error) logError('Error adding expense (compat)', error);
+  },
+
   getServices: async (): Promise<ServiceItem[]> => {
     const rawData = await safeFetch(supabase.from('service_items').select('*').order('name', { ascending: true }), MOCK_SERVICES, 'service_items');
-    // Map DB Lowercase columns to App CamelCase
     return rawData.map((s: any) => ({
         ...s,
         costPrice: s.costprice ?? s.costPrice ?? 0,
         minStock: s.minstock ?? s.minStock ?? 0,
         laundryStock: s.laundrystock ?? s.laundryStock ?? 0,
+        vendor_stock: s.vendor_stock ?? 0,
         in_circulation: s.in_circulation ?? 0,
         totalassets: s.totalassets ?? 0,
         default_qty: s.default_qty ?? 0
@@ -822,7 +789,6 @@ export const storageService = {
   },
   addService: async (item: ServiceItem) => {
     if (IS_USING_MOCK) return { error: null };
-    // Map App CamelCase to DB Lowercase
     const dbPayload = {
         id: item.id,
         name: item.name,
@@ -833,28 +799,18 @@ export const storageService = {
         costprice: item.costPrice,
         minstock: item.minStock,
         laundrystock: item.laundryStock,
+        vendor_stock: item.vendor_stock,
         in_circulation: item.in_circulation,
         totalassets: item.totalassets,
         default_qty: item.default_qty
     };
 
     const { error } = await supabase.from('service_items').insert(dbPayload);
-    if (error) {
-        if (isColumnMissingError(error)) {
-            // Legacy Fallback if needed, though schema usually exists
-            const { costprice, minstock, laundrystock, in_circulation, totalassets, default_qty, ...legacyPayload } = dbPayload;
-            const { error: retryError } = await supabase.from('service_items').insert(legacyPayload);
-            if (retryError) logError('Error adding service (Legacy)', retryError);
-        } else {
-            logError('Error adding service', error);
-        }
-    }
+    if (error) logError('Error adding service', error);
     return { error };
   },
   updateService: async (item: ServiceItem) => {
     if (IS_USING_MOCK) return { error: null };
-    
-    // Map App CamelCase to DB Lowercase
     const dbPayload = {
         id: item.id,
         name: item.name,
@@ -865,21 +821,14 @@ export const storageService = {
         costprice: item.costPrice,
         minstock: item.minStock,
         laundrystock: item.laundryStock,
+        vendor_stock: item.vendor_stock,
         in_circulation: item.in_circulation,
         totalassets: item.totalassets,
         default_qty: item.default_qty
     };
 
     const { error } = await supabase.from('service_items').upsert(dbPayload);
-    if (error) {
-        if (isColumnMissingError(error)) {
-            const { costprice, minstock, laundrystock, in_circulation, totalassets, default_qty, ...legacyPayload } = dbPayload;
-            const { error: retryError } = await supabase.from('service_items').upsert(legacyPayload);
-            if (retryError) logError('Error updating service (Legacy)', retryError);
-        } else {
-            logError('Error updating service', error);
-        }
-    }
+    if (error) logError('Error updating service', error);
     return { error };
   },
   deleteService: async (id: string) => {
@@ -888,7 +837,6 @@ export const storageService = {
     return { error: error || null };
   },
 
-  // Inventory Transactions
   getInventoryTransactions: async (): Promise<InventoryTransaction[]> => {
     return safeFetch(
         supabase.from('inventory_transactions')
@@ -905,7 +853,6 @@ export const storageService = {
     return { error };
   },
 
-  // Housekeeping Tasks
   getHousekeepingTasks: async (): Promise<HousekeepingTask[]> => {
     const limitDate = getDataStartDate();
     return safeFetch(
@@ -917,8 +864,6 @@ export const storageService = {
   },
   syncHousekeepingTasks: async (tasks: HousekeepingTask[]) => {
       if (IS_USING_MOCK) return;
-      
-      // Strict allowlist sanitization to remove UI-only fields (facilityName, roomType, etc.)
       const sanitizedTasks = tasks.map(task => ({
           id: task.id,
           facility_id: task.facility_id,
@@ -942,7 +887,6 @@ export const storageService = {
       if (error) logError('Error syncing tasks', error);
   },
 
-  // Webhooks
   getWebhooks: async (): Promise<WebhookConfig[]> => {
       return safeFetch(supabase.from('webhooks').select('*'), [], 'webhooks');
   },
@@ -969,7 +913,6 @@ export const storageService = {
       return { error };
   },
 
-  // Shifts
   getShifts: async (): Promise<Shift[]> => {
       return safeFetch(
           supabase.from('shifts')
@@ -1015,6 +958,7 @@ export const storageService = {
             category: s.category,
             totalassets: s.stock || 100,
             laundrystock: 0,
+            vendor_stock: 0,
             in_circulation: 0,
             default_qty: dqty
          };

@@ -19,12 +19,12 @@ import { vi } from 'date-fns/locale';
 type TimeFilter = 'day' | 'month' | 'year';
 
 export const Dashboard: React.FC = () => {
-  const { bookings, rooms, expenses, services, leaveRequests, otaOrders, triggerWebhook, notify } = useAppContext();
+  const { bookings, rooms, transactions, services, leaveRequests, otaOrders, triggerWebhook, notify } = useAppContext();
   const [filter, setFilter] = useState<TimeFilter>('day');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const navigate = useNavigate();
 
-  // --- CORE CALCULATION LOGIC (CEO VIEW) ---
+  // --- CORE CALCULATION LOGIC ---
   const dashboardData = useMemo(() => {
     const today = new Date();
     const todayStr = format(today, 'yyyy-MM-dd');
@@ -47,10 +47,11 @@ export const Dashboard: React.FC = () => {
     // 1. FINANCIALS
     let totalCashRevenue = 0;
     let totalTransferRevenue = 0;
-    let totalRevenue = 0;
-    let totalExpense = 0;
+    let totalRevenue = 0; // FROM BOOKINGS
+    let totalExpense = 0; // FROM TRANSACTIONS (New Logic)
     let totalBookingValue = 0;
     
+    // REVENUE: Keep Existing Logic (Bookings)
     bookings.forEach(b => {
       const payments = JSON.parse(b.paymentsJson || '[]');
       payments.forEach((p: any) => {
@@ -70,9 +71,14 @@ export const Dashboard: React.FC = () => {
       }
     });
 
-    expenses.forEach(e => {
-      const eDate = new Date(e.expenseDate);
-      if (isValid(eDate) && isWithinInterval(eDate, { start, end })) totalExpense += e.amount;
+    // EXPENSE: Update Logic (Transactions Table where Type = EXPENSE)
+    transactions.forEach(t => {
+      if (t.type === 'EXPENSE') {
+          const tDate = parseISO(t.transactionDate);
+          if (isValid(tDate) && isWithinInterval(tDate, { start, end })) {
+              totalExpense += Number(t.amount);
+          }
+      }
     });
 
     // 2. OPERATIONAL KPI
@@ -157,9 +163,8 @@ export const Dashboard: React.FC = () => {
        checkinsToday, checkoutsToday, occupancyRate,
        alerts, chartData
     };
-  }, [bookings, expenses, rooms, services, leaveRequests, otaOrders, filter, selectedDate]);
+  }, [bookings, transactions, rooms, services, leaveRequests, otaOrders, filter, selectedDate]); // Changed expenses -> transactions
 
-  // --- AUTOMATIC REPORT TRIGGER LOGIC (7 AM) ---
   const sendDailyReport = () => {
       const stats = {
           date: format(new Date(), 'dd/MM/yyyy'),
@@ -181,22 +186,16 @@ export const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-      // 1. Check local storage key for "last_daily_report_date"
       const lastSentDate = localStorage.getItem('last_daily_report_date');
       const todayStr = format(new Date(), 'yyyy-MM-dd');
       const now = new Date();
       
-      // 2. Logic: If today is NOT lastSentDate AND time is >= 7 AM
       if (lastSentDate !== todayStr && now.getHours() >= 7) {
-          // Send report
           sendDailyReport();
-          // Update key
           localStorage.setItem('last_daily_report_date', todayStr);
-          console.log("[Auto-Report] Sent daily report at", now.toISOString());
       }
-  }, []); // Run once on mount
+  }, []); 
 
-  // --- SUB-COMPONENTS ---
   const KPICard = ({ title, value, sub, icon: Icon, colorClass, trend, isMain, onClick }: any) => (
     <div 
         onClick={onClick}
@@ -244,8 +243,6 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-enter pb-10">
-      
-      {/* 1. TOP HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <div>
             <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
@@ -278,11 +275,10 @@ export const Dashboard: React.FC = () => {
          </div>
       </div>
 
-      {/* 2. KPI GRID (8 CARDS - Added Staff Leave) */}
       <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <KPICard 
-                title="Thực thu (Dòng tiền)" 
+                title="Thực thu (Booking)" 
                 value={`${dashboardData.totalRevenue.toLocaleString()} ₫`} 
                 sub={`TM: ${dashboardData.totalCashRevenue.toLocaleString()} | CK: ${dashboardData.totalTransferRevenue.toLocaleString()}`} 
                 icon={Wallet} 
@@ -291,9 +287,9 @@ export const Dashboard: React.FC = () => {
                 onClick={() => navigate('/bookings')}
               />
               <KPICard 
-                title="Chi phí vận hành" 
+                title="Chi phí (Sổ Quỹ)" 
                 value={`${dashboardData.totalExpense.toLocaleString()} ₫`} 
-                sub="Toàn bộ hóa đơn chi phí" 
+                sub="Tổng phiếu chi đã duyệt" 
                 icon={TrendingDown} 
                 colorClass="bg-red-500 text-red-500" 
                 onClick={() => navigate('/expenses')}
@@ -316,10 +312,7 @@ export const Dashboard: React.FC = () => {
           </div>
       </div>
 
-      {/* 3. TODAY'S OPS & CHART SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         
-         {/* LEFT: TODAY'S OPS (Action Center) */}
          <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100 flex flex-col h-[400px]">
             <div className="flex justify-between items-center mb-6 shrink-0">
                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
@@ -337,9 +330,6 @@ export const Dashboard: React.FC = () => {
             </div>
             
             <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
-                {/* PRIORITY ALERTS */}
-                
-                {/* 1. OTA ORDERS (NEW) */}
                 {dashboardData.alerts.pendingOtaOrders.length > 0 && (
                     <AlertItem 
                         icon={CloudLightning} 
@@ -351,7 +341,6 @@ export const Dashboard: React.FC = () => {
                     />
                 )}
 
-                {/* 2. HR */}
                 {dashboardData.alerts.pendingLeaves.length > 0 && (
                     <AlertItem 
                         icon={ShieldAlert} 
@@ -363,7 +352,6 @@ export const Dashboard: React.FC = () => {
                     />
                 )}
 
-                {/* 3. OPERATIONAL ALERTS */}
                 {dashboardData.alerts.upcomingCheckouts.length > 0 && (
                     <AlertItem 
                         icon={Clock} 
@@ -421,7 +409,6 @@ export const Dashboard: React.FC = () => {
             </button>
          </div>
 
-         {/* RIGHT: REVENUE FORECAST CHART */}
          <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-soft border border-slate-100 h-[400px] flex flex-col">
             <div className="flex justify-between items-center mb-6 shrink-0">
                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
@@ -465,7 +452,6 @@ export const Dashboard: React.FC = () => {
                 <span className="text-brand-600">HotelPro Analytics Engine v2.0</span>
             </div>
          </div>
-
       </div>
     </div>
   );
