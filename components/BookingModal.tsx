@@ -81,7 +81,7 @@ const INITIAL_BOOKING_STATE: Partial<Booking> = {
 export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, booking, defaultData, initialTab = 'info', initialCancellation = false }) => {
   const { 
       facilities, rooms, services, currentUser, bookings,
-      addBooking, updateBooking, checkAvailability,
+      addBooking, updateBooking, cancelBooking, checkAvailability,
       notify, triggerWebhook, upsertRoom, refreshData, webhooks, addGuestProfile,
       updateService, addInventoryTransaction, getGeminiApiKey, processLendingUsage,
       syncHousekeepingTasks, settings
@@ -1245,34 +1245,7 @@ If a field is not visible, return empty string "".`;
       
       setIsSubmitting(true);
       try {
-          // Tính toán hoàn tiền
-          const refundAmount = totalPaid - cancelFee;
-          let newPayments = [...payments];
-          
-          // Nếu có hoàn tiền (>0) -> Thêm record âm
-          if (refundAmount > 0) {
-              newPayments.push({
-                  ngayThanhToan: new Date().toISOString(),
-                  soTien: -refundAmount,
-                  method: 'Cash',
-                  ghiChu: `Hoàn tiền hủy phòng (Phí hủy: ${cancelFee.toLocaleString()})`
-              });
-          }
-
-          // Cập nhật doanh thu = Phí hủy (Vì tiền thừa đã hoàn, tiền còn lại chính là doanh thu)
-          const newTotalRevenue = cancelFee; 
-          
-          const updatedBooking: Booking = {
-              ...(formData as Booking),
-              status: 'Cancelled',
-              paymentsJson: JSON.stringify(newPayments),
-              totalRevenue: newTotalRevenue,
-              remainingAmount: 0, // Đã xử lý xong tiền nong
-              note: `${formData.note || ''}\n[HỦY PHÒNG]: ${cancelReason}. Phạt: ${cancelFee}, Hoàn: ${refundAmount}`
-          };
-
-          await updateBooking(updatedBooking);
-          notify('success', 'Đã hủy đặt phòng và xử lý tài chính.');
+          await cancelBooking(formData as Booking, cancelReason, cancelFee);
           onClose();
       } catch (e) {
           notify('error', 'Lỗi khi hủy phòng.');

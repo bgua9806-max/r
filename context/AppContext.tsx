@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { 
   Collaborator, Facility, Room, Booking, ServiceItem, Expense, FinanceTransaction,
   Shift, ShiftSchedule, AttendanceAdjustment, LeaveRequest, 
@@ -56,6 +56,7 @@ interface AppContextType {
   
   addBooking: (item: Booking) => Promise<boolean>;
   updateBooking: (item: Booking) => Promise<boolean>;
+  cancelBooking: (booking: Booking, reason: string, penaltyFee: number) => Promise<void>; // NEW FUNCTION
   checkAvailability: (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => boolean;
   
   addService: (item: ServiceItem) => Promise<void>;
@@ -295,9 +296,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteRoom = async (id: string) => { await storageService.deleteRoom(id); refreshData(); };
 
   const addBooking = async (item: Booking) => { 
-      // Initial payment logic is handled inside modal via Booking object construction usually
+      // 1. Lưu Booking (Logic cũ giữ nguyên)
       await storageService.addBooking(item); 
-      refreshData(); 
+      
+      // 2. [MỚI] Tự động ghi Sổ Quỹ (Transaction) nếu có thanh toán trước
+      try {
+          const payments = JSON.parse(item.paymentsJson || '[]');
+          // Chỉ xử lý nếu có thanh toán và booking mới được tạo
+          if (Array.isArray(payments) && payments.length > 0) {
+              const facilityId = facilities.find(f => f.facilityName === item.facilityName)?.id;
+              
+              for (const p of payments) {
+                  // Chỉ ghi nhận nếu số tiền > 0
+                  const amount = Number(p.soTien);
+                  if (amount > 0) {
+                      const trans: FinanceTransaction = {
+                          id: `TR-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                          transactionDate: p.ngayThanhToan || new Date().toISOString(),
+                          amount: amount,
+                          type: 'REVENUE',
+                          category: 'Doanh thu phòng',
+                          description: `Thu tiền phòng ${item.roomCode} - ${item.customerName}`,
+                          status: 'Verified',
+                          bookingId: item.id,
+                          paymentMethod: p.method || 'Cash',
+                          facilityId: facilityId,
+                          facilityName: item.facilityName,
+                          note: p.ghiChu || 'Thanh toán ban đầu (Tự động)',
+                          created_by: currentUser?.id,
+                          pic: currentUser?.collaboratorName || 'System'
+                      };
+                      // Gọi hàm addTransaction của storage để không trigger refreshData nhiều lần
+                      await storageService.addTransaction(trans);
+                  }
+              }
+          }
+      } catch (e) {
+          console.error("Lỗi tự động ghi sổ quỹ:", e);
+      }
+
+      // 3. Refresh dữ liệu (Logic cũ giữ nguyên)
+      await refreshData(); 
       return true; 
   };
 
@@ -334,6 +373,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await storageService.updateBooking(item); 
       refreshData(); 
       return true; 
+  };
+
+  // NEW: CANCEL BOOKING LOGIC WITH FUND REFUND
+  const cancelBooking = async (booking: Booking, reason: string, penaltyFee: number) => {
+      // 1. Calculate Financials
+      let payments: Payment[] = [];
+      try {
+          payments = JSON.parse(booking.paymentsJson || '[]');
+      } catch (e) { payments = []; }
+
+      const totalPaid = payments.reduce((sum, p) => sum + Number(p.soTien), 0);
+      const refundAmount = totalPaid - penaltyFee;
+
+      // 2. Record Expense (Refund) if applicable
+      if (refundAmount > 0) {
+          const facilityId = facilities.find(f => f.facilityName === booking.facilityName)?.id;
+          
+          await addTransaction({
+              id: `REFUND-${Date.now()}`,
+              transactionDate: new Date().toISOString(),
+              amount: refundAmount,
+              type: 'EXPENSE',
+              category: 'Hoàn tiền',
+              description: `Hoàn tiền hủy phòng ${booking.roomCode} - ${booking.customerName}`,
+              status: 'Verified',
+              facilityId: facilityId,
+              facilityName: booking.facilityName,
+              note: `Lý do hủy: ${reason}`,
+              created_by: currentUser?.id,
+              pic: currentUser?.collaboratorName || 'System'
+          });
+      }
+
+      // 3. Update Booking
+      const newPayments = [...payments];
+      
+      // Only add negative payment if there is a refund
+      if (refundAmount > 0) {
+          newPayments.push({
+              ngayThanhToan: new Date().toISOString(),
+              soTien: -refundAmount,
+              method: 'Cash',
+              ghiChu: `Hoàn tiền hủy phòng (Lý do: ${reason})`
+          });
+      }
+
+      const updatedBooking: Booking = {
+          ...booking,
+          status: 'Cancelled',
+          totalRevenue: penaltyFee,
+          remainingAmount: 0,
+          paymentsJson: JSON.stringify(newPayments),
+          note: `${booking.note || ''}\n[HỦY PHÒNG] Lý do: ${reason} - Phạt: ${penaltyFee.toLocaleString()} - Hoàn: ${refundAmount > 0 ? refundAmount.toLocaleString() : '0'}`
+      };
+
+      await storageService.updateBooking(updatedBooking);
+      await refreshData();
+      notify('success', 'Đã hủy phòng và xử lý hoàn tiền.');
   };
 
   const addService = async (item: ServiceItem) => { await storageService.addService(item); refreshData(); };
@@ -373,9 +470,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
   
   const updateExpense = async (item: Expense) => { 
-      // Simplified: Just re-add as update is complex with type mapping change
-      // Ideally we fetch the transaction and update it. For now, assume addExpense logic.
-      // In real migration, we update the transaction directly.
       console.warn("Update Expense called on legacy interface");
   };
   const deleteExpense = async (id: string) => { await deleteTransaction(id); };
@@ -828,7 +922,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshData, canAccess, notify, removeToast,
       addFacility, updateFacility, deleteFacility,
       upsertRoom, deleteRoom,
-      addBooking, updateBooking, checkAvailability,
+      addBooking, updateBooking, cancelBooking, checkAvailability,
       addService, updateService, deleteService,
       addTransaction, updateTransaction, deleteTransaction, addExpense,
       addCollaborator, updateCollaborator, deleteCollaborator,
