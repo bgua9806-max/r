@@ -1180,7 +1180,7 @@ If a field is not visible, return empty string "".`;
 
          // NEW LOGIC: Audit Log for Check-out
          const actorName = currentUser?.collaboratorName || 'Unknown';
-         const logEntry = `\n👋 [${format(now, 'HH:mm dd/MM')}] Check-out bởi ${actorName}. Tổng thu: ${totalRevenue.toLocaleString()}`;
+         const logEntry = `\n[Check-out] hoàn tất lúc ${format(now, 'HH:mm dd/MM')} bởi ${actorName}.`; 
          const updatedNote = (formData.note || '') + logEntry;
 
          const updatedBooking: Booking = { 
@@ -1193,7 +1193,7 @@ If a field is not visible, return empty string "".`;
              servicesJson: JSON.stringify(usedServices),
              lendingJson: JSON.stringify(lendingList),
              guestsJson: JSON.stringify(guestList),
-             note: updatedNote // Update note here
+             note: updatedNote 
          };
          
          const facility = facilities.find(f => f.facilityName === formData.facilityName);
@@ -1202,8 +1202,8 @@ If a field is not visible, return empty string "".`;
          const updates: Promise<any>[] = [updateBooking(updatedBooking)];
 
          if (facility && formData.roomCode) {
-             // 1. Create Explicit Checkout Task
-             const checkoutTask: HousekeepingTask = {
+             // 1. Create Housekeeping Task (MỚI)
+             const newTask: HousekeepingTask = {
                  id: crypto.randomUUID(),
                  facility_id: facility.id,
                  room_code: formData.roomCode,
@@ -1211,12 +1211,12 @@ If a field is not visible, return empty string "".`;
                  status: 'Pending',
                  priority: 'High',
                  created_at: new Date().toISOString(),
-                 note: 'Khách trả phòng (Auto-generated)',
+                 note: 'Khách trả phòng (Tự động)',
                  assignee: null
              };
-             updates.push(syncHousekeepingTasks([checkoutTask]));
+             updates.push(syncHousekeepingTasks([newTask]));
 
-             // 2. Update Room Status (Mark as Dirty)
+             // 2. Update Room (MỚI)
              const room = rooms.find(r => r.facility_id === facility.id && r.name === formData.roomCode);
              if (room) {
                  updates.push(upsertRoom({ ...room, status: 'Bẩn' }));
