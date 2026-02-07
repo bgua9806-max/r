@@ -38,6 +38,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     
     if (!canAccess(location.pathname)) {
         if (currentUser.role === 'Buồng phòng') return <Navigate to="/staff-portal" replace />;
+        if (currentUser.role === 'Nhân viên') return <Navigate to="/bookings" replace />;
         return <Navigate to="/dashboard" replace />;
     }
   

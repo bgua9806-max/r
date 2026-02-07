@@ -1,14 +1,13 @@
-
 import React, { useMemo, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   AreaChart, Area 
 } from 'recharts';
-import { format, isWithinInterval } from 'date-fns';
+import { format, isWithinInterval, parseISO } from 'date-fns';
 
 export const Reports: React.FC = () => {
-  const { bookings, expenses } = useAppContext();
+  const { bookings, transactions } = useAppContext();
   const [range, setRange] = useState(6); // 6 months
 
   const monthlyData = useMemo(() => {
@@ -41,10 +40,12 @@ export const Reports: React.FC = () => {
 
       // Calculate Expense
       let expense = 0;
-      expenses.forEach(e => {
-         const eDate = new Date(e.expenseDate);
-         if (isWithinInterval(eDate, { start, end })) {
-            expense += e.amount;
+      transactions.forEach(t => {
+         if (t.type === 'EXPENSE') {
+             const eDate = parseISO(t.transactionDate);
+             if (isWithinInterval(eDate, { start, end })) {
+                expense += Number(t.amount);
+             }
          }
       });
 
@@ -56,15 +57,17 @@ export const Reports: React.FC = () => {
       });
     }
     return data;
-  }, [bookings, expenses, range]);
+  }, [bookings, transactions, range]);
 
   const expenseByCategory = useMemo(() => {
     const categories: Record<string, number> = {};
-    expenses.forEach(e => {
-      categories[e.expenseCategory] = (categories[e.expenseCategory] || 0) + e.amount;
+    transactions.forEach(t => {
+      if (t.type === 'EXPENSE') {
+          categories[t.category] = (categories[t.category] || 0) + Number(t.amount);
+      }
     });
     return Object.keys(categories).map(k => ({ name: k, value: categories[k] }));
-  }, [expenses]);
+  }, [transactions]);
 
   return (
     <div className="space-y-6">

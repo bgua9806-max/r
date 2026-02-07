@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from './Modal';
 import { useAppContext } from '../context/AppContext';
 import { Shift } from '../types';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { DollarSign, Save, Play, Lock, Printer, AlertTriangle, TrendingUp, TrendingDown, Wallet, Loader2 } from 'lucide-react';
 
 interface Props {
@@ -12,7 +11,7 @@ interface Props {
 }
 
 export const ShiftModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  const { currentShift, openShift, closeShift, bookings, expenses, notify, refreshData, isLoading } = useAppContext();
+  const { currentShift, openShift, closeShift, bookings, transactions, notify, refreshData, isLoading } = useAppContext();
   
   // State for Opening Shift
   const [startCash, setStartCash] = useState(0);
@@ -59,10 +58,17 @@ export const ShiftModal: React.FC<Props> = ({ isOpen, onClose }) => {
      });
 
      // Expense Calculation
-     expenses.forEach(e => {
-         const eDate = new Date(e.expenseDate);
-         if (eDate >= startTime || (eDate.toDateString() === startTime.toDateString() && new Date().getDate() === startTime.getDate())) {
-             expense += e.amount;
+     transactions.forEach(t => {
+         if (t.type === 'EXPENSE') {
+             const eDate = parseISO(t.transactionDate);
+             if (eDate >= startTime || (eDate.toDateString() === startTime.toDateString() && new Date().getDate() === startTime.getDate())) {
+                 // Expenses are assumed cash unless specifically marked otherwise, or we filter based on method if available
+                 // Assuming here that transaction.paymentMethod tracks Cash vs Transfer
+                 const isCash = !t.paymentMethod || t.paymentMethod === 'Cash';
+                 if (isCash) {
+                    expense += Number(t.amount);
+                 }
+             }
          }
      });
 
@@ -71,7 +77,7 @@ export const ShiftModal: React.FC<Props> = ({ isOpen, onClose }) => {
          expense,
          expected: currentShift.start_cash + revenue - expense
      };
-  }, [currentShift, bookings, expenses]);
+  }, [currentShift, bookings, transactions]);
 
   useEffect(() => {
       if (isOpen) {
