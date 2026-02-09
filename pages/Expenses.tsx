@@ -80,9 +80,28 @@ export const Expenses: React.FC = () => {
   }, [transactions, currentDate, filterMode, typeFilter, searchTerm]);
 
   const stats = useMemo(() => {
-      const revenue = filteredTransactions.filter(t => t.type === 'REVENUE').reduce((sum, t) => sum + Number(t.amount), 0);
-      const expense = filteredTransactions.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + Number(t.amount), 0);
-      return { revenue, expense, profit: revenue - expense };
+      let revenue = 0;
+      let cashRevenue = 0;
+      let transferRevenue = 0;
+      
+      let expense = 0;
+      let cashExpense = 0;
+      let transferExpense = 0;
+
+      filteredTransactions.forEach(t => {
+          const amt = Number(t.amount);
+          // Default to Cash if not specified, consider Card/Transfer as non-cash
+          const isCash = t.paymentMethod === 'Cash' || !t.paymentMethod;
+          
+          if (t.type === 'REVENUE') {
+              revenue += amt;
+              if (isCash) cashRevenue += amt; else transferRevenue += amt;
+          } else {
+              expense += amt;
+              if (isCash) cashExpense += amt; else transferExpense += amt;
+          }
+      });
+      return { revenue, expense, profit: revenue - expense, cashRevenue, transferRevenue, cashExpense, transferExpense };
   }, [filteredTransactions]);
 
   const handleAdd = () => {
@@ -93,6 +112,15 @@ export const Expenses: React.FC = () => {
   const handleEdit = (t: FinanceTransaction) => {
     setEditingTransaction(t);
     setModalOpen(true);
+  };
+
+  const getPaymentMethodBadge = (method?: string) => {
+      switch (method) {
+          case 'Transfer': return <span className="bg-sky-100 text-sky-700 border-sky-200 border px-1.5 py-0.5 rounded text-[9px] font-bold uppercase">CK</span>;
+          case 'Card': return <span className="bg-purple-100 text-purple-700 border-purple-200 border px-1.5 py-0.5 rounded text-[9px] font-bold uppercase">Thẻ</span>;
+          case 'Other': return <span className="bg-slate-100 text-slate-600 border-slate-200 border px-1.5 py-0.5 rounded text-[9px] font-bold uppercase">Khác</span>;
+          default: return <span className="bg-emerald-100 text-emerald-700 border-emerald-200 border px-1.5 py-0.5 rounded text-[9px] font-bold uppercase">TM</span>; // Cash
+      }
   };
 
   return (
@@ -129,6 +157,10 @@ export const Expenses: React.FC = () => {
                         <div>
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tổng Thu</div>
                             <div className="text-lg font-black text-emerald-600">{stats.revenue.toLocaleString()} ₫</div>
+                            <div className="text-[9px] font-bold text-slate-400 flex gap-2">
+                                <span className="text-emerald-500">TM: {(stats.cashRevenue/1000).toFixed(0)}k</span>
+                                <span className="text-sky-500">CK: {(stats.transferRevenue/1000).toFixed(0)}k</span>
+                            </div>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 pr-4 border-r border-slate-100">
@@ -136,6 +168,10 @@ export const Expenses: React.FC = () => {
                         <div>
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tổng Chi</div>
                             <div className="text-lg font-black text-red-600">{stats.expense.toLocaleString()} ₫</div>
+                            <div className="text-[9px] font-bold text-slate-400 flex gap-2">
+                                <span className="text-red-400">TM: {(stats.cashExpense/1000).toFixed(0)}k</span>
+                                <span className="text-sky-400">CK: {(stats.transferExpense/1000).toFixed(0)}k</span>
+                            </div>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -190,6 +226,7 @@ export const Expenses: React.FC = () => {
                             <th className="p-4 text-center">Loại</th>
                             <th className="p-4">Danh mục / Cơ sở</th>
                             <th className="p-4">Nội dung</th>
+                            <th className="p-4 text-center">Hình thức</th>
                             <th className="p-4 text-right">Số tiền</th>
                             <th className="p-4 text-center">Thao tác</th>
                         </tr>
@@ -223,6 +260,9 @@ export const Expenses: React.FC = () => {
                                         <User size={8}/> {t.pic || t.created_by || 'System'}
                                     </div>
                                 </td>
+                                <td className="p-4 text-center">
+                                    {getPaymentMethodBadge(t.paymentMethod)}
+                                </td>
                                 <td className={`p-4 text-right font-black text-lg ${t.type === 'REVENUE' ? 'text-emerald-600' : 'text-red-600'}`}>
                                     {t.type === 'REVENUE' ? '+' : '-'}{Number(t.amount).toLocaleString()} ₫
                                 </td>
@@ -240,7 +280,7 @@ export const Expenses: React.FC = () => {
                         ))}
                         {filteredTransactions.length === 0 && (
                             <tr>
-                                <td colSpan={6} className="p-12 text-center text-slate-400 italic">Không tìm thấy giao dịch nào.</td>
+                                <td colSpan={7} className="p-12 text-center text-slate-400 italic">Không tìm thấy giao dịch nào.</td>
                             </tr>
                         )}
                     </tbody>

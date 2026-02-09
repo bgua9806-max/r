@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { FinanceTransaction } from '../types';
 import { useAppContext } from '../context/AppContext';
-import { ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Wallet, CreditCard, Banknote } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -21,7 +21,8 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
      description: '',
      note: '',
      type: 'EXPENSE',
-     status: 'Verified'
+     status: 'Verified',
+     paymentMethod: 'Cash'
   });
 
   useEffect(() => {
@@ -36,7 +37,8 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
             description: '',
             note: '',
             type: 'EXPENSE',
-            status: 'Verified'
+            status: 'Verified',
+            paymentMethod: 'Cash'
         });
     }
   }, [transaction, isOpen, facilities, settings]);
@@ -60,7 +62,8 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
       status: form.status || 'Verified',
       facilityId: form.facilityId!,
       facilityName: facilityName,
-      note: form.note || ''
+      note: form.note || '',
+      paymentMethod: form.paymentMethod || 'Cash'
     };
 
     if (transaction) updateTransaction(data);
@@ -99,6 +102,28 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Số tiền</label>
               <input type="number" required className={`w-full border-2 border-slate-100 rounded-xl p-3 bg-white font-black text-lg outline-none focus:border-brand-500 ${form.type === 'REVENUE' ? 'text-emerald-600' : 'text-red-600'}`} value={form.amount} onChange={e => setForm({...form, amount: Number(e.target.value)})} />
            </div>
+        </div>
+
+        {/* Payment Method Selector */}
+        <div>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Hình thức thanh toán</label>
+            <div className="grid grid-cols-4 gap-2">
+                {[
+                    { id: 'Cash', label: 'Tiền mặt' },
+                    { id: 'Transfer', label: 'CK' },
+                    { id: 'Card', label: 'Thẻ' },
+                    { id: 'Other', label: 'Khác' }
+                ].map(m => (
+                    <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setForm({...form, paymentMethod: m.id})}
+                        className={`py-2 rounded-lg text-xs font-bold border transition-all ${form.paymentMethod === m.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                    >
+                        {m.label}
+                    </button>
+                ))}
+            </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
