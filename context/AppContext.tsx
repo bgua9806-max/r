@@ -344,6 +344,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBooking = async (item: Booking) => { 
       // 1. Calculate difference in payment to record revenue
       const oldBooking = bookings.find(b => b.id === item.id);
+      let transactionToSave: FinanceTransaction | null = null;
+
       if (oldBooking) {
           const oldPaid = calculateTotalPaid(oldBooking);
           const newPaid = calculateTotalPaid(item);
@@ -365,7 +367,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   }
               } catch (e) {}
 
-              await addTransaction({
+              // Prepare payload but DO NOT save yet
+              transactionToSave = {
                   id: `TR-AUTO-${Date.now()}`,
                   transactionDate: new Date().toISOString(),
                   amount: diff,
@@ -377,12 +380,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   paymentMethod: method, 
                   facilityId: facilityId,
                   facilityName: item.facilityName,
-                  created_by: currentUser?.id
-              });
+                  created_by: currentUser?.id,
+                  pic: currentUser?.collaboratorName || 'System'
+              };
           }
       }
 
+      // 2. Commit Booking (Source of Truth)
+      // If this fails, function throws and transaction is NOT saved (Phantom Transaction Fix)
       await storageService.updateBooking(item); 
+
+      // 3. Side Effect: Save Transaction (only if booking saved successfully)
+      if (transactionToSave) {
+          try {
+              await storageService.addTransaction(transactionToSave);
+          } catch(e) {
+              console.error("Failed to record transaction after booking update", e);
+              notify('error', 'Lưu Booking thành công nhưng lỗi ghi Sổ Quỹ. Vui lòng kiểm tra lại.');
+          }
+      }
+
       refreshData(); 
       return true; 
   };

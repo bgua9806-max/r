@@ -518,7 +518,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
   const processSinglePayment = async (amount: number, method: 'Cash' | 'Transfer' | 'Card', note: string) => {
       const effectiveNote = note.trim() ? note : `Thu ${paymentCategory}`;
 
+      // Create unique ID for payment here
       const newPayment: Payment = {
+          id: crypto.randomUUID(),
           ngayThanhToan: new Date().toISOString(),
           soTien: amount,
           method: method,
@@ -581,6 +583,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
                       
                       const pList = safeJsonParse(member.paymentsJson);
                       const newPayment: Payment = {
+                          id: crypto.randomUUID(),
                           ngayThanhToan: new Date().toISOString(),
                           soTien: payForRoom,
                           method: payMethod,
@@ -638,6 +641,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       } else {
           if (remaining <= 0) return;
           const newPayment: Payment = {
+              id: crypto.randomUUID(),
               ngayThanhToan: new Date().toISOString(),
               soTien: remaining,
               method: 'Cash',

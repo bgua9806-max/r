@@ -133,6 +133,7 @@ export interface Violation {
 }
 
 export interface Payment {
+  id?: string; // Unique ID for tracking
   ngayThanhToan: string;
   soTien: number;
   ghiChu: string; 
