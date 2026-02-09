@@ -78,6 +78,8 @@ const INITIAL_BOOKING_STATE: Partial<Booking> = {
     groupName: ''
 };
 
+const PAYMENT_CATEGORIES = ['Tiền phòng', 'Tiền Minibar', 'Tiền giặt ủi', 'Phụ thu', 'Tiền cọc', 'Khác'];
+
 export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, booking, defaultData, initialTab = 'info', initialCancellation = false }) => {
   const { 
       facilities, rooms, services, currentUser, bookings,
@@ -131,6 +133,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
   const [payAmount, setPayAmount] = useState<string>('');
   const [payMethod, setPayMethod] = useState<'Cash' | 'Transfer' | 'Card'>('Cash');
   const [payNote, setPayNote] = useState('');
+  const [paymentCategory, setPaymentCategory] = useState('Tiền phòng');
 
   // Bill Preview State
   const [showBillPreview, setShowBillPreview] = useState(false);
@@ -162,6 +165,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
     setSelectedSheetRow(null);
     setShowBillPreview(false);
     setServiceCategoryFilter('BILLABLE'); // Reset filter to Billable on open
+    setPaymentCategory('Tiền phòng');
 
     if (booking) {
       setFormData(booking);
@@ -379,19 +383,43 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       return { total, paid, remaining: total - paid };
   }, [groupMembers]);
 
+  const serviceTotal = usedServices.reduce((sum, s) => sum + s.total, 0);
+  const totalRevenue = Number(formData.price || 0) + Number(formData.extraFee || 0) + serviceTotal;
+  const totalPaid = payments.reduce((sum, p) => sum + Number(p.soTien), 0);
+  const remaining = totalRevenue - totalPaid;
+
   useEffect(() => {
      if (activeTab !== 'payment') return;
      if (isGroupPaymentMode) {
          setPayAmount(groupFinancials.remaining > 0 ? groupFinancials.remaining.toString() : '');
          setPayNote(`Thanh toán đoàn ${formData.groupName}`);
      } else {
-         const singleTotal = Number(formData.price || 0) + Number(formData.extraFee || 0) + usedServices.reduce((sum, s) => sum + s.total, 0);
+         const singleTotal = Number(formData.price || 0) + Number(formData.extraFee || 0) + serviceTotal;
          const singlePaid = payments.reduce((sum, p) => sum + Number(p.soTien), 0);
          const singleRemaining = singleTotal - singlePaid;
          setPayAmount(singleRemaining > 0 ? singleRemaining.toString() : '');
          setPayNote('Thanh toán');
      }
   }, [isGroupPaymentMode, activeTab, groupFinancials, formData, usedServices, payments]);
+
+  // Smart Category Suggestion
+  useEffect(() => {
+      const amount = Number(payAmount);
+      if (amount > 0) {
+          // Check against Service Total
+          const svcTotal = usedServices.reduce((sum, s) => sum + s.total, 0);
+          if (amount === svcTotal && svcTotal > 0) {
+              setPaymentCategory('Tiền Minibar');
+              return;
+          }
+          // Check against Room Price
+          const roomPrice = Number(formData.price || 0);
+          if (amount === roomPrice) {
+              setPaymentCategory('Tiền phòng');
+              return;
+          }
+      }
+  }, [payAmount, usedServices, formData.price]);
 
   useEffect(() => {
     if (formData.facilityName && formData.checkinDate && formData.checkoutDate) {
@@ -422,11 +450,6 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
         }
     }
   }, [formData.facilityName, formData.roomCode, formData.checkinDate, formData.checkoutDate, formData.status, booking, checkAvailability, isGroupMode, selectedGroupRooms]);
-
-  const serviceTotal = usedServices.reduce((sum, s) => sum + s.total, 0);
-  const totalRevenue = Number(formData.price || 0) + Number(formData.extraFee || 0) + serviceTotal;
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.soTien), 0);
-  const remaining = totalRevenue - totalPaid;
 
   const handleAddService = (serviceId: string) => {
       const service = services.find(s => s.id === serviceId);
@@ -493,11 +516,14 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
   };
 
   const processSinglePayment = async (amount: number, method: 'Cash' | 'Transfer' | 'Card', note: string) => {
+      const effectiveNote = note.trim() ? note : `Thu ${paymentCategory}`;
+
       const newPayment: Payment = {
           ngayThanhToan: new Date().toISOString(),
           soTien: amount,
           method: method,
-          ghiChu: note
+          ghiChu: effectiveNote,
+          category: paymentCategory
       };
       
       const nextPayments = [...payments, newPayment];
@@ -558,7 +584,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
                           ngayThanhToan: new Date().toISOString(),
                           soTien: payForRoom,
                           method: payMethod,
-                          ghiChu: `${payNote} (Gộp)`
+                          ghiChu: `${payNote} (Gộp)`,
+                          category: paymentCategory
                       };
                       const updatedPList = [...pList, newPayment];
                       
@@ -592,7 +619,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
           }
 
       } else {
-          await processSinglePayment(amount, payMethod, payNote || 'Thanh toán');
+          await processSinglePayment(amount, payMethod, payNote || '');
           setPayAmount('');
           setPayNote('');
       }
@@ -614,7 +641,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
               ngayThanhToan: new Date().toISOString(),
               soTien: remaining,
               method: 'Cash',
-              ghiChu: 'Thanh toán hết'
+              ghiChu: 'Thanh toán hết',
+              category: paymentCategory
           };
           setPayments(prev => [...prev, newPayment]);
           notify('success', 'Đã thanh toán đủ.');
@@ -1717,6 +1745,7 @@ If a field is not visible, return empty string "".`;
                                             <div>
                                                 <div className="font-black text-brand-600 text-lg">+{p.soTien.toLocaleString()} Đ</div>
                                                 <div className="text-[10px] text-slate-400 font-bold mt-0.5">{format(parseISO(p.ngayThanhToan), 'HH:mm dd/MM/yyyy')}</div>
+                                                <div className="text-[10px] text-slate-500 italic mt-0.5">{p.category || 'Tiền phòng'}</div>
                                             </div>
                                             <div className="flex items-center gap-3">
                                                 <span className={`text-[10px] px-2 py-1 rounded-lg font-black uppercase tracking-wider ${p.method === 'Cash' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>
@@ -1732,7 +1761,25 @@ If a field is not visible, return empty string "".`;
                         {/* Payment Input */}
                         <div className={`w-full ${isGroupPaymentMode ? 'md:w-full' : 'md:w-[320px]'} bg-white p-5 rounded-2xl border border-brand-100 shadow-lg shadow-brand-50 flex flex-col gap-4`}>
                             <h4 className="font-black text-brand-700 text-[10px] uppercase tracking-widest">{isGroupPaymentMode ? 'Thanh toán cho cả đoàn' : 'Thêm thanh toán'}</h4>
-                            <div><label className="text-[10px] font-black text-slate-400 mb-2 block tracking-widest uppercase">Số tiền (VNĐ)</label><input type="number" className="w-full border-2 border-brand-50 rounded-xl p-3 text-2xl font-black text-brand-600 focus:border-brand-500 outline-none bg-slate-50/50" value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder="0" /></div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-400 mb-2 block tracking-widest uppercase">Số tiền (VNĐ)</label>
+                                <div className="flex flex-col gap-2">
+                                    <input type="number" className="w-full border-2 border-brand-50 rounded-xl p-3 text-2xl font-black text-brand-600 focus:border-brand-500 outline-none bg-slate-50/50" value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder="0" />
+                                    
+                                    <div>
+                                        <label className="text-[10px] font-black text-slate-400 mb-1 block tracking-widest uppercase">Nguồn thu</label>
+                                        <select 
+                                            className="w-full border-2 border-slate-100 rounded-xl p-2.5 text-sm font-bold text-slate-700 outline-none focus:border-brand-500"
+                                            value={paymentCategory}
+                                            onChange={(e) => setPaymentCategory(e.target.value)}
+                                        >
+                                            {PAYMENT_CATEGORIES.map(cat => (
+                                                <option key={cat} value={cat}>{cat}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
                             
                             <div>
                                 <label className="text-[10px] font-black text-slate-400 mb-2 block tracking-widest uppercase">Hình thức</label>

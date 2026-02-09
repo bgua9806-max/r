@@ -137,6 +137,7 @@ export interface Payment {
   soTien: number;
   ghiChu: string; 
   method: 'Cash' | 'Transfer' | 'Card' | 'Other';
+  category?: string; // New field for payment classification
 }
 
 // NEW: Finance Transaction (Replaces Expense)

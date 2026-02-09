@@ -315,8 +315,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                           transactionDate: p.ngayThanhToan || new Date().toISOString(),
                           amount: amount,
                           type: 'REVENUE',
-                          category: 'Doanh thu phòng',
-                          description: `Thu tiền phòng ${item.roomCode} - ${item.customerName}`,
+                          category: p.category || 'Doanh thu phòng',
+                          description: `Thu ${p.category || 'tiền phòng'} ${item.roomCode} - ${item.customerName}`,
                           status: 'Verified',
                           bookingId: item.id,
                           paymentMethod: p.method || 'Cash',
@@ -353,16 +353,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               // Auto-record Revenue Transaction
               const facilityId = facilities.find(f => f.facilityName === item.facilityName)?.id;
               
+              // Find the category from the last payment item if available
+              let category = 'Doanh thu phòng';
+              let method = 'Cash';
+              try {
+                  const payments: Payment[] = JSON.parse(item.paymentsJson || '[]');
+                  if (payments.length > 0) {
+                      const lastPayment = payments[payments.length - 1];
+                      if (lastPayment.category) category = lastPayment.category;
+                      if (lastPayment.method) method = lastPayment.method;
+                  }
+              } catch (e) {}
+
               await addTransaction({
                   id: `TR-AUTO-${Date.now()}`,
                   transactionDate: new Date().toISOString(),
                   amount: diff,
                   type: 'REVENUE',
-                  category: 'Doanh thu phòng',
-                  description: `Thu tiền phòng ${item.roomCode} - ${item.customerName}`,
+                  category: category,
+                  description: `Thu ${category} - Phòng ${item.roomCode} - ${item.customerName}`,
                   status: 'Verified',
                   bookingId: item.id,
-                  paymentMethod: 'Cash', // Default assumption, ideally extracted from new payment item
+                  paymentMethod: method, 
                   facilityId: facilityId,
                   facilityName: item.facilityName,
                   created_by: currentUser?.id
@@ -415,7 +427,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ngayThanhToan: new Date().toISOString(),
               soTien: -refundAmount,
               method: 'Cash',
-              ghiChu: `Hoàn tiền hủy phòng (Lý do: ${reason})`
+              ghiChu: `Hoàn tiền hủy phòng (Lý do: ${reason})`,
+              category: 'Hoàn tiền'
           });
       }
 
