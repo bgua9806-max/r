@@ -135,6 +135,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
   // Bill Preview State
   const [showBillPreview, setShowBillPreview] = useState(false);
 
+  // Service Category Filter
+  const [serviceCategoryFilter, setServiceCategoryFilter] = useState<'BILLABLE' | 'LENDING'>('BILLABLE');
+
   // Reset trạng thái gửi khi đổi người
   useEffect(() => {
       setIsSheetSent(false);
@@ -158,6 +161,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
     setShowSheetList(false);
     setSelectedSheetRow(null);
     setShowBillPreview(false);
+    setServiceCategoryFilter('BILLABLE'); // Reset filter to Billable on open
 
     if (booking) {
       setFormData(booking);
@@ -1570,8 +1574,35 @@ If a field is not visible, return empty string "".`;
                    {/* LEFT: Item Selector */}
                    <div className="flex-1 overflow-y-auto border border-slate-100 rounded-2xl p-4 bg-slate-50 custom-scrollbar max-h-[300px] md:max-h-full">
                       <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Danh mục hàng hóa & Đồ mượn</h4>
+                      
+                      {/* Toggle */}
+                      <div className="flex bg-white p-1 rounded-xl border border-slate-200 mb-3 shadow-sm">
+                          <button
+                              type="button"
+                              onClick={() => setServiceCategoryFilter('BILLABLE')}
+                              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${serviceCategoryFilter === 'BILLABLE' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                          >
+                              Minibar & Dịch vụ
+                          </button>
+                          <button
+                              type="button"
+                              onClick={() => setServiceCategoryFilter('LENDING')}
+                              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${serviceCategoryFilter === 'LENDING' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                          >
+                              Đồ cho mượn & Tài sản
+                          </button>
+                      </div>
+
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                         {services.map(s => {
+                         {services
+                             .filter(s => {
+                                 if (serviceCategoryFilter === 'BILLABLE') {
+                                     return ['Minibar', 'Amenity', 'Service', 'Voucher'].includes(s.category);
+                                 } else {
+                                     return ['Linen', 'Asset'].includes(s.category);
+                                 }
+                             })
+                             .map(s => {
                              const isLending = s.category === 'Linen' || s.category === 'Asset';
                              return (
                                 <button 
