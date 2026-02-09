@@ -11,13 +11,27 @@ interface Props {
   transaction?: FinanceTransaction | null;
 }
 
+const REVENUE_CATEGORIES = [
+    'Tiền phòng',
+    'Tiền Minibar',
+    'Tiền nâng cấp phòng',
+    'Tiền mất thẻ',
+    'Tiền cọc',
+    'Tiền book thêm phòng',
+    'Tiền giặt ủi',
+    'Tiền phụ thu (In sớm/Out trễ)',
+    'Thu khác'
+];
+
 export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction }) => {
   const { addTransaction, updateTransaction, facilities, settings, notify } = useAppContext();
+  
+  // Set default category to the first item in the detailed list if Revenue
   const [form, setForm] = useState<Partial<FinanceTransaction>>({
      transactionDate: new Date().toISOString().substring(0, 10),
      amount: 0,
      facilityId: '',
-     category: '',
+     category: REVENUE_CATEGORIES[0],
      description: '',
      note: '',
      type: 'EXPENSE',
@@ -43,6 +57,26 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
     }
   }, [transaction, isOpen, facilities, settings]);
 
+  const handleTypeChange = (newType: 'REVENUE' | 'EXPENSE') => {
+      setForm(prev => ({
+          ...prev,
+          type: newType,
+          category: newType === 'REVENUE' ? REVENUE_CATEGORIES[0] : (settings.expense_categories[0] || 'Khác'),
+          description: '' // Reset description when switching type
+      }));
+  };
+
+  const handleCategoryChange = (newCategory: string) => {
+      setForm(prev => ({
+          ...prev,
+          category: newCategory,
+          // Auto-fill description based on category if it's currently empty or generic
+          description: (prev.type === 'REVENUE' && (!prev.description || prev.description.startsWith('Thu ')))
+              ? `Thu ${newCategory}`
+              : prev.description
+      }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.amount || !form.facilityId || !form.category) {
@@ -52,13 +86,16 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
 
     const facilityName = facilities.find(f => f.id === form.facilityId)?.facilityName;
 
+    // Ensure description is filled if empty
+    const finalDescription = form.description || (form.type === 'REVENUE' ? `Thu ${form.category}` : `Chi ${form.category}`);
+
     const data: FinanceTransaction = {
       id: transaction?.id || `TR-${Date.now()}`,
       transactionDate: form.transactionDate!,
       amount: Number(form.amount),
       type: form.type!,
       category: form.category!,
-      description: form.description || (form.type === 'REVENUE' ? 'Phiếu thu khác' : 'Chi phí khác'),
+      description: finalDescription,
       status: form.status || 'Verified',
       facilityId: form.facilityId!,
       facilityName: facilityName,
@@ -79,14 +116,14 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
         <div className="flex bg-slate-100 p-1 rounded-xl">
             <button 
                 type="button"
-                onClick={() => setForm({...form, type: 'REVENUE'})}
+                onClick={() => handleTypeChange('REVENUE')}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${form.type === 'REVENUE' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500'}`}
             >
                 <ArrowUpCircle size={16}/> Phiếu Thu
             </button>
             <button 
                 type="button"
-                onClick={() => setForm({...form, type: 'EXPENSE'})}
+                onClick={() => handleTypeChange('EXPENSE')}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${form.type === 'EXPENSE' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500'}`}
             >
                 <ArrowDownCircle size={16}/> Phiếu Chi
@@ -136,10 +173,14 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
            <div>
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Danh mục</label>
               {form.type === 'REVENUE' ? (
-                  <select className="w-full border-2 border-slate-100 rounded-xl p-3 bg-white text-slate-900 font-bold outline-none focus:border-brand-500" value={form.category} onChange={e => setForm({...form, category: e.target.value})}>
-                      <option value="Doanh thu phòng">Doanh thu phòng</option>
-                      <option value="Minibar/Dịch vụ">Minibar/Dịch vụ</option>
-                      <option value="Khác">Thu khác</option>
+                  <select 
+                    className="w-full border-2 border-slate-100 rounded-xl p-3 bg-white text-slate-900 font-bold outline-none focus:border-brand-500" 
+                    value={form.category} 
+                    onChange={e => handleCategoryChange(e.target.value)}
+                  >
+                      {REVENUE_CATEGORIES.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                      ))}
                   </select>
               ) : (
                   <select required className="w-full border-2 border-slate-100 rounded-xl p-3 bg-white text-slate-900 font-bold outline-none focus:border-brand-500" value={form.category} onChange={e => setForm({...form, category: e.target.value})}>
@@ -151,7 +192,13 @@ export const TransactionModal: React.FC<Props> = ({ isOpen, onClose, transaction
 
         <div>
            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nội dung</label>
-           <input type="text" className="w-full border-2 border-slate-100 rounded-xl p-3 bg-white text-slate-900 font-medium outline-none focus:border-brand-500" placeholder="Ví dụ: Mua nước tẩy rửa..." value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
+           <input 
+                type="text" 
+                className="w-full border-2 border-slate-100 rounded-xl p-3 bg-white text-slate-900 font-medium outline-none focus:border-brand-500" 
+                placeholder={form.type === 'REVENUE' ? "VD: Thu tiền phòng 101..." : "Ví dụ: Mua nước tẩy rửa..."}
+                value={form.description} 
+                onChange={e => setForm({...form, description: e.target.value})} 
+           />
         </div>
 
         <div>
