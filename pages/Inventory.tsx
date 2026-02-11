@@ -167,6 +167,13 @@ export const Inventory: React.FC = () => {
       setDistributeModalOpen(true);
   };
 
+  const handleDeleteItem = async (id: string, name: string) => {
+      if(confirm(`CẢNH BÁO: Bạn có chắc muốn xóa vĩnh viễn "${name}" khỏi hệ thống?`)) {
+          await deleteService(id);
+          notify('success', `Đã xóa ${name}`);
+      }
+  };
+
   const handleTransactionSubmit = async () => {
     if (!selectedItem || actionQty <= 0) return;
     if (isSubmitting) return;
@@ -614,7 +621,7 @@ export const Inventory: React.FC = () => {
                                                     <button onClick={() => handleOpenDistribute(item)} className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Setup / Điều chuyển nội bộ (Optional)"><Share size={18}/></button>
                                                 )}
 
-                                                <button onClick={() => openTransaction(item, 'Liquidate')} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Thanh lý / Hủy / Vỡ"><Trash2 size={18}/></button>
+                                                <button onClick={() => handleDeleteItem(item.id, item.name)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Xóa vật tư"><Trash2 size={18}/></button>
                                                 <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"><Pencil size={18}/></button>
                                                 </>
                                                 )}
@@ -645,7 +652,7 @@ export const Inventory: React.FC = () => {
                                                 {!isReadOnly && (
                                                 <>
                                                 <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"><Pencil size={18}/></button>
-                                                <button onClick={() => deleteService(item.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={18}/></button>
+                                                <button onClick={() => handleDeleteItem(item.id, item.name)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={18}/></button>
                                                 </>
                                                 )}
                                             </div>
@@ -673,9 +680,14 @@ export const Inventory: React.FC = () => {
                                        <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase mt-1 inline-block">{item.category}</span>
                                    </div>
                                    {!isReadOnly && (
-                                   <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg">
-                                       <Pencil size={18}/>
-                                   </button>
+                                   <div className="flex gap-1">
+                                       <button onClick={() => { setEditForm(item); setEditModalOpen(true); }} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg">
+                                           <Pencil size={18}/>
+                                       </button>
+                                       <button onClick={() => handleDeleteItem(item.id, item.name)} className="p-2 text-rose-400 hover:bg-rose-50 rounded-lg">
+                                           <Trash2 size={18}/>
+                                       </button>
+                                   </div>
                                    )}
                                </div>
                                
@@ -724,8 +736,8 @@ export const Inventory: React.FC = () => {
                                            <Share size={18} strokeWidth={2.5}/> Setup
                                        </button>
                                    ) : (
-                                       <button onClick={() => openTransaction(item, 'Liquidate')} className={`py-3 bg-white text-rose-600 hover:bg-rose-50 border border-rose-100 font-bold text-xs rounded-xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all`}>
-                                           <Trash2 size={18} strokeWidth={2.5}/> Hủy
+                                       <button onClick={() => handleDeleteItem(item.id, item.name)} className={`py-3 bg-white text-rose-600 hover:bg-rose-50 border border-rose-100 font-bold text-xs rounded-xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all`}>
+                                           <Trash2 size={18} strokeWidth={2.5}/> Xóa
                                        </button>
                                    )}
                                 </div>
