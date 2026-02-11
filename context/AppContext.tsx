@@ -5,11 +5,13 @@ import {
   Shift, ShiftSchedule, AttendanceAdjustment, LeaveRequest, 
   HousekeepingTask, WebhookConfig, InventoryTransaction, 
   Settings, RoomRecipe, BankAccount, TimeLog, OtaOrder, 
-  ToastMessage, GuestProfile, LendingItem, SalaryAdvance, Violation, BulkImportItem, Payment
+  ToastMessage, GuestProfile, LendingItem, SalaryAdvance, Violation, BulkImportItem, Payment,
+  Season, ShiftDefinition
 } from '../types';
 import { ROLE_PERMISSIONS, DEFAULT_SETTINGS } from '../constants';
 import { storageService } from '../services/storage';
 import { supabase } from '../services/supabaseClient';
+import { determineShift } from '../utils/shiftLogic'; // Import new logic
 
 interface AppContextType {
   currentUser: Collaborator | null;
@@ -41,6 +43,10 @@ interface AppContextType {
   webhooks: WebhookConfig[];
   currentShift: Shift | null;
   toasts: ToastMessage[];
+  
+  // New State for Dynamic Shifts
+  seasons: Season[];
+  shiftDefinitions: ShiftDefinition[];
 
   refreshData: (full?: boolean) => Promise<void>;
   canAccess: (path: string) => boolean;
@@ -122,7 +128,12 @@ interface AppContextType {
   processLendingUsage: (facilityName: string, roomCode: string, items: { itemId: string, qty: number }[]) => Promise<void>;
   processRoomRestock: (facilityName: string, roomCode: string, items: { itemId: string, dirtyReturnQty: number, cleanRestockQty: number }[]) => Promise<void>;
   processCheckoutLinenReturn: (facilityName: string, roomCode: string) => Promise<void>; 
-  handleLinenExchange: (facilityName: string, roomCode: string, items: any[]) => Promise<void>; 
+  handleLinenExchange: (facilityName: string, roomCode: string, items: any[]) => Promise<void>;
+  
+  // Logic Helpers Exposed
+  upsertSeason: (season: Season) => Promise<void>;
+  upsertShiftDefinition: (shift: ShiftDefinition) => Promise<void>;
+  calculateShift: (checkInTime: string, date: Date) => ShiftDefinition | null;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -193,6 +204,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
   const [violations, setViolations] = useState<Violation[]>([]);
   
+  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [shiftDefinitions, setShiftDefinitions] = useState<ShiftDefinition[]>([]);
+  
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [roomRecipes, setRoomRecipes] = useState<Record<string, RoomRecipe>>({});
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
@@ -234,7 +248,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoading(true);
       try {
           const [
-              facs, rms, bks, svcs, trans, collabs, tasks, invTrans, shfts, schs, adjs, leaves, logs, whs, advs, vios
+              facs, rms, bks, svcs, trans, collabs, tasks, invTrans, shfts, schs, adjs, leaves, logs, whs, advs, vios,
+              seasonsData, shiftsData
           ] = await Promise.all([
               storageService.getFacilities(),
               storageService.getRooms(),
@@ -251,7 +266,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               storageService.getTimeLogs(),
               storageService.getWebhooks(),
               storageService.getSalaryAdvances(),
-              storageService.getViolations()
+              storageService.getViolations(),
+              storageService.getSeasons(),
+              storageService.getShiftDefinitions()
           ]);
 
           setFacilities(facs);
@@ -270,6 +287,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setWebhooks(whs);
           setSalaryAdvances(advs);
           setViolations(vios);
+          setSeasons(seasonsData);
+          setShiftDefinitions(shiftsData);
           
           if (full) {
               await syncOtaOrders(undefined, true);
@@ -745,7 +764,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBankAccount = async (b: BankAccount) => { await storageService.updateBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
   const deleteBankAccount = async (id: string) => { await storageService.deleteBankAccount(id); setBankAccounts(await storageService.getBankAccounts()); };
 
-  const syncOtaOrders = async (orders?: OtaOrder[], silent = false) => {
+  const syncOtaOrders = async (orders?: OtaOrder[], silent?: boolean) => {
       if (storageService.isUsingMock()) return;
       if (!silent) setIsLoading(true);
       try {
@@ -940,6 +959,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const processCheckoutLinenReturn = async () => {};
   const handleLinenExchange = async () => {};
+  
+  // Expose methods for logic
+  const upsertSeason = async (season: Season) => { await storageService.upsertSeason(season); refreshData(); };
+  const upsertShiftDefinition = async (shift: ShiftDefinition) => { await storageService.upsertShiftDefinition(shift); refreshData(); };
+  const calculateShift = useCallback((checkInTime: string, date: Date) => {
+      return determineShift(checkInTime, date, seasons, shiftDefinitions);
+  }, [seasons, shiftDefinitions]);
 
   return (
     <AppContext.Provider value={{
@@ -948,6 +974,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       housekeepingTasks, inventoryTransactions, shifts, schedules, adjustments,
       leaveRequests, otaOrders, timeLogs, bankAccounts, salaryAdvances, violations,
       settings, roomRecipes, webhooks, currentShift, toasts,
+      
+      // New State
+      seasons, shiftDefinitions,
       
       refreshData, canAccess, notify, removeToast,
       addFacility, updateFacility, deleteFacility,
@@ -969,7 +998,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       syncOtaOrders, queryOtaOrders, updateOtaOrder, deleteOtaOrder, confirmOtaCancellation,
       
       processMinibarUsage, processLendingUsage, processRoomRestock,
-      processCheckoutLinenReturn, handleLinenExchange, processBulkImport
+      processCheckoutLinenReturn, handleLinenExchange, processBulkImport,
+      
+      // Exposed logic helpers
+      upsertSeason, upsertShiftDefinition, calculateShift
     }}>
       {children}
     </AppContext.Provider>

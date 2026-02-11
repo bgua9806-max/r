@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { Facility, Room, Booking, Collaborator, FinanceTransaction, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount, TimeLog, SalaryAdvance, Violation, Expense } from '../types';
+import { Facility, Room, Booking, Collaborator, FinanceTransaction, ServiceItem, HousekeepingTask, WebhookConfig, Shift, ShiftSchedule, AttendanceAdjustment, InventoryTransaction, GuestProfile, LeaveRequest, AppConfig, Settings, RoomRecipe, BankAccount, TimeLog, SalaryAdvance, Violation, Expense, Season, ShiftDefinition } from '../types';
 import { MOCK_FACILITIES, MOCK_ROOMS, MOCK_COLLABORATORS, MOCK_BOOKINGS, MOCK_SERVICES, DEFAULT_SETTINGS, ROOM_RECIPES, MOCK_TIME_LOGS } from '../constants';
 
 const logError = (message: string, error: any) => {
@@ -83,6 +83,19 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
   return R * c; 
 }
+
+const MOCK_SEASONS: Season[] = [
+    { code: 'PEAK', name: 'Mùa Cao Điểm (Hè/Lễ)', start_month: 5, start_day: 1, end_month: 9, end_day: 30, is_active: true },
+    { code: 'LOW', name: 'Mùa Thấp Điểm', start_month: 10, start_day: 1, end_month: 4, end_day: 30, is_active: true }
+];
+
+const MOCK_SHIFTS: ShiftDefinition[] = [
+    { id: 'S1', code: 'SANG', name: 'Ca Sáng (Hè)', start_time: '07:00:00', end_time: '16:00:00', coefficient: 1.0, season_code: 'PEAK', grace_period_minutes: 15, is_active: true },
+    { id: 'S2', code: 'CHIEU', name: 'Ca Chiều (Hè)', start_time: '13:00:00', end_time: '22:00:00', coefficient: 1.0, season_code: 'PEAK', grace_period_minutes: 15, is_active: true },
+    { id: 'S3', code: 'TOI', name: 'Ca Tối (Hè)', start_time: '18:00:00', end_time: '08:00:00', coefficient: 1.2, season_code: 'PEAK', grace_period_minutes: 15, is_active: true },
+    { id: 'S4', code: 'SANG', name: 'Ca Sáng (Đông)', start_time: '08:00:00', end_time: '17:00:00', coefficient: 1.0, season_code: 'LOW', grace_period_minutes: 15, is_active: true },
+    { id: 'S5', code: 'TOI', name: 'Ca Tối (Đông)', start_time: '17:00:00', end_time: '08:00:00', coefficient: 1.2, season_code: 'LOW', grace_period_minutes: 15, is_active: true },
+];
 
 export const storageService = {
   checkConnection: async () => {
@@ -933,6 +946,25 @@ export const storageService = {
       if (error) logError('Error updating shift', error);
   },
 
+  // --- SEASONS & SHIFTS ---
+  getSeasons: async (): Promise<Season[]> => {
+      return safeFetch(supabase.from('seasons').select('*'), MOCK_SEASONS, 'seasons');
+  },
+  upsertSeason: async (season: Season) => {
+      if (IS_USING_MOCK) return;
+      const { error } = await supabase.from('seasons').upsert(season);
+      if (error) logError('Error upserting season', error);
+  },
+  
+  getShiftDefinitions: async (): Promise<ShiftDefinition[]> => {
+      return safeFetch(supabase.from('shift_types').select('*'), MOCK_SHIFTS, 'shift_types');
+  },
+  upsertShiftDefinition: async (shift: ShiftDefinition) => {
+      if (IS_USING_MOCK) return;
+      const { error } = await supabase.from('shift_types').upsert(shift);
+      if (error) logError('Error upserting shift definition', error);
+  },
+
   seedDatabase: async () => {
      if (IS_USING_MOCK) return;
      const facilitiesPayload = MOCK_FACILITIES.map(({staff, ...rest}) => rest);
@@ -964,5 +996,7 @@ export const storageService = {
          };
      });
      await supabase.from('service_items').upsert(servicesWithDefault);
+     await supabase.from('seasons').upsert(MOCK_SEASONS);
+     await supabase.from('shift_types').upsert(MOCK_SHIFTS);
   }
 };

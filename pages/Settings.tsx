@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2, RotateCw, Calculator, TrendingUp, TrendingDown, Equal, BedDouble } from 'lucide-react';
-import { Settings as SettingsType, ServiceItem, ItemCategory, WebhookConfig, RoomRecipe, BankAccount } from '../types';
+import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2, RotateCw, Calculator, TrendingUp, TrendingDown, Equal, BedDouble, Calendar, Clock, Loader2 } from 'lucide-react';
+import { Settings as SettingsType, ServiceItem, ItemCategory, WebhookConfig, RoomRecipe, BankAccount, Season, ShiftDefinition } from '../types';
 import { MOCK_SERVICES } from '../constants';
 import { storageService } from '../services/storage';
 import { RecipeModal } from '../components/RecipeModal';
@@ -14,7 +15,8 @@ export const Settings: React.FC = () => {
       webhooks, addWebhook, deleteWebhook, updateWebhook, triggerWebhook, 
       getGeminiApiKey, setAppConfig, roomRecipes, deleteRoomRecipe,
       bankAccounts, addBankAccount, updateBankAccount, deleteBankAccount, isLoading,
-      rooms // Added rooms to context for calculation
+      rooms,
+      seasons, shiftDefinitions, upsertSeason, upsertShiftDefinition
   } = useAppContext();
   
   const [localSettings, setLocalSettings] = useState(settings);
@@ -53,6 +55,17 @@ export const Settings: React.FC = () => {
   const [geminiKey, setGeminiKey] = useState('');
   const [isSavingKey, setIsSavingKey] = useState(false);
 
+  // --- LOCAL STATE FOR SEASONS & SHIFTS (Prevent UI Jumping) ---
+  const [localSeasons, setLocalSeasons] = useState<Season[]>([]);
+  const [localShifts, setLocalShifts] = useState<ShiftDefinition[]>([]);
+  const [isSavingShifts, setIsSavingShifts] = useState(false);
+
+  // Sync context data to local state initially
+  useEffect(() => {
+      if (seasons.length > 0) setLocalSeasons(seasons);
+      if (shiftDefinitions.length > 0) setLocalShifts(shiftDefinitions);
+  }, [seasons, shiftDefinitions]);
+
   // --- CALCULATE ROOM TYPE COUNTS ---
   const roomTypeStats = useMemo(() => {
       const stats: Record<string, number> = {};
@@ -64,7 +77,6 @@ export const Settings: React.FC = () => {
   }, [rooms]);
 
   useEffect(() => {
-      // Load current key on mount (masked for security if needed, but here simple retrieval)
       const loadKey = async () => {
           const key = await getGeminiApiKey();
           if (key) setGeminiKey(key);
@@ -147,7 +159,6 @@ export const Settings: React.FC = () => {
       }
   };
 
-  // --- BANK ACCOUNT LOGIC ---
   const handleOpenBankModal = (bank?: BankAccount) => {
       if (bank) {
           setEditingBank(bank);
@@ -203,43 +214,14 @@ export const Settings: React.FC = () => {
           message: "Đây là tín hiệu kiểm tra (Test Signal)",
           test_id: Date.now(),
           event: wh.event_type,
-          source: "Hotel Manager Pro",
-          ho_va_ten: "NGUYEN VAN TEST",
-          so_giay_to: "0123456789",
-          thoi_gian_tu: new Date().toISOString(),
-          data: {
-              room: "P101 (Test Room)",
-              facility: "Chi nhánh Trung Tâm (Demo)",
-              customer: "Nguyễn Văn Test",
-              timestamp: new Date().toISOString()
-          }
       };
-
-      // TÙY CHỈNH PAYLOAD CHO GOOGLE APPS SCRIPT (OTA)
-      if (wh.event_type === 'ota_import') {
-          mockPayload = {
-              action: 'update_room',
-              bookingCode: 'TEST-CONNECT-01',
-              room: 'ADMIN_TEST',
-              status: 'Connection Verified'
-          };
-      }
-      
-      // TÙY CHỈNH CHO GENERAL NOTIFICATION
-      if (wh.event_type === 'general_notification') {
-          mockPayload = {
-              type: 'TEST_SIGNAL',
-              message: 'Kiểm tra kết nối hệ thống thông báo chung.',
-              timestamp: new Date().toISOString()
-          };
-      }
       
       triggerWebhook(wh.event_type, mockPayload);
       notify('info', `Đã gửi tín hiệu test đến ${wh.event_type}`);
   };
 
   const handleResetMenu = async () => {
-     if(confirm('CẢNH BÁO: Hành động này sẽ GHI ĐÈ toàn bộ dịch vụ hiện có bằng danh sách Mẫu vào bảng "service_items" trên Supabase. Bạn có chắc chắn không?')) {
+     if(confirm('CẢNH BÁO: Hành động này sẽ GHI ĐÈ toàn bộ dịch vụ hiện có bằng danh sách Mẫu. Bạn có chắc chắn không?')) {
         notify('info', 'Đang nạp dữ liệu vào bảng SQL...');
         for(const item of MOCK_SERVICES) {
             await storageService.addService(item);
@@ -252,6 +234,36 @@ export const Settings: React.FC = () => {
   const handleSave = () => {
     updateSettings(localSettings);
     notify('success', 'Đã lưu cấu hình chung');
+  };
+
+  // --- SEASONS & SHIFTS HANDLERS (LOCAL STATE) ---
+  const handleUpdateLocalSeason = (code: string, field: keyof Season, val: any) => {
+      setLocalSeasons(prev => prev.map(s => s.code === code ? { ...s, [field]: val } : s));
+  };
+
+  const handleUpdateLocalShift = (id: string, field: keyof ShiftDefinition, val: any) => {
+      setLocalShifts(prev => prev.map(s => s.id === id ? { ...s, [field]: val } : s));
+  };
+
+  const handleSaveSeasonsAndShifts = async () => {
+      setIsSavingShifts(true);
+      try {
+          // Save Seasons
+          for (const s of localSeasons) {
+              await upsertSeason(s);
+          }
+          // Save Shifts
+          for (const sh of localShifts) {
+              await upsertShiftDefinition(sh);
+          }
+          await refreshData(); // Refresh global context
+          notify('success', 'Đã lưu cấu hình Mùa & Ca làm việc!');
+      } catch (e) {
+          console.error(e);
+          notify('error', 'Lỗi khi lưu cấu hình.');
+      } finally {
+          setIsSavingShifts(false);
+      }
   };
 
   const Section = ({ title, dataKey }: { title: string, dataKey: keyof SettingsType }) => (
@@ -305,7 +317,7 @@ export const Settings: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
          
-         {/* BANK CONFIGURATION (MULTIPLE ACCOUNTS) */}
+         {/* BANK CONFIGURATION */}
          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
              <div className="flex justify-between items-center mb-4">
                 <div>
@@ -348,11 +360,98 @@ export const Settings: React.FC = () => {
                          </div>
                      </div>
                  ))}
-                 {bankAccounts.length === 0 && (
-                     <div className="col-span-full py-8 text-center text-slate-400 italic text-sm bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                         Chưa có tài khoản nào. Hãy thêm mới để tạo mã QR.
+             </div>
+         </div>
+
+         {/* --- SEASON & SHIFT CONFIGURATION (UPDATED) --- */}
+         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
+             <div className="flex justify-between items-center mb-4">
+                <div>
+                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={20}/> Cấu Hình Mùa & Ca Làm Việc</h3>
+                   <p className="text-xs text-slate-500 mt-1">Thiết lập thời gian Mùa Cao Điểm/Thấp Điểm và giờ làm việc tương ứng.</p>
+                </div>
+                <button 
+                    onClick={handleSaveSeasonsAndShifts}
+                    disabled={isSavingShifts}
+                    className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                    {isSavingShifts ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>}
+                    Lưu Cấu Hình Ca
+                </button>
+             </div>
+
+             {/* Seasons List (Local State) */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                 {localSeasons.map(season => (
+                     <div key={season.code} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                         <div className="flex justify-between items-center mb-3">
+                             <h4 className="font-bold text-slate-700 uppercase text-sm">{season.name}</h4>
+                             <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${season.code === 'PEAK' ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'}`}>{season.code}</span>
+                         </div>
+                         <div className="grid grid-cols-2 gap-4 text-xs">
+                             <div>
+                                 <label className="text-slate-400 font-bold block mb-1">Bắt đầu (Tháng/Ngày)</label>
+                                 <div className="flex gap-2">
+                                     <input type="number" min="1" max="12" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.start_month} onChange={e => handleUpdateLocalSeason(season.code, 'start_month', Number(e.target.value))} />
+                                     <span className="self-center">/</span>
+                                     <input type="number" min="1" max="31" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.start_day} onChange={e => handleUpdateLocalSeason(season.code, 'start_day', Number(e.target.value))} />
+                                 </div>
+                             </div>
+                             <div>
+                                 <label className="text-slate-400 font-bold block mb-1">Kết thúc (Tháng/Ngày)</label>
+                                 <div className="flex gap-2">
+                                     <input type="number" min="1" max="12" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.end_month} onChange={e => handleUpdateLocalSeason(season.code, 'end_month', Number(e.target.value))} />
+                                     <span className="self-center">/</span>
+                                     <input type="number" min="1" max="31" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.end_day} onChange={e => handleUpdateLocalSeason(season.code, 'end_day', Number(e.target.value))} />
+                                 </div>
+                             </div>
+                         </div>
                      </div>
-                 )}
+                 ))}
+             </div>
+
+             {/* Shift Definitions Table (Local State) */}
+             <div className="overflow-x-auto bg-slate-50 rounded-xl border border-slate-200">
+                 <table className="w-full text-left border-collapse text-sm">
+                     <thead className="bg-slate-100 text-slate-500 font-bold text-xs uppercase">
+                         <tr>
+                             <th className="p-3">Tên Ca</th>
+                             <th className="p-3">Mùa Áp Dụng</th>
+                             <th className="p-3 text-center">Giờ Bắt Đầu</th>
+                             <th className="p-3 text-center">Giờ Kết Thúc</th>
+                             <th className="p-3 text-center">Hệ Số</th>
+                             <th className="p-3 text-center">Cho phép trễ (Phút)</th>
+                         </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-200">
+                         {localShifts.map(shift => (
+                             <tr key={shift.id} className="hover:bg-white transition-colors">
+                                 <td className="p-3 font-bold text-slate-700">{shift.name}</td>
+                                 <td className="p-3">
+                                     <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${shift.season_code === 'PEAK' ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'}`}>{shift.season_code}</span>
+                                 </td>
+                                 <td className="p-3 text-center">
+                                     <div className="flex items-center justify-center gap-1 bg-white border border-slate-200 rounded px-2 py-1 w-fit mx-auto">
+                                         <Clock size={12} className="text-slate-400"/>
+                                         <input type="time" className="bg-transparent outline-none font-mono text-xs font-bold w-16 text-center" value={shift.start_time} onChange={e => handleUpdateLocalShift(shift.id, 'start_time', e.target.value + ':00')} />
+                                     </div>
+                                 </td>
+                                 <td className="p-3 text-center">
+                                     <div className="flex items-center justify-center gap-1 bg-white border border-slate-200 rounded px-2 py-1 w-fit mx-auto">
+                                         <Clock size={12} className="text-slate-400"/>
+                                         <input type="time" className="bg-transparent outline-none font-mono text-xs font-bold w-16 text-center" value={shift.end_time} onChange={e => handleUpdateLocalShift(shift.id, 'end_time', e.target.value + ':00')} />
+                                     </div>
+                                 </td>
+                                 <td className="p-3 text-center">
+                                     <input type="number" step="0.1" className="w-12 border rounded text-center text-xs p-1 font-bold text-slate-600" value={shift.coefficient} onChange={e => handleUpdateLocalShift(shift.id, 'coefficient', Number(e.target.value))} />
+                                 </td>
+                                 <td className="p-3 text-center">
+                                     <input type="number" className="w-12 border rounded text-center text-xs p-1" value={shift.grace_period_minutes} onChange={e => handleUpdateLocalShift(shift.id, 'grace_period_minutes', Number(e.target.value))} />
+                                 </td>
+                             </tr>
+                         ))}
+                     </tbody>
+                 </table>
              </div>
          </div>
 
@@ -392,6 +491,7 @@ export const Settings: React.FC = () => {
 
          {/* RECIPE CONFIG */}
          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-full lg:col-span-3">
+             {/* ... Same Recipe Content ... */}
              <div className="flex justify-between items-center mb-4">
                 <div>
                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><ChefHat size={20}/> Định Mức & Công Thức Phòng (Room Recipes)</h3>
@@ -468,7 +568,7 @@ export const Settings: React.FC = () => {
              </div>
          </div>
 
-         {/* --- STANDARD INVENTORY ANALYSIS SECTION (NEW) --- */}
+         {/* ... INVENTORY ANALYSIS ... */}
          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
              <div className="flex justify-between items-center mb-6">
                 <div>
@@ -547,9 +647,6 @@ export const Settings: React.FC = () => {
                 <div>
                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><Globe size={20}/> Webhooks Integration</h3>
                    <p className="text-xs text-slate-500 mt-1">Kết nối n8n/Google Apps Script. <b>Lưu ý:</b> Cấu hình Node nhận là <b>POST</b>.</p>
-                </div>
-                <div className="flex items-center gap-2 bg-yellow-50 px-3 py-2 rounded-lg border border-yellow-200 text-xs text-yellow-800">
-                    <AlertTriangle size={14}/> <span>Nếu n8n lỗi, hãy kiểm tra Method = POST</span>
                 </div>
              </div>
 

@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from './Modal';
 import { ShiftSchedule, Collaborator } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { format } from 'date-fns';
-import { Trash2, Save, Sun, Moon, Coffee } from 'lucide-react';
+import { Trash2, Save, Sun, Moon, Coffee, Sunset, Cloud } from 'lucide-react';
+import { getCurrentSeason } from '../utils/shiftLogic';
 
 interface ShiftScheduleModalProps {
   isOpen: boolean;
@@ -17,29 +18,36 @@ interface ShiftScheduleModalProps {
 export const ShiftScheduleModal: React.FC<ShiftScheduleModalProps> = ({ 
   isOpen, onClose, staff, date, existingSchedule 
 }) => {
-  const { upsertSchedule, deleteSchedule, notify } = useAppContext();
-  const [shiftType, setShiftType] = useState<'Sáng' | 'Tối' | 'OFF'>('Sáng');
+  const { upsertSchedule, deleteSchedule, notify, seasons, shiftDefinitions } = useAppContext();
+  const [shiftType, setShiftType] = useState<string>('Sáng');
   const [note, setNote] = useState('');
+
+  // Determine active season for the selected date
+  const activeSeason = useMemo(() => getCurrentSeason(date, seasons), [date, seasons]);
+
+  // Filter available shifts for this season
+  const availableShifts = useMemo(() => {
+      if (!activeSeason) return [];
+      return shiftDefinitions.filter(s => s.season_code === activeSeason.code && s.is_active);
+  }, [activeSeason, shiftDefinitions]);
 
   useEffect(() => {
     if (existingSchedule) {
-      // Map về 2 ca chính nếu dữ liệu cũ có 'Chiều'
-      let type = existingSchedule.shift_type;
-      if (type === 'Chiều' as any) type = 'Sáng'; 
-      setShiftType(type as any);
+      setShiftType(existingSchedule.shift_type);
       setNote(existingSchedule.note || '');
     } else {
-      setShiftType('Sáng');
+      // Default to first available shift or 'Sáng'
+      setShiftType(availableShifts.length > 0 ? availableShifts[0].name : 'Sáng');
       setNote('');
     }
-  }, [existingSchedule, isOpen]);
+  }, [existingSchedule, isOpen, availableShifts]);
 
   const handleSave = () => {
     const s: ShiftSchedule = {
       id: existingSchedule?.id || `SCH-${Date.now()}`,
       staff_id: staff.id,
       date: format(date, 'yyyy-MM-dd'),
-      shift_type: shiftType as any,
+      shift_type: shiftType, // Now saves the full name e.g. "Ca Sáng (Hè)"
       note
     };
     upsertSchedule(s);
@@ -54,48 +62,60 @@ export const ShiftScheduleModal: React.FC<ShiftScheduleModalProps> = ({
     }
   };
 
+  const getShiftIcon = (code: string) => {
+      if (code === 'SANG') return <Sun size={20} className="text-amber-500"/>;
+      if (code === 'TOI') return <Moon size={20} className="text-indigo-500"/>;
+      if (code === 'CHIEU') return <Sunset size={20} className="text-orange-500"/>;
+      return <Cloud size={20} className="text-slate-400"/>;
+  };
+
+  const getShiftColor = (code: string, isSelected: boolean) => {
+      if (!isSelected) return 'bg-white border-slate-100 text-slate-500 hover:bg-slate-50';
+      if (code === 'SANG') return 'bg-amber-50 border-amber-500 text-amber-700';
+      if (code === 'TOI') return 'bg-indigo-50 border-indigo-500 text-indigo-700';
+      if (code === 'CHIEU') return 'bg-orange-50 border-orange-500 text-orange-700';
+      return 'bg-brand-50 border-brand-500 text-brand-700';
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Phân ca: ${staff.collaboratorName}`} size="sm">
       <div className="space-y-5">
         <div className="p-4 bg-slate-50 rounded-2xl text-slate-600 text-sm font-black border border-slate-100 flex justify-between items-center">
           <span>Ngày trực:</span>
-          <span className="text-brand-600">{format(date, 'dd/MM/yyyy')}</span>
+          <div className="text-right">
+              <span className="text-brand-600 block">{format(date, 'dd/MM/yyyy')}</span>
+              {activeSeason && <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider block">{activeSeason.name}</span>}
+          </div>
         </div>
 
         <div className="space-y-3">
-          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">CHỌN CA TRỰC (HỆ THỐNG 2 CA)</label>
-          <div className="flex flex-col gap-2">
-            <button
-                onClick={() => setShiftType('Sáng')}
-                className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all font-bold ${shiftType === 'Sáng' ? 'bg-amber-50 border-amber-500 text-amber-700' : 'bg-white border-slate-100 text-slate-500'}`}
-            >
-                <div className="flex items-center gap-3">
-                    <Sun size={20} className={shiftType === 'Sáng' ? 'text-amber-500' : 'text-slate-300'}/>
-                    <div className="text-left">
-                        <div className="text-sm uppercase">Ca Ngày (Sáng)</div>
-                        <div className="text-[10px] opacity-70">Hệ số 1.0</div>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">CHỌN CA TRỰC</label>
+          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+            {availableShifts.length > 0 ? availableShifts.map(shift => (
+                <button
+                    key={shift.id}
+                    onClick={() => setShiftType(shift.name)}
+                    className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all font-bold ${getShiftColor(shift.code, shiftType === shift.name)}`}
+                >
+                    <div className="flex items-center gap-3">
+                        {getShiftIcon(shift.code)}
+                        <div className="text-left">
+                            <div className="text-sm uppercase">{shift.name}</div>
+                            <div className="text-[10px] opacity-70 flex gap-2">
+                                <span>{shift.start_time.slice(0,5)} - {shift.end_time.slice(0,5)}</span>
+                                <span>• Hệ số {shift.coefficient}</span>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${shiftType === 'Sáng' ? 'border-amber-500' : 'border-slate-200'}`}>
-                    {shiftType === 'Sáng' && <div className="w-2.5 h-2.5 bg-amber-500 rounded-full"></div>}
-                </div>
-            </button>
-
-            <button
-                onClick={() => setShiftType('Tối')}
-                className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all font-bold ${shiftType === 'Tối' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'bg-white border-slate-100 text-slate-500'}`}
-            >
-                <div className="flex items-center gap-3">
-                    <Moon size={20} className={shiftType === 'Tối' ? 'text-indigo-500' : 'text-slate-300'}/>
-                    <div className="text-left">
-                        <div className="text-sm uppercase">Ca Đêm (Tối)</div>
-                        <div className="text-[10px] opacity-70">Hệ số 1.2</div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${shiftType === shift.name ? 'border-current' : 'border-slate-200'}`}>
+                        {shiftType === shift.name && <div className="w-2.5 h-2.5 bg-current rounded-full"></div>}
                     </div>
+                </button>
+            )) : (
+                <div className="text-center text-xs text-slate-400 italic py-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    Chưa có cấu hình ca cho mùa này.
                 </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${shiftType === 'Tối' ? 'border-indigo-500' : 'border-slate-200'}`}>
-                    {shiftType === 'Tối' && <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full"></div>}
-                </div>
-            </button>
+            )}
 
             <button
                 onClick={() => setShiftType('OFF')}

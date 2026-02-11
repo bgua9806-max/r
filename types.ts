@@ -81,7 +81,7 @@ export interface ShiftSchedule {
   id: string;
   staff_id: string;
   date: string; // YYYY-MM-DD
-  shift_type: 'Sáng' | 'Chiều' | 'Tối' | 'OFF';
+  shift_type: 'Sáng' | 'Chiều' | 'Tối' | 'OFF' | string; // Updated to allow dynamic strings
   note?: string;
 }
 
@@ -341,6 +341,29 @@ export interface BankAccount {
   template: 'compact' | 'qr_only' | 'print';
   is_default: boolean;
   created_at?: string;
+}
+
+// --- NEW SEASONS & SHIFTS INTERFACES (Phase 1) ---
+export interface Season {
+  code: string; // e.g., 'PEAK', 'LOW'
+  name: string;
+  start_month: number;
+  start_day: number;
+  end_month: number;
+  end_day: number;
+  is_active: boolean;
+}
+
+export interface ShiftDefinition {
+  id: string;
+  name: string; // e.g., 'Ca Sáng (Hè)'
+  start_time: string; // HH:mm:ss
+  end_time: string; // HH:mm:ss
+  coefficient: number; // 1.0, 1.2...
+  code: string; // 'SANG', 'CHIEU', 'TOI' (Logic mapping)
+  season_code: string; // Foreign key to Season.code
+  grace_period_minutes: number;
+  is_active: boolean;
 }
 
 export interface Settings {
