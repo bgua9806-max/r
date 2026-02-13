@@ -9,7 +9,7 @@ import {
 } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { TransactionModal } from '../components/TransactionModal';
-import { Plus, Pencil, Trash2, Calendar, Search, History, Wallet, ArrowDownCircle, ArrowUpCircle, Filter, ChevronLeft, ChevronRight, CheckCircle2, User, Lock, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Calendar, Search, History, Wallet, ArrowDownCircle, ArrowUpCircle, Filter, ChevronLeft, ChevronRight, CheckCircle2, User, Lock, AlertTriangle, CreditCard, Banknote } from 'lucide-react';
 import { ListFilter, FilterOption } from '../components/ListFilter';
 
 type FilterMode = 'day' | 'week' | 'month';
@@ -124,8 +124,11 @@ export const Expenses: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-enter pb-10">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-4 md:space-y-6 animate-enter pb-24 md:pb-10">
+      {/* HEADER SECTION */}
+      
+      {/* Desktop Header */}
+      <div className="hidden md:flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
          <div>
             <h1 className="text-2xl font-bold text-slate-900">Sổ Quỹ & Dòng Tiền</h1>
             <p className="text-sm text-slate-500">Quản lý thu chi và lịch sử giao ca.</p>
@@ -147,10 +150,43 @@ export const Expenses: React.FC = () => {
          </div>
       </div>
 
+      {/* Mobile Header */}
+      <div className="md:hidden flex flex-col gap-4">
+         <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+             <div>
+                 <h1 className="text-lg font-black text-slate-800">Sổ Quỹ</h1>
+                 <div className="flex items-center gap-1 text-xs text-slate-500 font-medium mt-0.5">
+                    <Calendar size={12}/> {getRangeLabel()}
+                 </div>
+             </div>
+             <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-1 border border-slate-200">
+                 <button onClick={() => handleNavigate(-1)} className="p-1.5 text-slate-500 hover:bg-white rounded-md transition-colors"><ChevronLeft size={16}/></button>
+                 <button onClick={() => handleNavigate(1)} className="p-1.5 text-slate-500 hover:bg-white rounded-md transition-colors"><ChevronRight size={16}/></button>
+             </div>
+         </div>
+
+         <div className="flex bg-slate-200/50 p-1 rounded-xl w-full">
+             <button 
+                onClick={() => setActiveTab('transactions')}
+                className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'transactions' ? 'bg-white text-brand-700 shadow-sm ring-1 ring-black/5' : 'text-slate-500'}`}
+             >
+                 <Wallet size={14}/> Sổ Quỹ
+             </button>
+             <button 
+                onClick={() => setActiveTab('shifts')}
+                className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'shifts' ? 'bg-white text-brand-700 shadow-sm ring-1 ring-black/5' : 'text-slate-500'}`}
+             >
+                 <History size={14}/> Giao Ca
+             </button>
+         </div>
+      </div>
+
       {activeTab === 'transactions' && (
-        <div className="animate-in fade-in slide-in-from-bottom-2 space-y-6">
+        <div className="animate-in fade-in slide-in-from-bottom-2 space-y-4 md:space-y-6">
             {/* STATS HEADER */}
-            <div className="flex flex-col xl:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            
+            {/* Desktop Stats */}
+            <div className="hidden md:flex flex-col xl:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
                 <div className="flex gap-4 w-full xl:w-auto overflow-x-auto">
                     <div className="flex items-center gap-2 pr-4 border-r border-slate-100">
                         <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600 border border-emerald-100"><ArrowUpCircle size={20}/></div>
@@ -207,17 +243,83 @@ export const Expenses: React.FC = () => {
                 </div>
             </div>
 
-            <ListFilter 
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                options={typeOptions}
-                selectedFilter={typeFilter}
-                onFilterChange={setTypeFilter as any}
-                placeholder="Tìm kiếm giao dịch..."
-            />
+            {/* Mobile Stats (Horizontal Scroll) */}
+            <div className="md:hidden flex overflow-x-auto gap-3 pb-2 no-scrollbar snap-x snap-mandatory">
+                <div className="snap-center shrink-0 w-[85%] bg-emerald-50 rounded-xl p-4 border border-emerald-100 shadow-sm flex items-center justify-between">
+                    <div>
+                        <div className="text-[10px] font-bold text-emerald-600 uppercase mb-1">Tổng Thu</div>
+                        <div className="text-2xl font-black text-emerald-700">{stats.revenue.toLocaleString()} ₫</div>
+                    </div>
+                    <div className="p-2 bg-white rounded-full text-emerald-600 shadow-sm"><ArrowUpCircle size={24}/></div>
+                </div>
+                <div className="snap-center shrink-0 w-[85%] bg-red-50 rounded-xl p-4 border border-red-100 shadow-sm flex items-center justify-between">
+                    <div>
+                        <div className="text-[10px] font-bold text-red-600 uppercase mb-1">Tổng Chi</div>
+                        <div className="text-2xl font-black text-red-700">{stats.expense.toLocaleString()} ₫</div>
+                    </div>
+                    <div className="p-2 bg-white rounded-full text-red-600 shadow-sm"><ArrowDownCircle size={24}/></div>
+                </div>
+                <div className="snap-center shrink-0 w-[85%] bg-blue-50 rounded-xl p-4 border border-blue-100 shadow-sm flex items-center justify-between">
+                    <div>
+                        <div className="text-[10px] font-bold text-blue-600 uppercase mb-1">Lợi Nhuận</div>
+                        <div className="text-2xl font-black text-blue-700">{stats.profit.toLocaleString()} ₫</div>
+                    </div>
+                    <div className="p-2 bg-white rounded-full text-blue-600 shadow-sm"><Wallet size={24}/></div>
+                </div>
+            </div>
+
+            {/* Desktop Filter */}
+            <div className="hidden md:block">
+                <ListFilter 
+                    searchTerm={searchTerm}
+                    onSearchChange={setSearchTerm}
+                    options={typeOptions}
+                    selectedFilter={typeFilter}
+                    onFilterChange={setTypeFilter as any}
+                    placeholder="Tìm kiếm giao dịch..."
+                />
+            </div>
+
+            {/* Mobile Filter & Search */}
+            <div className="md:hidden space-y-3">
+                <div className="relative">
+                    <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Tìm nội dung, số tiền..." 
+                      className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none bg-white shadow-sm"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+                
+                <div className="flex overflow-x-auto gap-2 pb-1 no-scrollbar items-center">
+                    {(['day', 'week', 'month'] as FilterMode[]).map((m) => (
+                        <button 
+                            key={m}
+                            onClick={() => setFilterMode(m)}
+                            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${filterMode === m ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200'}`}
+                        >
+                            {m === 'day' ? 'Ngày' : m === 'week' ? 'Tuần' : 'Tháng'}
+                        </button>
+                    ))}
+                    <div className="w-[1px] h-5 bg-slate-300 mx-1 shrink-0"></div>
+                    {(['All', 'REVENUE', 'EXPENSE'] as const).map((t) => (
+                        <button 
+                            key={t}
+                            onClick={() => setTypeFilter(t)}
+                            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${typeFilter === t ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-500 border-slate-200'}`}
+                        >
+                            {t === 'All' ? 'Tất cả' : t === 'REVENUE' ? 'Khoản Thu' : 'Khoản Chi'}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
             {/* TRANSACTION LIST */}
-            <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
+            
+            {/* Desktop Table */}
+            <div className="hidden md:block bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50/50 border-b border-slate-100 text-slate-500 uppercase font-extrabold text-[10px] tracking-widest">
@@ -287,12 +389,65 @@ export const Expenses: React.FC = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Mobile Card List */}
+            <div className="md:hidden flex flex-col gap-3">
+                {filteredTransactions.length === 0 ? (
+                    <div className="text-center text-slate-400 italic py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                        Không có giao dịch nào
+                    </div>
+                ) : (
+                    filteredTransactions.sort((a,b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()).map(t => (
+                        <div 
+                            key={t.id} 
+                            onClick={() => handleEdit(t)}
+                            className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start gap-3 active:scale-[0.98] transition-transform relative overflow-hidden"
+                        >
+                            <div className={`p-2.5 rounded-full shrink-0 ${t.type === 'REVENUE' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                                {t.type === 'REVENUE' ? <ArrowUpCircle size={20}/> : <ArrowDownCircle size={20}/>}
+                            </div>
+                            
+                            <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start mb-1">
+                                    <div className="font-bold text-slate-800 text-sm line-clamp-1">{t.description}</div>
+                                    <div className={`font-black text-sm shrink-0 ml-2 ${t.type === 'REVENUE' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {t.type === 'REVENUE' ? '+' : '-'}{Number(t.amount).toLocaleString()}
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                                    <span className="font-medium bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{t.category}</span>
+                                    <span>•</span>
+                                    <span>{format(parseISO(t.transactionDate), 'dd/MM')}</span>
+                                    <span>•</span>
+                                    <span className="uppercase">{t.pic || 'System'}</span>
+                                </div>
+
+                                <div className="flex justify-between items-center mt-2">
+                                    <div className="flex gap-1">
+                                        {getPaymentMethodBadge(t.paymentMethod)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Corner Delete Button (Small touch target) */}
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); if(confirm('Xóa?')) deleteTransaction(t.id); }}
+                                className="absolute bottom-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors z-10"
+                            >
+                                <Trash2 size={16}/>
+                            </button>
+                        </div>
+                    ))
+                )}
+            </div>
         </div>
       )}
 
       {activeTab === 'shifts' && (
           <div className="animate-in fade-in slide-in-from-bottom-2">
-              <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
+              {/* Desktop Table */}
+              <div className="hidden md:block bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
                   <div className="p-4 border-b border-slate-100 text-sm font-bold text-slate-500 uppercase tracking-wider bg-slate-50">Lịch sử giao ca & Bàn giao quỹ</div>
                   <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
@@ -374,8 +529,67 @@ export const Expenses: React.FC = () => {
                       </table>
                   </div>
               </div>
+
+              {/* Mobile Shift Cards */}
+              <div className="md:hidden space-y-4">
+                  {shifts.filter(s => s.status === 'Closed').map(s => {
+                      const start = parseISO(s.start_time);
+                      const end = s.end_time ? parseISO(s.end_time) : new Date();
+                      const diff = (s.difference || 0);
+
+                      return (
+                          <div key={s.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
+                              {/* Header */}
+                              <div className="flex justify-between items-start mb-3 border-b border-slate-50 pb-3">
+                                  <div>
+                                      <div className="text-sm font-black text-slate-800 uppercase flex items-center gap-2">
+                                          <User size={14} className="text-brand-600"/> {s.staff_name}
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                          {format(start, 'dd/MM')} • {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
+                                      </div>
+                                  </div>
+                                  {diff === 0 ? (
+                                      <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-black uppercase border border-emerald-200">Khớp quỹ</span>
+                                  ) : (
+                                      <span className="text-[10px] bg-red-100 text-red-700 px-2 py-1 rounded font-black uppercase border border-red-200">Lệch {diff.toLocaleString()}</span>
+                                  )}
+                              </div>
+
+                              {/* Stats Grid */}
+                              <div className="grid grid-cols-2 gap-3 mb-3">
+                                  <div className="bg-slate-50 p-2 rounded-lg text-center">
+                                      <div className="text-[10px] font-bold text-slate-400 uppercase">Thu / Chi (TM)</div>
+                                      <div className="text-xs font-bold text-slate-700 mt-1">
+                                          <span className="text-emerald-600">+{s.total_revenue_cash?.toLocaleString()}</span> / <span className="text-red-600">-{s.total_expense_cash?.toLocaleString()}</span>
+                                      </div>
+                                  </div>
+                                  <div className="bg-slate-50 p-2 rounded-lg text-center">
+                                      <div className="text-[10px] font-bold text-slate-400 uppercase">Bàn giao</div>
+                                      <div className="text-lg font-black text-slate-800 leading-none mt-1">
+                                          {s.end_cash_actual?.toLocaleString()}
+                                      </div>
+                                  </div>
+                              </div>
+
+                              {/* Footer */}
+                              <div className="text-xs text-slate-500 italic">
+                                  "{s.note || 'Không có ghi chú'}"
+                              </div>
+                          </div>
+                      )
+                  })}
+              </div>
           </div>
       )}
+
+      {/* MOBILE FAB */}
+      <button 
+        onClick={handleAdd}
+        className="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 flex items-center justify-center z-50 hover:scale-110 active:scale-95 transition-all"
+      >
+          <Plus size={28} strokeWidth={2.5}/>
+      </button>
 
       <TransactionModal 
          isOpen={isModalOpen} 
