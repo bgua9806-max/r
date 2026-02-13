@@ -680,6 +680,22 @@ export const OtaOrders: React.FC = () => {
                                         </span>
                                         <span className="flex items-center gap-1 text-slate-400 border-l border-slate-200 pl-2"><BedDouble size={12}/> {order.roomQuantity}</span>
                                     </div>
+
+                                    {/* NEW DETAILS BLOCK */}
+                                    <div className="mt-2 pt-2 border-t border-slate-50 flex flex-col gap-1.5">
+                                        <div className="flex items-start gap-2 text-xs text-slate-600 font-medium">
+                                            <BedDouble size={12} className="text-slate-400 mt-0.5 shrink-0"/>
+                                            <span className="leading-tight">{order.roomType}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                                            <Calendar size={12} className="text-slate-400 shrink-0"/>
+                                            <span>
+                                                {isValidDates ? format(checkin, 'dd/MM') : '--'} 
+                                                <span className="text-slate-300 mx-1">➜</span> 
+                                                {isValidDates ? format(checkout, 'dd/MM') : '--'}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                                 {/* ... etc ... */}
                             </div>
