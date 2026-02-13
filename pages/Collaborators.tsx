@@ -400,7 +400,7 @@ export const Collaborators: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-enter pb-10">
+    <div className="space-y-6 animate-enter pb-24 md:pb-10">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">Quản Lý Nhân Sự</h1>
@@ -659,6 +659,8 @@ export const Collaborators: React.FC = () => {
                 options={roleOptions} selectedFilter={roleFilter} onFilterChange={setRoleFilter}
                 placeholder="Tìm theo tên nhân viên..."
               />
+              
+              {/* Desktop Table (Isolate) */}
               <div className="hidden md:block bg-white rounded-xl shadow-md border border-slate-100 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
@@ -698,24 +700,33 @@ export const Collaborators: React.FC = () => {
                   </table>
                 </div>
               </div>
-              <div className="md:hidden space-y-3">
+
+              {/* Mobile Card List (New) */}
+              <div className="md:hidden space-y-4">
                  {filteredCollaborators.map(c => (
-                     <div key={c.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col gap-3">
-                         <div className="flex items-start justify-between">
-                             <div className="flex items-center gap-3">
-                                <div className="w-14 h-14 rounded-full flex items-center justify-center text-white text-lg font-black shadow-lg" style={{ backgroundColor: c.color || '#3b82f6' }}>{(c.collaboratorName || '?').charAt(0)}</div>
-                                <div>
-                                    <h3 className="font-black text-slate-800 text-lg">{c.collaboratorName}</h3>
-                                    <div className="flex items-center gap-2 mt-1"><span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${getRoleBadgeColor(c.role)}`}>{c.role}</span></div>
-                                </div>
-                             </div>
-                         </div>
-                         <div className="grid grid-cols-4 gap-2 pt-1">
-                             <button onClick={() => handleOpenManualAdvance(c)} className="py-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-sm hover:bg-emerald-100 flex items-center justify-center gap-2 border border-emerald-100"><Banknote size={16}/></button>
-                             <button onClick={() => handleOpenFine(c)} className="py-3 bg-rose-50 text-rose-600 rounded-xl font-bold text-sm hover:bg-rose-100 flex items-center justify-center gap-2 border border-rose-100"><AlertTriangle size={16}/></button>
-                             <button onClick={() => handleEdit(c)} className="py-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-100 flex items-center justify-center gap-2 border border-blue-100"><Pencil size={16}/></button>
-                             <button onClick={() => { if(confirm('Xóa nhân viên?')) deleteCollaborator(c.id); }} className="py-3 bg-white border-2 border-slate-100 text-slate-400 rounded-xl font-bold text-sm hover:bg-slate-50 flex items-center justify-center gap-2"><Trash2 size={16}/></button>
-                         </div>
+                     <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                        <div className="flex items-center gap-3">
+                           <div className="w-12 h-12 rounded-full flex items-center justify-center text-white text-lg font-bold shadow-sm" style={{ backgroundColor: c.color || '#3b82f6' }}>{(c.collaboratorName || '?').charAt(0)}</div>
+                           <div>
+                              <h3 className="font-bold text-slate-800 text-lg">{c.collaboratorName}</h3>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${getRoleBadgeColor(c.role)}`}>{c.role}</span>
+                              <div className="text-xs text-slate-500 mt-1 font-mono">{Number(c.baseSalary).toLocaleString()} đ</div>
+                           </div>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 mt-4 pt-3 border-t border-slate-100">
+                           <button onClick={() => handleEdit(c)} className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg text-blue-600 bg-blue-50 hover:bg-blue-100">
+                              <Pencil size={16} /> <span className="text-[10px] font-bold">Sửa</span>
+                           </button>
+                           <button onClick={() => handleOpenManualAdvance(c)} className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg text-emerald-600 bg-emerald-50 hover:bg-emerald-100">
+                              <Banknote size={16} /> <span className="text-[10px] font-bold">Ứng</span>
+                           </button>
+                           <button onClick={() => handleOpenFine(c)} className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100">
+                              <AlertTriangle size={16} /> <span className="text-[10px] font-bold">Phạt</span>
+                           </button>
+                           <button onClick={() => { if(confirm('Xóa?')) deleteCollaborator(c.id); }} className="flex flex-col items-center justify-center gap-1 p-2 rounded-lg text-slate-500 bg-slate-100 hover:bg-slate-200">
+                              <Trash2 size={16} /> <span className="text-[10px] font-bold">Xóa</span>
+                           </button>
+                        </div>
                      </div>
                  ))}
               </div>
@@ -841,7 +852,9 @@ export const Collaborators: React.FC = () => {
                       </button>
                   </div>
               )}
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              
+              {/* Desktop Table (Isolated) */}
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                   <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                           <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase border-b border-slate-200">
@@ -883,6 +896,48 @@ export const Collaborators: React.FC = () => {
                       </table>
                   </div>
               </div>
+
+              {/* Mobile Card List (New) */}
+              <div className="md:hidden space-y-4">
+                 {leaveRequests.filter(req => isRestricted ? req.staff_id === currentUser?.id : true).map(req => (
+                     <div key={req.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                        <div className="flex justify-between items-start">
+                           <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-bold text-sm">
+                                 {req.staff_name.charAt(0)}
+                              </div>
+                              <div>
+                                 <div className="font-bold text-slate-800">{req.staff_name}</div>
+                                 <div className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 inline-block mt-1">{req.leave_type}</div>
+                              </div>
+                           </div>
+                           <div>
+                              {req.status === 'Approved' ? <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100 uppercase">Đã duyệt</span> :
+                               req.status === 'Rejected' ? <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-full border border-rose-100 uppercase">Từ chối</span> :
+                               <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full border border-amber-100 uppercase">Chờ duyệt</span>}
+                           </div>
+                        </div>
+                        
+                        <div className="mt-3 pt-3 border-t border-slate-100">
+                           <div className="flex justify-between items-center text-xs mb-2">
+                              <span className="text-slate-400 font-bold uppercase">Thời gian</span>
+                              <span className="font-bold text-slate-800">{format(parseISO(req.start_date), 'dd/MM')} - {format(parseISO(req.end_date), 'dd/MM')}</span>
+                           </div>
+                           <div className="bg-slate-50 p-2 rounded text-xs italic text-slate-600">
+                              "{req.reason}"
+                           </div>
+                        </div>
+
+                        {!isRestricted && req.status === 'Pending' && (
+                           <div className="grid grid-cols-2 gap-3 mt-3">
+                              <button onClick={() => handleApproveLeave(req, false)} className="py-2 bg-slate-100 text-slate-500 font-bold text-xs uppercase rounded-lg">Từ chối</button>
+                              <button onClick={() => handleApproveLeave(req, true)} className="py-2 bg-emerald-600 text-white font-bold text-xs uppercase rounded-lg shadow-sm">Duyệt</button>
+                           </div>
+                        )}
+                     </div>
+                 ))}
+                 {leaveRequests.length === 0 && <div className="text-center text-slate-400 py-8 italic">Không có đơn nghỉ phép nào.</div>}
+              </div>
           </div>
       )}
 
@@ -897,7 +952,9 @@ export const Collaborators: React.FC = () => {
                       </button>
                   )}
               </div>
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              
+              {/* Desktop Table (Isolated) */}
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                   <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                           <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase border-b border-slate-200">
@@ -941,21 +998,58 @@ export const Collaborators: React.FC = () => {
                       </table>
                   </div>
               </div>
+
+              {/* Mobile Card List (New) */}
+              <div className="md:hidden space-y-4">
+                 {salaryAdvances.filter(req => isRestricted ? req.staff_id === currentUser?.id : true).map(req => {
+                     const staff = collaborators.find(c => c.id === req.staff_id);
+                     return (
+                         <div key={req.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                            <div className="flex justify-between items-center mb-2">
+                               <div>
+                                  <div className="font-bold text-slate-800 text-sm">{staff?.collaboratorName}</div>
+                                  <div className="text-[10px] text-slate-400">{format(parseISO(req.request_date), 'dd/MM/yyyy')}</div>
+                               </div>
+                               <div className="text-xl font-black text-brand-600">{req.amount.toLocaleString()} <span className="text-[10px] text-slate-400 font-medium">đ</span></div>
+                            </div>
+                            
+                            <div className="bg-slate-50 p-2 rounded text-xs italic text-slate-600 mb-3 border border-slate-100">
+                               "{req.reason}"
+                            </div>
+
+                            <div className="flex justify-between items-center">
+                               <div>
+                                  {req.status === 'Approved' ? <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100 uppercase">Đã duyệt</span> :
+                                   req.status === 'Rejected' ? <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-full border border-rose-100 uppercase">Từ chối</span> :
+                                   <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full border border-amber-100 uppercase">Chờ duyệt</span>}
+                               </div>
+                               {!isRestricted && req.status === 'Pending' && (
+                                   <div className="flex gap-2">
+                                       <button onClick={() => handleApproveAdvance(req.id, false)} className="px-3 py-1.5 bg-slate-100 text-slate-500 text-[10px] font-bold uppercase rounded-lg">Từ chối</button>
+                                       <button onClick={() => handleApproveAdvance(req.id, true)} className="px-3 py-1.5 bg-brand-600 text-white text-[10px] font-bold uppercase rounded-lg shadow-sm">Duyệt</button>
+                                   </div>
+                               )}
+                            </div>
+                         </div>
+                     )
+                 })}
+                 {salaryAdvances.length === 0 && <div className="text-center text-slate-400 py-8 italic">Chưa có phiếu ứng nào.</div>}
+              </div>
           </div>
       )}
 
       {/* TAB 6: TIMESHEET */}
       {activeTab === 'timesheet' && !isRestricted && (
           <div className="animate-in fade-in space-y-4">
-              <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-3">
+              <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-col md:flex-row gap-3 md:gap-0">
+                  <div className="flex items-center gap-3 w-full md:w-auto">
                       <div className="p-2 bg-brand-50 text-brand-600 rounded-lg"><ClipboardList size={20}/></div>
                       <div>
                           <h2 className="text-lg font-bold text-slate-800">Bảng Chấm Công</h2>
                           <p className="text-xs text-slate-500">Kỳ lương: <span className="font-bold text-brand-600">{selectedMonthStr}</span></p>
                       </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
                       <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
                           <button onClick={() => setTimesheetMode('schedule')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${timesheetMode === 'schedule' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500'}`}>Theo Lịch</button>
                           <button onClick={() => setTimesheetMode('realtime')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${timesheetMode === 'realtime' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500'}`}>Theo GPS</button>
@@ -964,7 +1058,8 @@ export const Collaborators: React.FC = () => {
                   </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+              {/* Desktop Table (Isolated) */}
+              <div className="hidden md:block bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
                   <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                           <thead className="bg-slate-50/50 border-b border-slate-200">
@@ -1004,6 +1099,48 @@ export const Collaborators: React.FC = () => {
                           </tbody>
                       </table>
                   </div>
+              </div>
+
+              {/* Mobile "Mini Payslip" Cards (New) */}
+              <div className="md:hidden space-y-4">
+                 {timesheetData.map(d => (
+                     <div key={d.staff.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                        <div className="flex justify-between items-center mb-3">
+                           <div className="font-bold text-slate-800 text-sm">{d.staff.collaboratorName}</div>
+                           <div className="text-lg font-black text-emerald-600">{Math.round(d.calculatedSalary).toLocaleString()} <span className="text-[10px] text-slate-400">đ</span></div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                           <div className="bg-white p-2 rounded border border-slate-50 text-center">
+                              <div className="text-[10px] text-slate-400 uppercase font-bold">Công Chuẩn</div>
+                              <div className="font-black text-slate-700">{d.standardDays.toFixed(1)}</div>
+                           </div>
+                           <div className="bg-white p-2 rounded border border-slate-50 text-center">
+                              <div className="text-[10px] text-slate-400 uppercase font-bold">Đi Muộn</div>
+                              <div className={`font-black ${d.totalLateMinutes > 0 ? 'text-red-500' : 'text-slate-700'}`}>{d.totalLateMinutes > 0 ? `${d.totalLateMinutes}p` : '-'}</div>
+                           </div>
+                           <div className="bg-white p-2 rounded border border-slate-50 text-center">
+                              <div className="text-[10px] text-slate-400 uppercase font-bold">Ca Làm</div>
+                              <div className="text-xs font-bold flex justify-center gap-1">
+                                 <span className="text-amber-600">{d.dayShifts}S</span> / <span className="text-indigo-600">{d.nightShifts}T</span>
+                              </div>
+                           </div>
+                           <div className="bg-white p-2 rounded border border-slate-50 text-center">
+                              <div className="text-[10px] text-slate-400 uppercase font-bold">Điều chỉnh</div>
+                              <div className="text-xs font-bold text-blue-600">{d.adjustment ? 'Có' : 'Không'}</div>
+                           </div>
+                        </div>
+
+                        <div className="flex justify-end gap-2 mt-3 pt-2 border-t border-slate-50">
+                           <button onClick={() => openAdjustment(d.staff)} className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                              <Edit2 size={18} />
+                           </button>
+                           <button onClick={() => handleOpenPayroll(d.staff, d.calculatedSalary)} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                              <QrCode size={18} />
+                           </button>
+                        </div>
+                     </div>
+                 ))}
               </div>
           </div>
       )}
