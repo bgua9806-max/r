@@ -167,6 +167,26 @@ export const useBookingLogic = () => {
     });
   }, [bookings, searchTerm, filterFacility]);
 
+  // --- SMART NAVIGATION SEARCH (AUTO-JUMP) ---
+  useEffect(() => {
+      // 1. Safety Checks
+      if (!searchTerm || !searchTerm.trim()) return;
+      if (filteredBookings.length === 0) return;
+
+      // 2. Select the most relevant result (First item in filtered list)
+      const bestMatch = filteredBookings[0];
+      if (!bestMatch.checkinDate) return;
+
+      // 3. Parse Date
+      const targetDate = parseISO(bestMatch.checkinDate);
+
+      // 4. Update Calendar if needed
+      // Only jump if target date is valid AND different from current view to prevent loops
+      if (isValid(targetDate) && !isSameDay(targetDate, currentDate)) {
+          setCurrentDate(targetDate);
+      }
+  }, [filteredBookings, searchTerm, currentDate]);
+
   // --- ROOM MAP LOGIC (GRID VIEW) ---
   const roomMapData = useMemo(() => {
       const displayFacilities = facilities.filter(f => !filterFacility || f.facilityName === filterFacility);
