@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useAppContext } from '../context/AppContext';
 import { 
   CloudLightning, RefreshCw, Calendar, ArrowRight, User, 
-  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter, Loader2, Layers, Link
+  CheckCircle, Clock, XCircle, CreditCard, DollarSign, BedDouble, AlertTriangle, MapPin, AlertCircle, AlertOctagon, MoreHorizontal, Bell, Search, Trash2, X, Archive, Users, Coffee, Utensils, Filter, Loader2, Layers, Link, Home
 } from 'lucide-react';
 import { format, parseISO, isSameDay, isValid, differenceInCalendarDays, isSameMonth } from 'date-fns';
 import { OtaOrder } from '../types';
@@ -678,7 +678,7 @@ export const OtaOrders: React.FC = () => {
                                         <span className="flex items-center gap-1 truncate max-w-[200px]" title={order.guestDetails || `${order.guestCount} Khách`}>
                                             <Users size={12}/> {order.guestDetails || order.guestCount}
                                         </span>
-                                        <span className="flex items-center gap-1 text-slate-400 border-l border-slate-200 pl-2"><BedDouble size={12}/> {order.roomQuantity}</span>
+                                        <span className="flex items-center gap-1 text-slate-400 border-l border-slate-200 pl-2"><Home size={12}/> {order.roomQuantity}</span>
                                     </div>
 
                                     {/* NEW DETAILS BLOCK */}
