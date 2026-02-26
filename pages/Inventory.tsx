@@ -523,6 +523,45 @@ export const Inventory: React.FC = () => {
                         </tbody>
                     </table>
                 </div>
+
+                {/* Mobile History View */}
+                <div className="md:hidden space-y-3 p-4">
+                    {filteredHistory.length === 0 ? (
+                        <div className="text-center text-slate-400 py-10">
+                            <History size={40} className="mx-auto mb-2 opacity-50"/>
+                            <p className="text-sm font-medium">Chưa có lịch sử giao dịch.</p>
+                        </div>
+                    ) : (
+                        filteredHistory.map(t => (
+                            <div key={t.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative">
+                                <div className="flex justify-between items-start mb-3 border-b border-slate-50 pb-2">
+                                    <div>
+                                        <div className="font-bold text-slate-800 text-sm">{format(parseISO(t.created_at), 'HH:mm')} - {format(parseISO(t.created_at), 'dd/MM/yyyy')}</div>
+                                        <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5 flex items-center gap-1">
+                                            <User size={10}/> {t.staff_name}
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        {getTransBadge(t.type)}
+                                    </div>
+                                </div>
+                                
+                                <div className="flex justify-between items-center mb-2">
+                                    <div className="font-black text-slate-800 text-base">{t.item_name}</div>
+                                    <div className={`font-black text-xl ${t.type === 'IN' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                        {t.type === 'IN' ? '+' : '-'}{t.quantity}
+                                    </div>
+                                </div>
+
+                                {t.note && (
+                                    <div className="bg-slate-50 p-2 rounded-lg text-xs text-slate-600 italic border border-slate-100 mt-2">
+                                        {t.note}
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
         ) : (
             <div className="md:flex-1 md:overflow-x-auto md:overflow-y-auto md:custom-scrollbar">
