@@ -702,9 +702,16 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
   };
 
   const handleCheckoutDateChange = (newDate: string) => {
-      const unitPrice = getPriceForDate(formData.facilityName!, formData.roomCode!, formData.checkinDate!);
-      const nights = calculateNights(formData.checkinDate!, newDate);
-      setFormData(prev => ({ ...prev, checkoutDate: newDate, price: unitPrice * nights }));
+      const oldNights = calculateNights(formData.checkinDate!, formData.checkoutDate!);
+      const newNights = calculateNights(formData.checkinDate!, newDate);
+      
+      // Chỉ tính lại giá nếu số đêm thay đổi (tránh ghi đè giá khi chỉ sửa giờ)
+      if (oldNights !== newNights) {
+          const unitPrice = getPriceForDate(formData.facilityName!, formData.roomCode!, formData.checkinDate!);
+          setFormData(prev => ({ ...prev, checkoutDate: newDate, price: unitPrice * newNights }));
+      } else {
+          setFormData(prev => ({ ...prev, checkoutDate: newDate }));
+      }
   };
 
   const handleAddGuest = () => {
