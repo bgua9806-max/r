@@ -98,7 +98,7 @@ export const useBookingLogic = () => {
       }
 
       // 3. Check Bookings in this room
-      const roomBookings = bookings.filter(b => b.roomCode === room.name && b.facilityName === facilityName);
+      const roomBookings = bookings.filter(b => b.roomCode?.trim() === room.name?.trim() && b.facilityName?.trim() === facilityName?.trim());
       
       const hasBookingMatch = roomBookings.some(b => {
           // A. Text Match
@@ -204,7 +204,7 @@ export const useBookingLogic = () => {
           const roomsWithStatus = facilityRooms.map(room => {
               // 1. Find active booking
               const activeBooking = bookings.find(b => {
-                  if (b.facilityName !== fac.facilityName || b.roomCode !== room.name) return false;
+                  if (b.facilityName?.trim() !== fac.facilityName?.trim() || b.roomCode?.trim() !== room.name?.trim()) return false;
                   if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false; 
 
                   const checkIn = parseISO(b.checkinDate);
@@ -233,7 +233,7 @@ export const useBookingLogic = () => {
               const referenceTime = isFutureView ? startOfDay(currentDate) : now;
               const nextBooking = !activeBooking ? bookings
                   .filter(b => {
-                      if (b.facilityName !== fac.facilityName || b.roomCode !== room.name || b.status !== 'Confirmed') return false;
+                      if (b.facilityName?.trim() !== fac.facilityName?.trim() || b.roomCode?.trim() !== room.name?.trim() || b.status !== 'Confirmed') return false;
                       const checkin = parseISO(b.checkinDate);
                       return isValid(checkin) && checkin > referenceTime;
                   })
@@ -331,7 +331,7 @@ export const useBookingLogic = () => {
               
               // Use same logic as map for consistency
               const activeBooking = bookings.find(b => {
-                  if (b.facilityName !== fac.facilityName || b.roomCode !== r.name) return false;
+                  if (b.facilityName?.trim() !== fac.facilityName?.trim() || b.roomCode?.trim() !== r.name?.trim()) return false;
                   if (b.status === 'Cancelled' || b.status === 'CheckedOut') return false; 
                   
                   const checkIn = parseISO(b.checkinDate);
@@ -478,7 +478,7 @@ export const useBookingLogic = () => {
   }, [facilities, rooms, filterFacility, housekeepingTasks, searchTerm]); // Add searchTerm dependency
 
   const getBookingsForRow = (facility: string, room: string) => {
-    return filteredBookings.filter(b => b.facilityName === facility && b.roomCode === room);
+    return filteredBookings.filter(b => b.facilityName?.trim() === facility?.trim() && b.roomCode?.trim() === room?.trim());
   };
 
   const getViewConfig = () => {

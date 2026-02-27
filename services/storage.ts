@@ -573,7 +573,7 @@ export const storageService = {
     const rawData = await safeFetch(
         supabase.from('bookings')
             .select('*')
-            .or(`checkoutDate.gte.${limitDate},status.eq.Confirmed,status.eq.CheckedIn`),
+            .or(`checkoutDate.gte.${limitDate},checkinDate.gte.${limitDate},status.eq.Confirmed,status.eq.CheckedIn,status.eq.Pending`),
         MOCK_BOOKINGS, 'bookings'
     );
 
