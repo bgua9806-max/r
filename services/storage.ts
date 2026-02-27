@@ -568,12 +568,11 @@ export const storageService = {
   },
 
   getBookings: async (): Promise<Booking[]> => {
-    const limitDate = getDataStartDate();
-    
     const rawData = await safeFetch(
         supabase.from('bookings')
             .select('*')
-            .or(`checkoutDate.gte.${limitDate},checkinDate.gte.${limitDate},status.eq.Confirmed,status.eq.CheckedIn,status.eq.Pending`),
+            .order('id', { ascending: false })
+            .limit(5000),
         MOCK_BOOKINGS, 'bookings'
     );
 
