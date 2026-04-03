@@ -140,6 +140,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
 
   // Service Category Filter
   const [serviceCategoryFilter, setServiceCategoryFilter] = useState<'BILLABLE' | 'LENDING'>('BILLABLE');
+  const [billableSubFilter, setBillableSubFilter] = useState<'ALL' | 'FREE' | 'MINIBAR' | 'SERVICE'>('ALL');
 
   // Reset trạng thái gửi khi đổi người
   useEffect(() => {
@@ -165,6 +166,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
     setSelectedSheetRow(null);
     setShowBillPreview(false);
     setServiceCategoryFilter('BILLABLE'); // Reset filter to Billable on open
+    setBillableSubFilter('ALL');
     setPaymentCategory('Tiền phòng');
 
     if (booking) {
@@ -1618,7 +1620,7 @@ If a field is not visible, return empty string "".`;
                       <div className="flex bg-white p-1 rounded-xl border border-slate-200 mb-3 shadow-sm">
                           <button
                               type="button"
-                              onClick={() => setServiceCategoryFilter('BILLABLE')}
+                              onClick={() => { setServiceCategoryFilter('BILLABLE'); setBillableSubFilter('ALL'); }}
                               className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${serviceCategoryFilter === 'BILLABLE' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
                           >
                               Minibar & Dịch vụ
@@ -1632,28 +1634,84 @@ If a field is not visible, return empty string "".`;
                           </button>
                       </div>
 
+                      {/* Sub-filter for BILLABLE */}
+                      {serviceCategoryFilter === 'BILLABLE' && (
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                              {[
+                                  { key: 'ALL' as const, label: 'Tất cả', color: 'slate' },
+                                  { key: 'FREE' as const, label: '🟢 Miễn phí', color: 'emerald' },
+                                  { key: 'MINIBAR' as const, label: '🟠 Minibar', color: 'orange' },
+                                  { key: 'SERVICE' as const, label: '🔵 Dịch vụ', color: 'blue' },
+                              ].map(f => (
+                                  <button
+                                      key={f.key}
+                                      type="button"
+                                      onClick={() => setBillableSubFilter(f.key)}
+                                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${
+                                          billableSubFilter === f.key
+                                              ? f.key === 'FREE' ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
+                                              : f.key === 'MINIBAR' ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
+                                              : f.key === 'SERVICE' ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                                              : 'bg-slate-600 text-white border-slate-600 shadow-sm'
+                                          : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                      }`}
+                                  >
+                                      {f.label}
+                                  </button>
+                              ))}
+                          </div>
+                      )}
+
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                          {services
                              .filter(s => {
                                  if (serviceCategoryFilter === 'BILLABLE') {
-                                     return ['Minibar', 'Amenity', 'Service', 'Voucher'].includes(s.category);
+                                     const isBillable = ['Minibar', 'Amenity', 'Service', 'Voucher'].includes(s.category);
+                                     if (!isBillable) return false;
+                                     if (billableSubFilter === 'ALL') return true;
+                                     if (billableSubFilter === 'FREE') return s.category === 'Amenity' || s.price === 0;
+                                     if (billableSubFilter === 'MINIBAR') return s.category === 'Minibar';
+                                     if (billableSubFilter === 'SERVICE') return s.category === 'Service' || s.category === 'Voucher';
+                                     return true;
                                  } else {
                                      return ['Linen', 'Asset'].includes(s.category);
                                  }
                              })
                              .map(s => {
                              const isLending = s.category === 'Linen' || s.category === 'Asset';
+                             const isFree = s.category === 'Amenity' || s.price === 0;
+                             const isService = s.category === 'Service' || s.category === 'Voucher';
                              return (
                                 <button 
                                     key={s.id} 
                                     type="button" 
                                     onClick={() => handleAddService(s.id)} 
-                                    className={`flex flex-col items-center justify-center p-3 border rounded-xl hover:shadow-md transition-all active:scale-95 group relative ${isLending ? 'bg-blue-50 border-blue-200 hover:border-blue-400' : 'bg-white border-slate-200 hover:border-brand-500'}`}
+                                    className={`flex flex-col items-center justify-center p-3 border rounded-xl hover:shadow-md transition-all active:scale-95 group relative ${
+                                        isLending ? 'bg-blue-50 border-blue-200 hover:border-blue-400' 
+                                        : isFree ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-400'
+                                        : isService ? 'bg-blue-50 border-blue-200 hover:border-blue-400'
+                                        : 'bg-white border-orange-200 hover:border-orange-400'
+                                    }`}
                                 >
+                                   {/* Category badge */}
+                                   {!isLending && (
+                                       <div className={`absolute top-1 right-1 px-1 py-0.5 rounded text-[7px] font-black uppercase tracking-wider ${
+                                           isFree ? 'bg-emerald-100 text-emerald-600' 
+                                           : isService ? 'bg-blue-100 text-blue-600'
+                                           : 'bg-orange-100 text-orange-600'
+                                       }`}>
+                                           {isFree ? 'FREE' : isService ? 'DV' : ''}
+                                       </div>
+                                   )}
                                    {isLending && <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full"></div>}
                                    <span className="font-bold text-xs text-slate-700 line-clamp-1 group-hover:text-brand-600 transition-colors text-center">{s.name}</span>
-                                   <span className={`text-[10px] font-black mt-1 uppercase ${isLending ? 'text-blue-600' : 'text-brand-600'}`}>
-                                       {isLending ? 'Mượn' : `${s.price.toLocaleString()} Đ`}
+                                   <span className={`text-[10px] font-black mt-1 uppercase ${
+                                       isLending ? 'text-blue-600' 
+                                       : isFree ? 'text-emerald-600' 
+                                       : isService ? 'text-blue-600'
+                                       : 'text-orange-600'
+                                   }`}>
+                                       {isLending ? 'Mượn' : isFree ? '0 Đ (Free)' : `${s.price.toLocaleString()} Đ`}
                                    </span>
                                 </button>
                              );
