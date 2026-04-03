@@ -249,6 +249,10 @@ export const Expenses: React.FC = () => {
                     <div>
                         <div className="text-[10px] font-bold text-emerald-600 uppercase mb-1">Tổng Thu</div>
                         <div className="text-2xl font-black text-emerald-700">{stats.revenue.toLocaleString()} ₫</div>
+                        <div className="text-[10px] font-bold text-emerald-600/70 flex gap-2 mt-1">
+                            <span className="text-emerald-600">TM: {(stats.cashRevenue/1000).toFixed(0)}k</span>
+                            <span className="text-emerald-600/80">CK: {(stats.transferRevenue/1000).toFixed(0)}k</span>
+                        </div>
                     </div>
                     <div className="p-2 bg-white rounded-full text-emerald-600 shadow-sm"><ArrowUpCircle size={24}/></div>
                 </div>
@@ -256,6 +260,10 @@ export const Expenses: React.FC = () => {
                     <div>
                         <div className="text-[10px] font-bold text-red-600 uppercase mb-1">Tổng Chi</div>
                         <div className="text-2xl font-black text-red-700">{stats.expense.toLocaleString()} ₫</div>
+                        <div className="text-[10px] font-bold text-red-600/70 flex gap-2 mt-1">
+                            <span className="text-red-600">TM: {(stats.cashExpense/1000).toFixed(0)}k</span>
+                            <span className="text-red-600/80">CK: {(stats.transferExpense/1000).toFixed(0)}k</span>
+                        </div>
                     </div>
                     <div className="p-2 bg-white rounded-full text-red-600 shadow-sm"><ArrowDownCircle size={24}/></div>
                 </div>
