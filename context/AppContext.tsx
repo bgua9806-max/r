@@ -63,6 +63,7 @@ interface AppContextType {
   addBooking: (item: Booking) => Promise<boolean>;
   updateBooking: (item: Booking) => Promise<boolean>;
   cancelBooking: (booking: Booking, reason: string, penaltyFee: number) => Promise<void>; // NEW FUNCTION
+  refundDeposit: (booking: Booking) => Promise<void>; // Hoàn tiền cọc
   checkAvailability: (facilityName: string, roomCode: string, checkIn: string, checkOut: string, excludeId?: string) => boolean;
   
   addService: (item: ServiceItem) => Promise<void>;
@@ -167,7 +168,16 @@ const mapOtaData = (data: any[]): OtaOrder[] => {
 const calculateTotalPaid = (booking: Booking): number => {
     try {
         const payments: Payment[] = JSON.parse(booking.paymentsJson || '[]');
-        return payments.reduce((sum, p) => sum + Number(p.soTien), 0);
+        // Loại trừ tiền cọc khỏi tổng thanh toán - tiền cọc phải hoàn lại khách
+        return payments.filter(p => p.category !== 'Tiền cọc').reduce((sum, p) => sum + Number(p.soTien), 0);
+    } catch(e) { return 0; }
+};
+
+// Tính riêng tổng tiền cọc đã thu
+const calculateTotalDeposit = (booking: Booking): number => {
+    try {
+        const payments: Payment[] = JSON.parse(booking.paymentsJson || '[]');
+        return payments.filter(p => p.category === 'Tiền cọc').reduce((sum, p) => sum + Number(p.soTien), 0);
     } catch(e) { return 0; }
 };
 
@@ -329,19 +339,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   // Chỉ ghi nhận nếu số tiền > 0
                   const amount = Number(p.soTien);
                   if (amount > 0) {
+                      const isDeposit = p.category === 'Tiền cọc';
                       const trans: FinanceTransaction = {
                           id: `TR-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                           transactionDate: p.ngayThanhToan || new Date().toISOString(),
                           amount: amount,
                           type: 'REVENUE',
-                          category: p.category || 'Doanh thu phòng',
-                          description: `Thu ${p.category || 'tiền phòng'} ${item.roomCode} - ${item.customerName}`,
+                          category: isDeposit ? 'Tiền cọc giữ hộ' : (p.category || 'Doanh thu phòng'),
+                          description: isDeposit ? `[CỌC] Thu cọc phòng ${item.roomCode} - ${item.customerName}` : `Thu ${p.category || 'tiền phòng'} ${item.roomCode} - ${item.customerName}`,
                           status: 'Verified',
                           bookingId: item.id,
                           paymentMethod: p.method || 'Cash',
                           facilityId: facilityId,
                           facilityName: item.facilityName,
-                          note: p.ghiChu || 'Thanh toán ban đầu (Tự động)',
+                          note: isDeposit ? `Tiền cọc - Phải hoàn lại khách. ${p.ghiChu || ''}` : (p.ghiChu || 'Thanh toán ban đầu (Tự động)'),
                           created_by: currentUser?.id,
                           pic: currentUser?.collaboratorName || 'System'
                       };
@@ -368,7 +379,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (oldBooking) {
           const oldPaid = calculateTotalPaid(oldBooking);
           const newPaid = calculateTotalPaid(item);
-          const diff = newPaid - oldPaid;
+          const diffPaid = newPaid - oldPaid;
+
+          const oldDeposit = calculateTotalDeposit(oldBooking);
+          const newDeposit = calculateTotalDeposit(item);
+          const diffDeposit = newDeposit - oldDeposit;
+
+          const diff = diffPaid > 0 ? diffPaid : (diffDeposit > 0 ? diffDeposit : 0);
 
           if (diff > 0) {
               // Auto-record Revenue Transaction
@@ -377,30 +394,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               // Find the category from the last payment item if available
               let category = 'Doanh thu phòng';
               let method = 'Cash';
+              let isDepositPayment = false;
               try {
                   const payments: Payment[] = JSON.parse(item.paymentsJson || '[]');
                   if (payments.length > 0) {
                       const lastPayment = payments[payments.length - 1];
                       if (lastPayment.category) category = lastPayment.category;
                       if (lastPayment.method) method = lastPayment.method;
+                      isDepositPayment = lastPayment.category === 'Tiền cọc';
                   }
               } catch (e) {}
 
               // Prepare payload but DO NOT save yet
+              // TIỀN CỌC: category riêng để không lẫn doanh thu
               transactionToSave = {
                   id: `TR-AUTO-${Date.now()}`,
                   transactionDate: new Date().toISOString(),
                   amount: diff,
                   type: 'REVENUE',
-                  category: category,
-                  description: `Thu ${category} - Phòng ${item.roomCode} - ${item.customerName}`,
+                  category: isDepositPayment ? 'Tiền cọc giữ hộ' : category,
+                  description: isDepositPayment 
+                      ? `[CỌC] Thu cọc phòng ${item.roomCode} - ${item.customerName}` 
+                      : `Thu ${category} - Phòng ${item.roomCode} - ${item.customerName}`,
                   status: 'Verified',
                   bookingId: item.id,
                   paymentMethod: method, 
                   facilityId: facilityId,
                   facilityName: item.facilityName,
                   created_by: currentUser?.id,
-                  pic: currentUser?.collaboratorName || 'System'
+                  pic: currentUser?.collaboratorName || 'System',
+                  note: isDepositPayment ? 'Tiền cọc - Phải hoàn lại khách' : undefined
               };
           }
       }
@@ -959,6 +982,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const processCheckoutLinenReturn = async () => {};
   const handleLinenExchange = async () => {};
+
+  // HOÀN TIỀN CỌC khi checkout
+  const refundDeposit = async (booking: Booking) => {
+      const depositAmount = calculateTotalDeposit(booking);
+      if (depositAmount <= 0) {
+          notify('info', 'Booking này không có tiền cọc để hoàn.');
+          return;
+      }
+      if (booking.depositRefunded) {
+          notify('info', 'Đã hoàn cọc cho booking này rồi.');
+          return;
+      }
+
+      const facilityId = facilities.find(f => f.facilityName === booking.facilityName)?.id;
+
+      // 1. Ghi phiếu chi hoàn cọc
+      await addTransaction({
+          id: `REFUND-DEP-${Date.now()}`,
+          transactionDate: new Date().toISOString(),
+          amount: depositAmount,
+          type: 'EXPENSE',
+          category: 'Hoàn tiền cọc',
+          description: `Hoàn cọc phòng ${booking.roomCode} - ${booking.customerName}`,
+          status: 'Verified',
+          facilityId: facilityId,
+          facilityName: booking.facilityName,
+          note: `Hoàn cọc ${depositAmount.toLocaleString()}đ cho khách`,
+          created_by: currentUser?.id,
+          pic: currentUser?.collaboratorName || 'System'
+      });
+
+      // 2. Đánh dấu đã hoàn cọc trên booking
+      const updatedBooking: Booking = {
+          ...booking,
+          depositRefunded: true,
+          depositAmount: depositAmount
+      };
+      await storageService.updateBooking(updatedBooking);
+      await refreshData();
+      notify('success', `Đã hoàn cọc ${depositAmount.toLocaleString()}đ cho khách phòng ${booking.roomCode}.`);
+  };
   
   // Expose methods for logic
   const upsertSeason = async (season: Season) => { await storageService.upsertSeason(season); refreshData(); };
@@ -981,7 +1045,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshData, canAccess, notify, removeToast,
       addFacility, updateFacility, deleteFacility,
       upsertRoom, deleteRoom,
-      addBooking, updateBooking, cancelBooking, checkAvailability,
+      addBooking, updateBooking, cancelBooking, refundDeposit, checkAvailability,
       addService, updateService, deleteService,
       addTransaction, updateTransaction, deleteTransaction, addExpense,
       addCollaborator, updateCollaborator, deleteCollaborator,

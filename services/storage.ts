@@ -591,15 +591,19 @@ export const storageService = {
         };
 
         let isDeclared = mappedBooking.isDeclared;
-        if (isDeclared === undefined && mappedBooking.cleaningJson) {
+        let depositRefunded = mappedBooking.depositRefunded;
+        let depositAmount = mappedBooking.depositAmount;
+        if (mappedBooking.cleaningJson) {
             try {
                 const cleanObj = JSON.parse(mappedBooking.cleaningJson);
-                if (cleanObj && typeof cleanObj === 'object' && cleanObj.isDeclared === true) {
-                    isDeclared = true;
+                if (cleanObj && typeof cleanObj === 'object') {
+                    if (cleanObj.isDeclared === true) isDeclared = true;
+                    if (cleanObj.depositRefunded === true) depositRefunded = true;
+                    if (cleanObj.depositAmount !== undefined) depositAmount = cleanObj.depositAmount;
                 }
             } catch (e) { }
         }
-        return { ...mappedBooking, isDeclared: !!isDeclared };
+        return { ...mappedBooking, isDeclared: !!isDeclared, depositRefunded: !!depositRefunded, depositAmount: depositAmount || 0 };
     });
   },
 
@@ -611,11 +615,24 @@ export const storageService = {
         const cleanObj = payload.cleaningJson ? JSON.parse(payload.cleaningJson) : {};
         if (payload.isDeclared) cleanObj.isDeclared = true;
         else delete cleanObj.isDeclared;
+
+        if (payload.depositRefunded) cleanObj.depositRefunded = true;
+        else delete cleanObj.depositRefunded;
+        
+        if (payload.depositAmount) cleanObj.depositAmount = payload.depositAmount;
+        else delete cleanObj.depositAmount;
+
         payload.cleaningJson = JSON.stringify(cleanObj);
     } catch (e) {
-        payload.cleaningJson = JSON.stringify({ isDeclared: payload.isDeclared });
+        payload.cleaningJson = JSON.stringify({ 
+            isDeclared: payload.isDeclared, 
+            depositRefunded: payload.depositRefunded,
+            depositAmount: payload.depositAmount
+        });
     }
     delete payload.isDeclared; 
+    delete payload.depositRefunded;
+    delete payload.depositAmount;
 
     const dbPayload = {
         ...payload,
@@ -644,11 +661,24 @@ export const storageService = {
         const cleanObj = payload.cleaningJson ? JSON.parse(payload.cleaningJson) : {};
         if (payload.isDeclared) cleanObj.isDeclared = true;
         else delete cleanObj.isDeclared;
+        
+        if (payload.depositRefunded) cleanObj.depositRefunded = true;
+        else delete cleanObj.depositRefunded;
+        
+        if (payload.depositAmount) cleanObj.depositAmount = payload.depositAmount;
+        else delete cleanObj.depositAmount;
+
         payload.cleaningJson = JSON.stringify(cleanObj);
     } catch (e) {
-        payload.cleaningJson = JSON.stringify({ isDeclared: payload.isDeclared });
+        payload.cleaningJson = JSON.stringify({ 
+            isDeclared: payload.isDeclared, 
+            depositRefunded: payload.depositRefunded,
+            depositAmount: payload.depositAmount
+        });
     }
     delete payload.isDeclared;
+    delete payload.depositRefunded;
+    delete payload.depositAmount;
 
     const dbPayload = {
         ...payload,

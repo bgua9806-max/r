@@ -32,7 +32,7 @@ export const Reports: React.FC = () => {
         const payments = JSON.parse(b.paymentsJson);
         payments.forEach((p: any) => {
            const pDate = new Date(p.ngayThanhToan);
-           if (isWithinInterval(pDate, { start, end })) {
+           if (isWithinInterval(pDate, { start, end }) && p.category !== 'Tiền cọc') {
               revenue += Number(p.soTien);
            }
         });

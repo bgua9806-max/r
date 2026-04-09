@@ -83,7 +83,7 @@ const PAYMENT_CATEGORIES = ['Tiền phòng', 'Tiền Minibar', 'Tiền giặt �
 export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, booking, defaultData, initialTab = 'info', initialCancellation = false }) => {
   const { 
       facilities, rooms, services, currentUser, bookings,
-      addBooking, updateBooking, cancelBooking, checkAvailability,
+      addBooking, updateBooking, cancelBooking, refundDeposit, checkAvailability,
       notify, triggerWebhook, upsertRoom, refreshData, webhooks, addGuestProfile,
       updateService, addInventoryTransaction, getGeminiApiKey, processLendingUsage,
       syncHousekeepingTasks, settings
@@ -378,7 +378,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       groupMembers.forEach(m => {
           total += m.totalRevenue;
           const pList = safeJsonParse(m.paymentsJson);
-          const mPaid = pList.reduce((sum: number, p: Payment) => sum + Number(p.soTien), 0);
+          const mPaid = pList.filter((p: Payment) => p.category !== 'Tiền cọc').reduce((sum: number, p: Payment) => sum + Number(p.soTien), 0);
           paid += mPaid;
       });
 
@@ -387,7 +387,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
 
   const serviceTotal = usedServices.reduce((sum, s) => sum + s.total, 0);
   const totalRevenue = Number(formData.price || 0) + Number(formData.extraFee || 0) + serviceTotal;
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.soTien), 0);
+  const totalPaid = payments.filter(p => p.category !== 'Tiền cọc').reduce((sum, p) => sum + Number(p.soTien), 0);
+  const totalDeposit = payments.filter(p => p.category === 'Tiền cọc').reduce((sum, p) => sum + Number(p.soTien), 0);
   const remaining = totalRevenue - totalPaid;
 
   useEffect(() => {
@@ -537,7 +538,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
       setFormData(prev => ({
           ...prev,
           paymentsJson: JSON.stringify(nextPayments),
-          remainingAmount: totalRevenue - (totalPaid + amount)
+          remainingAmount: totalRevenue - (totalPaid + (paymentCategory !== 'Tiền cọc' ? amount : 0))
       }));
 
       // If existing booking, save immediately
@@ -545,7 +546,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
           setIsSubmitting(true);
           try {
               const currentRevenue = Number(formData.price || 0) + Number(formData.extraFee || 0) + serviceTotal;
-              const currentPaid = nextPayments.reduce((sum, p) => sum + Number(p.soTien), 0);
+              const currentPaid = nextPayments.filter(p => p.category !== 'Tiền cọc').reduce((sum, p) => sum + Number(p.soTien), 0);
               const currentRemaining = currentRevenue - currentPaid;
 
               const updatedBooking: Booking = {
@@ -578,30 +579,53 @@ export const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, boo
               let remainingToDistribute = amount;
               const updates = [];
 
-              for (const member of groupMembers) {
-                  if (remainingToDistribute <= 0) break;
-                  if (member.remainingAmount > 0) {
-                      const payForRoom = Math.min(member.remainingAmount, remainingToDistribute);
-                      
-                      const pList = safeJsonParse(member.paymentsJson);
+              if (paymentCategory === 'Tiền cọc') {
+                  // Tiền cọc Minibar/Hư hỏng không phân bổ trừ vào tiền phòng. Gom hết gán cho Leader.
+                  const targetBooking = groupMembers.find(b => b.isGroupLeader) || booking || groupMembers[0];
+                  if (targetBooking) {
+                      const pList = safeJsonParse(targetBooking.paymentsJson);
                       const newPayment: Payment = {
                           id: crypto.randomUUID(),
                           ngayThanhToan: new Date().toISOString(),
-                          soTien: payForRoom,
+                          soTien: amount,
                           method: payMethod,
-                          ghiChu: `${payNote} (Gộp)`,
+                          ghiChu: `${payNote} (Cọc đoàn)`,
                           category: paymentCategory
                       };
                       const updatedPList = [...pList, newPayment];
-                      
                       const updatedMember: Booking = {
-                          ...member,
-                          paymentsJson: JSON.stringify(updatedPList),
-                          remainingAmount: member.totalRevenue - (member.totalRevenue - member.remainingAmount + payForRoom)
+                          ...targetBooking,
+                          paymentsJson: JSON.stringify(updatedPList)
                       };
                       updates.push(updateBooking(updatedMember));
-                      
-                      remainingToDistribute -= payForRoom;
+                      remainingToDistribute = 0;
+                  }
+              } else {
+                  for (const member of groupMembers) {
+                      if (remainingToDistribute <= 0) break;
+                      if (member.remainingAmount > 0) {
+                          const payForRoom = Math.min(member.remainingAmount, remainingToDistribute);
+                          
+                          const pList = safeJsonParse(member.paymentsJson);
+                          const newPayment: Payment = {
+                              id: crypto.randomUUID(),
+                              ngayThanhToan: new Date().toISOString(),
+                              soTien: payForRoom,
+                              method: payMethod,
+                              ghiChu: `${payNote} (Gộp)`,
+                              category: paymentCategory
+                          };
+                          const updatedPList = [...pList, newPayment];
+                          
+                          const updatedMember: Booking = {
+                              ...member,
+                              paymentsJson: JSON.stringify(updatedPList),
+                              remainingAmount: member.totalRevenue - (member.totalRevenue - member.remainingAmount + payForRoom)
+                          };
+                          updates.push(updateBooking(updatedMember));
+                          
+                          remainingToDistribute -= payForRoom;
+                      }
                   }
               }
               
@@ -1524,7 +1548,7 @@ If a field is not visible, return empty string "".`;
                       </div>
                       <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">Điện thoại</label>
-                          <input required className="w-full border rounded p-2.5 text-sm bg-white text-slate-900 shadow-sm" value={formData.customerPhone} onChange={e => setFormData({...formData, customerPhone: e.target.value})} placeholder="09xxxx" />
+                          <input className="w-full border rounded p-2.5 text-sm bg-white text-slate-900 shadow-sm" value={formData.customerPhone} onChange={e => setFormData({...formData, customerPhone: e.target.value})} placeholder="09xxxx" />
                       </div>
                    </div>
 
@@ -1801,6 +1825,30 @@ If a field is not visible, return empty string "".`;
                        {displayRemaining > 0 && <button type="button" onClick={handleQuickPayAll} className="w-full sm:w-auto px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold shadow-lg hover:bg-rose-700 transition-all active:scale-95 uppercase tracking-widest">Thu nhanh</button>}
                     </div>
                     {/* ... (Rest of Payment UI same as before) ... */}
+                     {/* TIEN COC SECTION */}
+                     {totalDeposit > 0 && !isGroupPaymentMode && (
+                         <div className={`flex flex-col sm:flex-row justify-between items-center p-4 rounded-2xl border shadow-sm gap-3 ${booking?.depositRefunded ? 'bg-slate-50 border-slate-200' : 'bg-amber-50 border-amber-200'}`}>
+                             <div className="flex items-center gap-3 w-full sm:w-auto">
+                                 <div className={`p-2 rounded-full ${booking?.depositRefunded ? 'bg-slate-400 text-white' : 'bg-amber-500 text-white'}`}>
+                                     <Banknote size={20}/>
+                                 </div>
+                                 <div>
+                                     <span className="font-black text-[10px] uppercase tracking-widest opacity-70 block mb-0.5">TIEN COC (Tach rieng - Khong tinh vao doanh thu)</span>
+                                     <span className={`font-black text-xl ${formData?.depositRefunded ? 'text-slate-500 line-through' : 'text-amber-700'}`}>{totalDeposit.toLocaleString()} D</span>
+                                     {formData?.depositRefunded && <span className="ml-2 text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">Da hoan coc</span>}
+                                 </div>
+                             </div>
+                             {formData && !formData.depositRefunded && (
+                                 <button 
+                                     type="button" 
+                                     onClick={() => { if(confirm(`Xac nhan hoan coc ${totalDeposit.toLocaleString()}d cho khach?`)) refundDeposit(formData as Booking); }}
+                                     className="w-full sm:w-auto px-4 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold shadow-lg hover:bg-amber-700 transition-all active:scale-95 uppercase tracking-widest flex items-center justify-center gap-2"
+                                 >
+                                     <Banknote size={14}/> Hoan Coc
+                                 </button>
+                             )}
+                         </div>
+                     )}
                     <div className="flex flex-col md:flex-row gap-6">
                         {/* History */}
                         {!isGroupPaymentMode && (

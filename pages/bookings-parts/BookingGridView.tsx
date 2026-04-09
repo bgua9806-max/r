@@ -157,7 +157,23 @@ export const BookingGridView: React.FC<BookingGridViewProps> = ({
                                        {b ? (
                                            <div className="space-y-1.5 md:space-y-3">
                                                <div>
-                                                   <div className="font-bold text-slate-800 text-xs md:text-sm truncate" title={b.customerName}>{b.customerName}</div>
+                                                                                                      <div className="font-bold text-slate-800 text-xs md:text-sm truncate" title={b.customerName}>{b.customerName}</div>
+                                                   
+                                                   {/* NEW: Deposit Badge */}
+                                                   {(() => {
+                                                       let depositVal = 0;
+                                                       try {
+                                                           const pList = JSON.parse(b.paymentsJson || '[]');
+                                                           depositVal = pList.filter((p: any) => p.category === 'Tiền cọc').reduce((s: number, p: any) => s + Number(p.soTien), 0);
+                                                       } catch(e) {}
+                                                       return depositVal > 0 ? (
+                                                           <div className="mt-1 flex items-center gap-1 text-[9px] md:text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded w-fit">
+                                                               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                                               Đã cọc {(depositVal/1000).toLocaleString()}k
+                                                               {b.depositRefunded && <span className="ml-1 text-emerald-600 bg-emerald-100 px-1 rounded">Đã hoàn</span>}
+                                                           </div>
+                                                       ) : null;
+                                                   })()}
                                                    
                                                    {/* NEW: Guest Info Badge */}
                                                    {guestStats.total > 0 && (

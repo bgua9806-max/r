@@ -269,6 +269,8 @@ export interface Booking {
   lendingJson?: string; // Đồ khách mượn (LendingItem[])
   guestsJson?: string; // Lưu danh sách Guest[]
   isDeclared?: boolean; // New field: Đã khai báo lưu trú hay chưa
+  depositAmount?: number; // Tổng tiền cọc đã thu (tách riêng, không tính vào doanh thu)
+  depositRefunded?: boolean; // Đã hoàn cọc hay chưa
   
   // GROUP BOOKING FIELDS
   groupId?: string; // ID chung của đoàn

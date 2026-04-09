@@ -8,7 +8,7 @@ import {
 import { 
   TrendingUp, Calendar, Wallet, TrendingDown, Clock, LogIn, LogOut, BedDouble, 
   CreditCard, Brush, Package, CheckCircle2, ChevronRight, Zap, Star, DollarSign,
-  UserX, ShieldAlert, CloudLightning, Send
+  UserX, ShieldAlert, CloudLightning, Send, Lock
 } from 'lucide-react';
 import { 
   format, endOfDay, endOfMonth, endOfYear, 
@@ -48,6 +48,7 @@ export const Dashboard: React.FC = () => {
     let totalCashRevenue = 0;
     let totalTransferRevenue = 0;
     let totalRevenue = 0; // FROM BOOKINGS
+    let totalHoldingDeposit = 0; // FROM BOOKINGS (Tiền cọc)
     let totalExpense = 0; // FROM TRANSACTIONS (New Logic)
     let totalBookingValue = 0;
     
@@ -58,10 +59,14 @@ export const Dashboard: React.FC = () => {
         const pDate = new Date(p.ngayThanhToan);
         if (isValid(pDate) && isWithinInterval(pDate, { start, end })) {
           const amount = Number(p.soTien);
-          totalRevenue += amount;
-          const isCash = p.method === 'Cash' || (!p.method && !(p.ghiChu || '').toLowerCase().match(/ck|chuyển|transfer|thẻ/));
-          if (isCash) totalCashRevenue += amount;
-          else totalTransferRevenue += amount;
+          if (p.category === 'Tiền cọc') {
+              totalHoldingDeposit += amount;
+          } else {
+              totalRevenue += amount;
+              const isCash = p.method === 'Cash' || (!p.method && !(p.ghiChu || '').toLowerCase().match(/ck|chuyển|transfer|thẻ/));
+              if (isCash) totalCashRevenue += amount;
+              else totalTransferRevenue += amount;
+          }
         }
       });
       
@@ -128,7 +133,7 @@ export const Dashboard: React.FC = () => {
              const payments = JSON.parse(b.paymentsJson || '[]');
              payments.forEach((p: any) => {
                 const pd = new Date(p.ngayThanhToan);
-                if(isValid(pd) && isSameDay(pd, day)) rev += Number(p.soTien);
+                if(isValid(pd) && isSameDay(pd, day) && p.category !== 'Tiền cọc') rev += Number(p.soTien);
              });
              const checkin = parseISO(b.checkinDate);
              if(isValid(checkin) && isSameDay(checkin, day) && (b.status === 'Confirmed' || b.status === 'CheckedIn')) {
@@ -158,7 +163,7 @@ export const Dashboard: React.FC = () => {
     };
 
     return {
-       totalRevenue, totalCashRevenue, totalTransferRevenue, totalExpense, totalBookingValue,
+       totalRevenue, totalCashRevenue, totalTransferRevenue, totalExpense, totalBookingValue, totalHoldingDeposit,
        netProfit: totalRevenue - totalExpense,
        checkinsToday, checkoutsToday, occupancyRate,
        alerts, chartData
@@ -276,7 +281,7 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <KPICard 
                 title="Thực thu (Booking)" 
                 value={`${dashboardData.totalRevenue.toLocaleString()} ₫`} 
@@ -295,6 +300,7 @@ export const Dashboard: React.FC = () => {
                 onClick={() => navigate('/expenses')}
               />
               <KPICard title="Lợi nhuận ròng" value={`${dashboardData.netProfit.toLocaleString()} ₫`} sub={dashboardData.netProfit >= 0 ? "Thặng dư tài chính" : "Đang thâm hụt"} icon={DollarSign} colorClass="bg-emerald-500 text-emerald-500" />
+              <KPICard title="Tiền cọc giữ hộ" value={`${dashboardData.totalHoldingDeposit.toLocaleString()} ₫`} sub="Sẽ phải hoàn lại khách" icon={Lock} colorClass="bg-amber-500 text-amber-500" />
               <KPICard title="Giá trị Booking" value={`${dashboardData.totalBookingValue.toLocaleString()} ₫`} sub="Doanh số ghi nhận trong kỳ" icon={TrendingUp} colorClass="bg-indigo-500 text-indigo-500" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

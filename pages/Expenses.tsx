@@ -22,7 +22,7 @@ export const Expenses: React.FC = () => {
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'All' | 'REVENUE' | 'EXPENSE'>('All');
+  const [typeFilter, setTypeFilter] = useState<'All' | 'REVENUE' | 'EXPENSE' | 'DEPOSIT'>('All');
   
   const [filterMode, setFilterMode] = useState<FilterMode>('month');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -30,7 +30,8 @@ export const Expenses: React.FC = () => {
   const typeOptions: FilterOption[] = [
       { label: 'Tất cả', value: 'All' },
       { label: 'Phiếu Thu', value: 'REVENUE' },
-      { label: 'Phiếu Chi', value: 'EXPENSE' }
+      { label: 'Phiếu Chi', value: 'EXPENSE' },
+      { label: 'Tiền Cọc', value: 'DEPOSIT'}
   ];
 
   const handleNavigate = (direction: number) => {
@@ -68,7 +69,12 @@ export const Expenses: React.FC = () => {
         if (filterMode === 'day') matchesTime = isSameDay(tDate, currentDate);
         else matchesTime = isWithinInterval(tDate, { start, end });
 
-        const matchesType = typeFilter === 'All' || t.type === typeFilter;
+        const isDeposit = ['Tiền cọc giữ hộ', 'Hoàn tiền cọc'].includes(t.category);
+        
+        let matchesType = false;
+        if (typeFilter === 'All') matchesType = true;
+        else if (typeFilter === 'DEPOSIT') matchesType = isDeposit;
+        else matchesType = t.type === typeFilter && !isDeposit;
         
         const matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                               (t.facilityName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
