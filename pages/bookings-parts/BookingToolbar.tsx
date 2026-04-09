@@ -73,20 +73,22 @@ export const BookingToolbar: React.FC<BookingToolbarProps> = ({
 
   if (viewMode === 'grid') {
     return (
-        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col xl:flex-row gap-4 justify-between items-center shrink-0 z-20 relative animate-in fade-in slide-in-from-top-2">
-            <div className="flex flex-1 flex-wrap items-center gap-4 w-full xl:w-auto">
-                 <div className="flex bg-slate-100 p-1 rounded-lg shrink-0">
-                     <button onClick={() => setViewMode('timeline')} className="p-2 rounded-md transition-all text-slate-500 hover:text-slate-700" title="Xem Lịch Timeline"><Calendar size={18}/></button>
-                     <button onClick={() => setViewMode('grid')} className="p-2 rounded-md transition-all bg-white text-brand-600 shadow-sm font-medium" title="Sơ đồ phòng (Grid)"><LayoutGrid size={18}/></button>
-                 </div>
-                 
-                 {/* DATE NAVIGATOR FOR GRID VIEW */}
-                 <div className="flex items-center border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden w-full md:w-auto">
-                    <button onClick={() => setCurrentDate(addDays(currentDate, -1))} className="p-2 hover:bg-slate-50 border-r border-slate-100"><ChevronLeft size={18} className="text-slate-500" /></button>
-                    <span className="flex-1 px-4 text-sm font-semibold text-slate-700 min-w-[120px] text-center capitalize whitespace-nowrap">
-                        {format(currentDate, 'EEEE, dd/MM', { locale: vi })}
-                    </span>
-                    <button onClick={() => setCurrentDate(addDays(currentDate, 1))} className="p-2 hover:bg-slate-50 border-l border-slate-100"><ChevronRight size={18} className="text-slate-500"/></button>
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center shrink-0 z-20 relative animate-in fade-in slide-in-from-top-2">
+            <div className="flex flex-1 flex-col md:flex-row flex-wrap items-start md:items-center gap-4 w-full xl:w-auto">
+                 <div className="flex items-center gap-3 w-full md:w-auto">
+                     <div className="flex bg-slate-100 p-1 rounded-lg shrink-0">
+                         <button onClick={() => setViewMode('timeline')} className="p-2 rounded-md transition-all text-slate-500 hover:text-slate-700" title="Xem Lịch Timeline"><Calendar size={18}/></button>
+                         <button onClick={() => setViewMode('grid')} className="p-2 rounded-md transition-all bg-white text-brand-600 shadow-sm font-medium" title="Sơ đồ phòng (Grid)"><LayoutGrid size={18}/></button>
+                     </div>
+                     
+                     {/* DATE NAVIGATOR FOR GRID VIEW */}
+                     <div className="flex items-center border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden flex-1 md:w-auto">
+                        <button onClick={() => setCurrentDate(addDays(currentDate, -1))} className="p-2 hover:bg-slate-50 border-r border-slate-100"><ChevronLeft size={18} className="text-slate-500" /></button>
+                        <span className="flex-1 px-2 md:px-4 text-[13px] md:text-sm font-semibold text-slate-700 md:min-w-[120px] text-center capitalize whitespace-nowrap overflow-hidden text-ellipsis">
+                            {format(currentDate, 'EEEE, dd/MM', { locale: vi })}
+                        </span>
+                        <button onClick={() => setCurrentDate(addDays(currentDate, 1))} className="p-2 hover:bg-slate-50 border-l border-slate-100"><ChevronRight size={18} className="text-slate-500"/></button>
+                     </div>
                  </div>
                  
                  <button onClick={() => setCurrentDate(new Date())} className="hidden md:block text-xs font-semibold text-brand-600 hover:bg-brand-50 px-3 py-2 rounded-lg border border-brand-200 transition-colors shrink-0">Hôm nay</button>
@@ -185,30 +187,31 @@ export const BookingToolbar: React.FC<BookingToolbarProps> = ({
         {/* 3. COMPACT TOOLBAR FOR TIMELINE */}
         <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col xl:flex-row gap-3 justify-between items-start xl:items-center shrink-0 z-20 relative">
             <div className="flex flex-col md:flex-row flex-wrap items-start md:items-center gap-3 w-full xl:w-auto">
-                <div className="flex gap-3 w-full md:w-auto">
+                <div className="flex items-center gap-3 w-full md:w-auto">
                     <div className="flex bg-slate-100 p-1 rounded-lg shrink-0">
                         <button onClick={() => setViewMode('timeline')} className="p-2 rounded-md transition-all bg-white text-brand-600 shadow-sm font-medium"><Calendar size={18}/></button>
                         <button onClick={() => setViewMode('grid')} className="p-2 rounded-md transition-all text-slate-500 hover:text-slate-700"><LayoutGrid size={18}/></button>
                     </div>
-                    <div className="flex bg-slate-100 p-1 rounded-lg shrink-0 flex-1 md:flex-none justify-center">
-                        {(['Day', 'Week', 'Month'] as CalendarViewMode[]).map(m => (
-                            <button key={m} onClick={() => setCalendarMode(m)} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${calendarMode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                                {m === 'Day' ? 'Ngày' : m === 'Week' ? 'Tuần' : 'Tháng'}
-                            </button>
-                        ))}
+
+                    <div className="flex items-center border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden flex-1 md:w-auto">
+                        <button onClick={() => navigateDate(-1)} className="p-2 hover:bg-slate-50 border-r border-slate-100"><ChevronLeft size={18} className="text-slate-500" /></button>
+                        <span className="flex-1 px-2 md:px-4 text-[13px] md:text-sm font-semibold text-slate-700 md:min-w-[120px] text-center capitalize whitespace-nowrap overflow-hidden text-ellipsis">
+                        {calendarMode === 'Day' ? format(currentDate, 'EEEE, dd/MM', { locale: vi }) : 
+                            calendarMode === 'Month' ? format(currentDate, 'MMMM yyyy', { locale: vi }) : 
+                            `${format(dateRange.start, 'dd/MM')} - ${format(dateRange.end, 'dd/MM')}`}
+                        </span>
+                        <button onClick={() => navigateDate(1)} className="p-2 hover:bg-slate-50 border-l border-slate-100"><ChevronRight size={18} className="text-slate-500"/></button>
                     </div>
                 </div>
 
-                <div className="flex items-center border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden w-full md:w-auto">
-                    <button onClick={() => navigateDate(-1)} className="p-2 hover:bg-slate-50 border-r border-slate-100"><ChevronLeft size={18} className="text-slate-500" /></button>
-                    <span className="flex-1 px-4 text-sm font-semibold text-slate-700 min-w-[120px] text-center capitalize whitespace-nowrap">
-                    {calendarMode === 'Day' ? format(currentDate, 'EEEE, dd/MM', { locale: vi }) : 
-                        calendarMode === 'Month' ? format(currentDate, 'MMMM yyyy', { locale: vi }) : 
-                        `${format(dateRange.start, 'dd/MM')} - ${format(dateRange.end, 'dd/MM')}`}
-                    </span>
-                    <button onClick={() => navigateDate(1)} className="p-2 hover:bg-slate-50 border-l border-slate-100"><ChevronRight size={18} className="text-slate-500"/></button>
+                <div className="flex bg-slate-100 p-1 rounded-lg shrink-0 w-full md:w-auto justify-center">
+                    {(['Day', 'Week', 'Month'] as CalendarViewMode[]).map(m => (
+                        <button key={m} onClick={() => setCalendarMode(m)} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-bold rounded-md transition-all ${calendarMode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            {m === 'Day' ? 'Ngày' : m === 'Week' ? 'Tuần' : 'Tháng'}
+                        </button>
+                    ))}
                 </div>
-                
+
                 <button onClick={() => setCurrentDate(new Date())} className="hidden md:block text-xs font-semibold text-brand-600 hover:bg-brand-50 px-3 py-2 rounded-lg border border-brand-200 transition-colors shrink-0">Hôm nay</button>
             </div>
 
