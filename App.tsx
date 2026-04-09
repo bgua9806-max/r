@@ -73,9 +73,17 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         if (res.missing) setSchemaError(true);
     });
 
+    // Auto collapse sidebar after 5 seconds on desktop
+    const autoCollapseTimer = setTimeout(() => {
+        if (window.innerWidth >= 768) {
+            setSidebarOpen(false);
+        }
+    }, 5000);
+
     return () => {
         window.removeEventListener('resize', handleResize);
         clearInterval(checkInterval);
+        clearTimeout(autoCollapseTimer);
     };
   }, []);
 

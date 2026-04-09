@@ -109,7 +109,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
           )}
       </div>
 
-      <nav className="flex-1 px-2 space-y-1 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 px-2 space-y-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
         {menuItems.filter(i => canAccess(i.to)).map((item) => {
           const isActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
           
