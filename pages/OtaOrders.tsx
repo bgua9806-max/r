@@ -20,15 +20,16 @@ const processOtaGroups = (orders: OtaOrder[]) => {
         let groupKey = order.id; // Default unique key
 
         // Logic 1: Expedia Style (8 ký tự đầu giống nhau)
-        if (order.platform === 'Expedia' && order.bookingCode.length >= 8) {
+        if (order.platform === 'Expedia' && order.bookingCode && order.bookingCode.length >= 8) {
             const prefix = order.bookingCode.substring(0, 8);
             // Unique key combining platform + prefix + checkin (avoid collision with different dates)
-            groupKey = `EXP_${prefix}_${order.checkIn.substring(0,10)}`; 
+            const checkInStr = order.checkIn ? order.checkIn.substring(0,10) : 'N/A';
+            groupKey = `EXP_${prefix}_${checkInStr}`; 
         } 
         // Logic 2: General (Same Guest + Same CheckIn + Same Platform)
         else {
             const safeName = (order.guestName || '').toLowerCase().trim();
-            const safeDate = order.checkIn.substring(0, 10);
+            const safeDate = order.checkIn ? order.checkIn.substring(0, 10) : 'N/A';
             groupKey = `GEN_${order.platform}_${safeName}_${safeDate}`;
         }
 
@@ -41,7 +42,7 @@ const processOtaGroups = (orders: OtaOrder[]) => {
     Object.values(groups).forEach(group => {
         if (group.length > 1) {
             // Sort nội bộ nhóm theo mã booking để thứ tự Phòng 1, Phòng 2 đúng
-            group.sort((a, b) => a.bookingCode.localeCompare(b.bookingCode));
+            group.sort((a, b) => (a.bookingCode || '').localeCompare(b.bookingCode || ''));
             
             group.forEach((order, index) => {
                 processedOrders.push({
@@ -212,7 +213,7 @@ export const OtaOrders: React.FC = () => {
                       guest: o.guestName,
                       platform: o.platform,
                       amount: o.totalAmount,
-                      checkIn: format(parseISO(o.checkIn), 'dd/MM/yyyy')
+                      checkIn: o.checkIn ? format(parseISO(o.checkIn), 'dd/MM/yyyy') : '--'
                   }))
               }
           });
@@ -397,8 +398,8 @@ export const OtaOrders: React.FC = () => {
                             </tr>
                         ) : (
                             displayData.map((order, idx) => {
-                                const checkin = parseISO(order.checkIn);
-                                const checkout = parseISO(order.checkOut);
+                                const checkin = order.checkIn ? parseISO(order.checkIn) : new Date('invalid');
+                                const checkout = order.checkOut ? parseISO(order.checkOut) : new Date('invalid');
                                 const isValidDates = isValid(checkin) && isValid(checkout);
                                 const isToday = isValidDates && isSameDay(checkin, new Date());
                                 const styles = getPlatformConfig(order.platform);
@@ -534,7 +535,7 @@ export const OtaOrders: React.FC = () => {
                                         <td className="p-4 align-top text-right">
                                             <div className="flex flex-col items-end gap-1">
                                                 <div className={`font-black text-sm ${isCancelled || isConfirmed ? 'text-slate-400 line-through' : 'text-brand-600'}`}>
-                                                    {order.totalAmount.toLocaleString()} ₫
+                                                    {(order.totalAmount || 0).toLocaleString()} ₫
                                                 </div>
                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1 ${order.paymentStatus === 'Prepaid' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-orange-50 text-orange-700 border border-orange-100'}`}>
                                                     {order.paymentStatus === 'Prepaid' ? 'Prepaid' : 'Tại KS'}
@@ -617,8 +618,8 @@ export const OtaOrders: React.FC = () => {
             ) : (
                 displayData.map(order => {
                     // ... (Mobile item render same as desktop, omitted for brevity, logic follows OtaOrders original file)
-                    const checkin = parseISO(order.checkIn);
-                    const checkout = parseISO(order.checkOut);
+                    const checkin = order.checkIn ? parseISO(order.checkIn) : new Date('invalid');
+                    const checkout = order.checkOut ? parseISO(order.checkOut) : new Date('invalid');
                     const isValidDates = isValid(checkin) && isValid(checkout);
                     const isToday = isValidDates && isSameDay(checkin, new Date());
                     const styles = getPlatformConfig(order.platform);
@@ -702,7 +703,7 @@ export const OtaOrders: React.FC = () => {
 
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
                                 <div>
-                                    <div className={`text-lg font-black ${isCancelled ? 'text-slate-400 line-through' : 'text-brand-700'}`}>{order.totalAmount.toLocaleString()}</div>
+                                    <div className={`text-lg font-black ${isCancelled ? 'text-slate-400 line-through' : 'text-brand-700'}`}>{(order.totalAmount || 0).toLocaleString()}</div>
                                 </div>
 
                                 {/* ACTION BUTTONS MOBILE */}
