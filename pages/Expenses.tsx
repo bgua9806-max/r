@@ -318,13 +318,13 @@ export const Expenses: React.FC = () => {
                         </button>
                     ))}
                     <div className="w-[1px] h-5 bg-slate-300 mx-1 shrink-0"></div>
-                    {(['All', 'REVENUE', 'EXPENSE'] as const).map((t) => (
+                    {(['All', 'REVENUE', 'EXPENSE', 'DEPOSIT'] as const).map((t) => (
                         <button 
                             key={t}
-                            onClick={() => setTypeFilter(t)}
+                            onClick={() => setTypeFilter(t as any)}
                             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${typeFilter === t ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-500 border-slate-200'}`}
                         >
-                            {t === 'All' ? 'Tất cả' : t === 'REVENUE' ? 'Khoản Thu' : 'Khoản Chi'}
+                            {t === 'All' ? 'Tất cả' : t === 'REVENUE' ? 'Khoản Thu' : t === 'EXPENSE' ? 'Khoản Chi' : 'Tiền Cọc'}
                         </button>
                     ))}
                 </div>
