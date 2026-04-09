@@ -55,7 +55,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
       className={`h-full bg-[#0f172a] text-slate-300 flex flex-col border-r border-slate-800 shadow-xl overflow-hidden transition-all duration-300 w-full`}
     >
       {/* Header Sidebar */}
-      <div className="h-16 flex items-center px-4 border-b border-slate-800/80 bg-[#020617] justify-between">
+      <div className={`h-16 flex items-center px-4 border-b border-slate-800/80 bg-[#020617] ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'justify-between'}`}>
         <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
           <div className="w-9 h-9 rounded bg-gradient-to-tr from-amber-200 via-yellow-400 to-amber-600 flex items-center justify-center text-slate-900 shrink-0 shadow-lg border border-amber-200">
              <span className="font-black font-sans text-xl leading-none mt-0.5 tracking-tighter">M</span>
@@ -76,7 +76,8 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
           {/* TIMEKEEPING BUTTON */}
           <button 
              onClick={() => setTimekeepingOpen(true)}
-             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg group relative overflow-hidden
+             className={`w-full flex items-center py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg group relative overflow-hidden
+                ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'gap-3 px-3'}
                 ${activeLog 
                     ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-600/30 hover:bg-emerald-600/20' 
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'}
@@ -97,7 +98,8 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
           {currentUser?.role !== 'Buồng phòng' && (
             <button 
                onClick={() => setShiftModalOpen(true)}
-               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg
+               className={`w-full flex items-center py-2.5 rounded-lg font-bold text-sm transition-all shadow-lg
+                  ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'gap-3 px-3'}
                   ${currentShift ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 hover:bg-blue-600/20' : 'bg-brand-600 text-white hover:bg-brand-500'}
                `}
             >
@@ -120,7 +122,8 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
               onClick={() => window.innerWidth < 768 && toggle()} // Auto close on mobile click
               title={!isOpen ? item.label : ''}
               className={`
-                relative flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group mb-1
+                relative flex items-center py-3 rounded-lg transition-all duration-200 group mb-1
+                ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'gap-3 px-3'}
                 ${isActive 
                   ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/20 font-medium' 
                   : 'hover:bg-slate-800/80 hover:text-white text-slate-400'}
@@ -159,7 +162,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
       <div className="p-3 border-t border-slate-800/80 bg-[#020617]">
         <button 
            onClick={handleLogout}
-           className={`flex items-center gap-3 w-full p-2 rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-all group ${(!isOpen && window.innerWidth >= 768) ? 'justify-center' : ''}`}
+           className={`flex items-center w-full py-2 rounded-lg hover:bg-red-500/10 hover:text-red-400 transition-all group ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'gap-3 px-3'}`}
         >
           <LogOut size={20} className="shrink-0" />
           <span className={`text-sm font-medium whitespace-nowrap overflow-hidden transition-all duration-200 ${(isOpen || window.innerWidth < 768) ? 'w-auto opacity-100' : 'w-0 opacity-0 hidden'}`}>
