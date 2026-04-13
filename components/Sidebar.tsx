@@ -55,8 +55,8 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
       className={`h-full bg-[#0f172a] text-slate-300 flex flex-col border-r border-slate-800 shadow-xl overflow-hidden transition-all duration-300 w-full`}
     >
       {/* Header Sidebar */}
-      <div className={`h-16 flex items-center px-4 border-b border-slate-800/80 bg-[#020617] ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'justify-between'}`}>
-        <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
+      <div className={`h-16 flex items-center border-b border-slate-800/80 bg-[#020617] ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'justify-between px-4'}`}>
+        <div className={`flex items-center overflow-hidden whitespace-nowrap ${(!isOpen && window.innerWidth >= 768) ? 'justify-center' : 'gap-3'}`}>
           <div className="w-9 h-9 rounded bg-gradient-to-tr from-amber-200 via-yellow-400 to-amber-600 flex items-center justify-center text-slate-900 shrink-0 shadow-lg border border-amber-200">
              <span className="font-black font-sans text-xl leading-none mt-0.5 tracking-tighter">M</span>
           </div>

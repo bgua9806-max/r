@@ -814,12 +814,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const queryOtaOrders = async (params: { page: number, pageSize: number, tab: string, search: string, dateFilter?: any }) => {
       if (storageService.isUsingMock()) return { data: [], hasMore: false };
-      
+
+      // === TAB LỊCH SỬ HỦY: Gộp đơn hủy OTA + đơn hủy thủ công từ bảng bookings ===
+      if (params.tab === 'Cancelled') {
+          try {
+              // Nguồn 1: Đơn hủy OTA (status = 'Confirmed' trong ota_orders)
+              let otaQuery = supabase.from('ota_orders').select('*').eq('status', 'Confirmed').order('email_date', { ascending: false });
+              if (params.search) {
+                  otaQuery = otaQuery.or(`guest_name.ilike.%${params.search}%,booking_code.ilike.%${params.search}%`);
+              }
+              const { data: otaData } = await otaQuery;
+
+              // Nguồn 2: Đơn hủy thủ công từ bảng bookings (lọc bằng JS để tránh lỗi tên cột)
+              const { data: cancelledBookings, error: bkError } = await supabase
+                  .from('bookings').select('*').eq('status', 'Cancelled');
+              if (bkError) console.error('Lỗi query bookings:', bkError);
+
+              // Map bookings sang format OtaOrder + lọc tìm kiếm bằng JS
+              const mappedBookings: OtaOrder[] = (cancelledBookings || [])
+                  .filter((b: any) => {
+                      if (!params.search) return true;
+                      const s = params.search.toLowerCase();
+                      const name = (b.customername || b.customerName || '').toLowerCase();
+                      const room = (b.roomcode || b.roomCode || '').toLowerCase();
+                      const phone = (b.customerphone || b.customerPhone || '').toLowerCase();
+                      const bookingId = (b.id || '').toLowerCase();
+                      return name.includes(s) || room.includes(s) || phone.includes(s) || bookingId.includes(s);
+                  })
+                  .map((b: any) => ({
+                      id: 'BK-' + b.id,
+                      platform: 'Trực tiếp' as any,
+                      bookingCode: (b.id || '').substring(0, 10).toUpperCase(),
+                      guestName: b.customername || b.customerName || 'Khách lẻ',
+                      guestPhone: b.customerphone || b.customerPhone || '',
+                      emailDate: b.createddate || b.createdDate || b.created_at || '',
+                      checkIn: b.checkindate || b.checkinDate || '',
+                      checkOut: b.checkoutdate || b.checkoutDate || '',
+                      roomType: 'Phòng ' + (b.roomcode || b.roomCode || ''),
+                      roomQuantity: 1,
+                      guestCount: (Number(b.adults) || 1) + (Number(b.children) || 0),
+                      guestDetails: '',
+                      breakfastStatus: '',
+                      totalAmount: b.price || 0,
+                      netAmount: 0,
+                      paymentStatus: 'Pay at hotel',
+                      status: 'Confirmed' as any,
+                      assignedRoom: b.roomcode || b.roomCode || '',
+                      cancellationDate: b.createddate || b.createdDate || b.created_at || '',
+                      notes: b.note || `Nguồn: ${b.source || 'Trực tiếp'}`,
+                  }));
+
+              // Gộp 2 nguồn, sắp xếp theo thời gian mới nhất
+              const merged = [...mapOtaData(otaData || []), ...mappedBookings];
+              merged.sort((a, b) => new Date(b.emailDate || 0).getTime() - new Date(a.emailDate || 0).getTime());
+
+              // Phân trang
+              const from = params.page * params.pageSize;
+              const to = from + params.pageSize;
+              return {
+                  data: merged.slice(from, to),
+                  hasMore: merged.length > to
+              };
+          } catch (e) {
+              console.error('Lỗi query lịch sử hủy:', e);
+              return { data: [], hasMore: false };
+          }
+      }
+
+      // === CÁC TAB KHÁC: Giữ nguyên logic cũ ===
       let query = supabase.from('ota_orders').select('*').order('email_date', { ascending: false });
 
       if (params.tab === 'Pending') query = query.in('status', ['Pending', 'Cancelled']);
       else if (params.tab === 'Processed') query = query.eq('status', 'Assigned');
-      else if (params.tab === 'Cancelled') query = query.eq('status', 'Confirmed'); 
       else if (params.tab === 'Today') {
           const today = new Date().toISOString().substring(0, 10);
           query = query.gte('check_in', `${today}T00:00:00`).lte('check_in', `${today}T23:59:59`);
