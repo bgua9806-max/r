@@ -39,8 +39,8 @@ function onOpen() {
 
 function showCustomExportDialog() {
   var htmlOutput = HtmlService.createHtmlOutputFromFile('CustomExport')
-    .setWidth(500)
-    .setHeight(400);
+    .setWidth(600)
+    .setHeight(650);
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, '🚀 Xuất File Báo Cáo Tùy Chỉnh');
 }
 
@@ -208,7 +208,7 @@ function showDownloadDialog(blob, fileName, rowCount) {
   template.mimeType = mimeType;
   template.rowCount = rowCount;
   
-  var htmlOutput = template.evaluate().setWidth(450).setHeight(250);
+  var htmlOutput = template.evaluate().setWidth(500).setHeight(320);
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, '✅ Xuất file thành công');
 }
 
@@ -311,9 +311,13 @@ function exportFilteredSheetToCSV(sheet, sheetName, filterDate, dateColumnName, 
   
   if (dateColumnIndex === -1) return { blob: null, rowCount: 0, fileName: "Error.csv" };
   
-  var filteredDisplayRows = [displayValues[0]];
+  // ✅ FIX: Cố định luôn hàng 1 (Tiêu đề) và hàng 2 (Hướng dẫn) cho sheet ASM_VN
+  var filteredDisplayRows = [];
+  if (displayValues.length > 0) filteredDisplayRows.push(displayValues[0]);
+  if (displayValues.length > 1) filteredDisplayRows.push(displayValues[1]);
   
-  for (var i = 1; i < rawValues.length; i++) {
+  // Dữ liệu khách bắt đầu từ hàng thứ 3 (index 2)
+  for (var i = 2; i < rawValues.length; i++) {
     var cellValue = rawValues[i][dateColumnIndex];
     if (cellValue) {
       var rowDate = new Date(cellValue);
