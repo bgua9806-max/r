@@ -1,0 +1,158 @@
+// --- CẤU HÌNH TÊN SHEET ---
+const SHEET_VN_NAME = "ASM_VN";
+const SHEET_NN_NAME = "ASM_NN";
+
+// --- ĐỊNH NGHĨA HEADER (CỘT) CHUẨN ---
+const HEADERS_VN = [
+  "STT", "Họ và tên", "Ngày, tháng, năm sinh", "Giới tính", "Quốc gia", "Quốc tịch", 
+  "Loại giấy tờ", "Tên giấy tờ", "Số giấy tờ", "Số điện thoại", "Loại cư trú", 
+  "Tỉnh/TP", "Quận/Huyện_cũ", "Phường/Xã/ Đặc khu", "Địa chỉ chi tiết", 
+  "Thời gian lưu trú (từ)", "Thời gian lưu trú (đến)", "Lý do lưu trú", "Tên phòng / Khoa"
+];
+
+const HEADERS_NN = [
+  "STT", "Họ và Tên", "Ngày sinh", "Đúng đến", "GT", "QT", "Số HC", 
+  "Phòng", "Ngày đến", "Ngày đi ĐK", "Ngày trả phòng", "Lời dự liệu nếu có"
+];
+
+// --- CỘT CẦN GIỮ NGUYÊN PLAIN TEXT (1-indexed) ---
+// VN: Ngày sinh(3), Số giấy tờ(9), SĐT(10), Thời gian từ(16), Thời gian đến(17)
+const TEXT_COLS_VN = [3, 9, 10, 16, 17];
+// NN: Ngày sinh(3), Số HC(7), Ngày đến(9), Ngày đi ĐK(10), Ngày trả phòng(11)
+const TEXT_COLS_NN = [3, 7, 9, 10, 11];
+
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+
+  try {
+    const doc = SpreadsheetApp.getActiveSpreadsheet();
+    setupSheets(doc); // Đảm bảo sheet tồn tại và có header
+
+    const rawData = JSON.parse(e.postData.contents);
+    
+    // Nếu gửi mảng (nhiều khách) hoặc object đơn (1 khách)
+    const dataList = Array.isArray(rawData.data) ? rawData.data : [rawData.data];
+    const sheetTarget = rawData.sheet_target; // "VIETNAM_GUEST" hoặc "FOREIGN_GUEST"
+
+    let targetSheet;
+    
+    if (sheetTarget === 'VIETNAM_GUEST') {
+      targetSheet = doc.getSheetByName(SHEET_VN_NAME);
+      processVietnamGuests(targetSheet, dataList);
+    } else {
+      targetSheet = doc.getSheetByName(SHEET_NN_NAME);
+      processForeignGuests(targetSheet, dataList);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ "result": "success", "count": dataList.length }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (e) {
+    return ContentService.createTextOutput(JSON.stringify({ "result": "error", "error": e.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ===================================================================
+// Hàm xử lý ghi khách Việt Nam (ĐÃ SỬA: Force Plain Text)
+// ===================================================================
+function processVietnamGuests(sheet, guests) {
+  const lastRow = Math.max(sheet.getLastRow(), 1); // Đảm bảo không ghi đè header
+  const rows = guests.map((g, index) => {
+    return [
+      lastRow + index, // STT tự động tăng
+      g.ho_va_ten,
+      g.ngay_sinh,        // dd/mm/yyyy → PHẢI giữ nguyên string
+      g.gioi_tinh,
+      g.quoc_tich,        // Quốc gia (mặc định giống quốc tịch)
+      g.quoc_tich,
+      g.loai_giay_to,
+      g.ten_giay_to || "",
+      g.so_giay_to,       // CCCD 12 số → PHẢI giữ số 0 đầu
+      g.so_dien_thoai || "",  // SĐT → PHẢI giữ số 0 đầu
+      g.loai_cu_tru || "Lưu trú",
+      g.dia_chi_thuong_tru?.tinh_tp || "",
+      g.dia_chi_thuong_tru?.quan_huyen || "",
+      g.dia_chi_thuong_tru?.phuong_xa || "",
+      g.dia_chi_thuong_tru?.chi_tiet || "",
+      g.thoi_gian_luu_tru?.tu_ngay || "",  // dd/mm/yyyy hh:mm:ss → PHẢI giữ nguyên
+      g.thoi_gian_luu_tru?.den_ngay || "",
+      g.ly_do || "Du lịch",
+      g.phong
+    ];
+  });
+  
+  if (rows.length > 0) {
+    const range = sheet.getRange(lastRow + 1, 1, rows.length, rows[0].length);
+    
+    // ✅ FIX: Force Plain Text cho các cột nhạy cảm TRƯỚC KHI ghi dữ liệu
+    // Điều này ngăn Google Sheets auto-convert "051303007334" → 51303007334 (mất số 0)
+    // và "10/12/2003" → 37906 (serial number)
+    TEXT_COLS_VN.forEach(col => {
+      sheet.getRange(lastRow + 1, col, rows.length, 1).setNumberFormat("@");
+    });
+    
+    range.setValues(rows);
+  }
+}
+
+// ===================================================================
+// Hàm xử lý ghi khách Nước Ngoài (ĐÃ SỬA: Force Plain Text + Chuẩn hóa GT)
+// ===================================================================
+function processForeignGuests(sheet, guests) {
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  const rows = guests.map((g, index) => {
+    
+    // --- LOGIC: CHUẨN HÓA GIỚI TÍNH ---
+    let gioitinh_final = g.gioi_tinh;
+    if (gioitinh_final == 'Nam' || gioitinh_final == 'Male') {
+      gioitinh_final = 'M';
+    } else if (gioitinh_final == 'Nữ' || gioitinh_final == 'Female') {
+      gioitinh_final = 'F';
+    }
+
+    return [
+      lastRow + index, // STT
+      g.ho_va_ten,
+      g.ngay_sinh,           // dd/mm/yyyy → PHẢI giữ nguyên string
+      g.dung_den || "D",
+      gioitinh_final,        // M/F
+      g.quoc_tich,           // ISO 3 char
+      g.so_ho_chieu,         // Số hộ chiếu → PHẢI giữ nguyên
+      g.ten_phong,
+      g.ngay_den,            // dd/mm/yyyy → PHẢI giữ nguyên
+      g.ngay_di_du_kien,     // dd/mm/yyyy → PHẢI giữ nguyên
+      g.ngay_tra_phong || "",
+      g.ghi_chu || ""
+    ];
+  });
+
+  if (rows.length > 0) {
+    const range = sheet.getRange(lastRow + 1, 1, rows.length, rows[0].length);
+    
+    // ✅ FIX: Force Plain Text cho các cột nhạy cảm
+    TEXT_COLS_NN.forEach(col => {
+      sheet.getRange(lastRow + 1, col, rows.length, 1).setNumberFormat("@");
+    });
+    
+    range.setValues(rows);
+  }
+}
+
+// Hàm khởi tạo Sheet nếu chưa có
+function setupSheets(doc) {
+  let sheetVN = doc.getSheetByName(SHEET_VN_NAME);
+  if (!sheetVN) {
+    sheetVN = doc.insertSheet(SHEET_VN_NAME);
+    sheetVN.getRange(1, 1, 1, HEADERS_VN.length).setValues([HEADERS_VN]).setFontWeight("bold").setBackground("#e0f2f1");
+  }
+
+  let sheetNN = doc.getSheetByName(SHEET_NN_NAME);
+  if (!sheetNN) {
+    sheetNN = doc.insertSheet(SHEET_NN_NAME);
+    sheetNN.getRange(1, 1, 1, HEADERS_NN.length).setValues([HEADERS_NN]).setFontWeight("bold").setBackground("#fff3e0");
+  }
+}

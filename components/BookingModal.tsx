@@ -51,7 +51,7 @@ const DEFAULT_OCR_DATA: ResidenceData = {
     phuong_xa: '', 
     dia_chi_chitiet: '',
     ly_do: 'Du lịch', 
-    loai_cu_tru: 'Lưu trú'
+    loai_cu_tru: 'Thường trú'
 };
 
 const INITIAL_BOOKING_STATE: Partial<Booking> = {
@@ -875,7 +875,7 @@ If a field is not visible, return empty string "".`;
                   quan_huyen: data.dia_chi?.quan_huyen || '',
                   phuong_xa: data.dia_chi?.phuong_xa || '',
                   dia_chi_chitiet: data.dia_chi?.chi_tiet || '',
-                  loai_cu_tru: 'Lưu trú'
+                  loai_cu_tru: 'Thường trú'
               };
           } else {
               newOcrData = {
@@ -891,7 +891,7 @@ If a field is not visible, return empty string "".`;
                   quan_huyen: '',
                   phuong_xa: '',
                   dia_chi_chitiet: '',
-                  loai_cu_tru: 'Lưu trú'
+                  loai_cu_tru: 'Thường trú'
               };
           }
           
@@ -971,7 +971,7 @@ If a field is not visible, return empty string "".`;
 
       if (isVietnam) {
           const idTypeMap: Record<string, string> = {
-              'CCCD': 'Căn cước công dân',
+              'CCCD': 'CCCD',
               'Passport': 'Hộ chiếu',
               'Khác': 'Giấy tờ khác'
           };

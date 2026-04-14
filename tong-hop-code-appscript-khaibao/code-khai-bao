@@ -1,0 +1,753 @@
+/**
+ * ============================================================================
+ * 🛠️ BỘ CODE XUẤT BÁO CÁO ASM - PHIÊN BẢN NÂNG CAP
+ * Version: 5.1 - Fix date serial number + Fix leading zeros
+ * ============================================================================
+ */
+
+var HOTEL_CONFIG = {
+  matt: "703",
+  maqh: "703001",
+  mapx: "703001001",
+  maks: "ANA",
+  tenks: "Ana Sương"
+};
+
+var EMAIL_RECIPIENTS = "trinhbaovui.2001@gmail.com";
+
+// ==================== MENU CHÍNH ====================
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('📊 Báo Cáo ASM')
+    .addItem('🚀 Xuất File Tùy Chỉnh', 'showCustomExportDialog')
+    .addSeparator()
+    .addItem('📥 Xuất CSV Khách VN (Hôm nay)', 'downloadCSV_VN_Today')
+    .addItem('📥 Xuất CSV Khách NN (Hôm nay)', 'downloadCSV_NN_Today')
+    .addSeparator()
+    .addItem('📅 Xuất CSV Khách VN (Chọn ngày)', 'downloadCSV_VN_Custom')
+    .addItem('📅 Xuất CSV Khách NN (Chọn ngày)', 'downloadCSV_NN_Custom')
+    .addSeparator()
+    .addItem('📧 Gửi Email Báo Cáo (Hôm nay)', 'sendEmailToday')
+    .addItem('📧 Gửi Email Báo Cáo (Chọn ngày)', 'sendEmailCustom')
+    .addSeparator()
+    .addItem('⚙️ Cài Đặt Auto Email 7PM', 'setupAutoEmailTrigger')
+    .addItem('🔧 Sửa dữ liệu cũ (Serial → Date)', 'fixLegacySerialDates')
+    .addToUi();
+}
+
+// ==================== GIAO DIỆN TÙY CHỈNH ====================
+
+function showCustomExportDialog() {
+  var htmlOutput = HtmlService.createHtmlOutputFromFile('CustomExport')
+    .setWidth(500)
+    .setHeight(400);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, '🚀 Xuất File Báo Cáo Tùy Chỉnh');
+}
+
+function getSheetNames() {
+  var sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  var sheetNames = [];
+  for (var i = 0; i < sheets.length; i++) {
+    sheetNames.push(sheets[i].getName());
+  }
+  return sheetNames;
+}
+
+function customExport(sheetName, dateStr) {
+  try {
+    var filterDate = parseDate(dateStr);
+    if (!filterDate) {
+      return { success: false, message: '❌ Ngày không hợp lệ. Định dạng: DD/MM/YYYY' };
+    }
+    
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+    
+    if (!sheet) {
+      return { success: false, message: '❌ Không tìm thấy sheet: ' + sheetName };
+    }
+    
+    if (sheetName === "ASM_VN") {
+      var textColumns = ["Số giấy tờ", "Số điện thoại", "CMND/CCCD", "Số hộ chiếu", "Ngày, tháng, năm sinh", "Thời gian lưu trú (từ)", "Thời gian lưu trú (đến)"];
+      var result = exportFilteredSheetToCSV(sheet, "ASM_VN", filterDate, "Thời gian lưu trú (từ)", textColumns);
+    } else {
+      var result = exportForeignGuestToCSV(sheet, "Danh_Sach_Khach_Nuoc_Ngoai", filterDate, "Ngày đến");
+    }
+    
+    if (result.rowCount === 0) {
+      return { 
+        success: false, 
+        message: '⚠️ Không có dữ liệu ngày ' + Utilities.formatDate(filterDate, "Asia/Ho_Chi_Minh", "dd/MM/yyyy") 
+      };
+    }
+    
+    return {
+      success: true,
+      base64Data: Utilities.base64Encode(result.blob.getBytes()),
+      fileName: result.fileName,
+      mimeType: result.blob.getContentType(),
+      rowCount: result.rowCount
+    };
+    
+  } catch (error) {
+    return { success: false, message: '❌ Lỗi: ' + error.toString() };
+  }
+}
+
+// ==================== TỰ ĐỘNG GỬI EMAIL 7H TỐI ====================
+
+function autoSendDailyEmail() {
+  var today = new Date();
+  sendEmailReport_Main(today);
+  Logger.log("✅ Đã gửi email báo cáo tự động lúc 7h tối ngày " + Utilities.formatDate(today, "Asia/Ho_Chi_Minh", "dd/MM/yyyy"));
+}
+
+function setupAutoEmailTrigger() {
+  var ui = SpreadsheetApp.getUi();
+  
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'autoSendDailyEmail') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  
+  ScriptApp.newTrigger('autoSendDailyEmail')
+    .timeBased()
+    .atHour(19)
+    .everyDays(1)
+    .create();
+  
+  ui.alert('✅ Thành công', 'Đã cài đặt tự động gửi email lúc 7h tối hàng ngày!', ui.ButtonSet.OK);
+}
+
+// ==================== DOWNLOAD CSV ====================
+
+function downloadCSV_VN_Today() {
+  downloadCSV_VN(new Date());
+}
+
+function downloadCSV_VN_Custom() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt('Chọn ngày xuất file', 'Nhập ngày (DD/MM/YYYY):', ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() == ui.Button.OK) {
+    var filterDate = parseDate(response.getResponseText());
+    if (!filterDate) {
+      ui.alert('❌ Lỗi', 'Ngày không hợp lệ. Vui lòng nhập theo định dạng DD/MM/YYYY', ui.ButtonSet.OK);
+      return;
+    }
+    downloadCSV_VN(filterDate);
+  }
+}
+
+function downloadCSV_NN_Today() {
+  downloadCSV_NN(new Date());
+}
+
+function downloadCSV_NN_Custom() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt('Chọn ngày xuất file', 'Nhập ngày (DD/MM/YYYY):', ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() == ui.Button.OK) {
+    var filterDate = parseDate(response.getResponseText());
+    if (!filterDate) {
+      ui.alert('❌ Lỗi', 'Ngày không hợp lệ. Vui lòng nhập theo định dạng DD/MM/YYYY', ui.ButtonSet.OK);
+      return;
+    }
+    downloadCSV_NN(filterDate);
+  }
+}
+
+function downloadCSV_VN(filterDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ASM_VN");
+  
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('❌ Lỗi', 'Không tìm thấy sheet "ASM_VN"', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  var textColumns = ["Số giấy tờ", "Số điện thoại", "CMND/CCCD", "Số hộ chiếu", "Ngày, tháng, năm sinh", "Thời gian lưu trú (từ)", "Thời gian lưu trú (đến)"];
+  var result = exportFilteredSheetToCSV(sheet, "ASM_VN", filterDate, "Thời gian lưu trú (từ)", textColumns);
+  
+  if (result.rowCount === 0) {
+    SpreadsheetApp.getUi().alert('⚠️ Thông báo', 'Không có dữ liệu ngày ' + Utilities.formatDate(filterDate, "Asia/Ho_Chi_Minh", "dd/MM/yyyy"), SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  showDownloadDialog(result.blob, result.fileName, result.rowCount);
+}
+
+function downloadCSV_NN(filterDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ASM_NN");
+  
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('❌ Lỗi', 'Không tìm thấy sheet "ASM_NN"', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  var result = exportForeignGuestToCSV(sheet, "Danh_Sach_Khach_Nuoc_Ngoai", filterDate, "Ngày đến");
+  
+  if (result.rowCount === 0) {
+    SpreadsheetApp.getUi().alert('⚠️ Thông báo', 'Không có dữ liệu ngày ' + Utilities.formatDate(filterDate, "Asia/Ho_Chi_Minh", "dd/MM/yyyy"), SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  showDownloadDialog(result.blob, result.fileName, result.rowCount);
+}
+
+function showDownloadDialog(blob, fileName, rowCount) {
+  var base64Data = Utilities.base64Encode(blob.getBytes());
+  var mimeType = blob.getContentType();
+  
+  var template = HtmlService.createTemplateFromFile('DownloadDialog');
+  template.base64Data = base64Data;
+  template.fileName = fileName;
+  template.mimeType = mimeType;
+  template.rowCount = rowCount;
+  
+  var htmlOutput = template.evaluate().setWidth(450).setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, '✅ Xuất file thành công');
+}
+
+// ==================== EMAIL ====================
+
+function sendEmailToday() {
+  sendEmailReport_Main(new Date());
+}
+
+function sendEmailCustom() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt('Gửi email báo cáo', 'Nhập ngày (DD/MM/YYYY):', ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() == ui.Button.OK) {
+    var filterDate = parseDate(response.getResponseText());
+    if (!filterDate) {
+      ui.alert('❌ Lỗi', 'Ngày không hợp lệ', ui.ButtonSet.OK);
+      return;
+    }
+    sendEmailReport_Main(filterDate);
+  }
+}
+
+function sendEmailReport_Main(filterDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetVN = ss.getSheetByName("ASM_VN");
+  var sheetNN = ss.getSheetByName("ASM_NN");
+  
+  if (!sheetVN || !sheetNN) {
+    SpreadsheetApp.getUi().alert('❌ Lỗi', 'Không tìm thấy sheet', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  try {
+    var textColumns = ["Số giấy tờ", "Số điện thoại", "CMND/CCCD", "Số hộ chiếu", "Ngày, tháng, năm sinh", "Thời gian lưu trú (từ)", "Thời gian lưu trú (đến)"];
+    var resultVN = exportFilteredSheetToCSV(sheetVN, "ASM_VN", filterDate, "Thời gian lưu trú (từ)", textColumns);
+    var resultNN = exportForeignGuestToCSV(sheetNN, "Danh_Sach_Khach_Nuoc_Ngoai", filterDate, "Ngày đến");
+    
+    if (resultVN.rowCount + resultNN.rowCount === 0) {
+      SpreadsheetApp.getUi().alert('⚠️ Thông báo', 'Không có dữ liệu', SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+    
+    sendEmailReport(EMAIL_RECIPIENTS, resultVN, resultNN, filterDate);
+    SpreadsheetApp.getUi().alert('✅ Thành công', 'Đã gửi email\n\nVN: ' + resultVN.rowCount + ' khách\nNN: ' + resultNN.rowCount + ' khách', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('❌ Lỗi', error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+function sendEmailReport(recipients, resultVN, resultNN, filterDate) {
+  var dateStr = Utilities.formatDate(filterDate, "Asia/Ho_Chi_Minh", "dd/MM/yyyy");
+  var attachments = [];
+  if (resultVN.blob) attachments.push(resultVN.blob);
+  if (resultNN.blob) attachments.push(resultNN.blob);
+  
+  MailApp.sendEmail({
+    to: recipients,
+    subject: "Báo cáo ASM ngày " + dateStr,
+    body: "Kính gửi,\n\nGửi báo cáo ASM ngày " + dateStr + ":\n" +
+          "1. Khách Việt Nam: " + resultVN.rowCount + " khách\n" +
+          "2. Khách Nước ngoài: " + resultNN.rowCount + " khách\n\nTrân trọng.",
+    attachments: attachments
+  });
+}
+
+// ============================================================================
+// ✅ EXPORT VN - ĐÃ SỬA: Xử lý date serial + giữ số 0 CCCD
+// ============================================================================
+function exportFilteredSheetToCSV(sheet, sheetName, filterDate, dateColumnName, textColumns) {
+  var range = sheet.getDataRange();
+  var rawValues = range.getValues();
+  var displayValues = range.getDisplayValues();
+  
+  var headers = rawValues[0];
+  var dateColumnIndex = -1;
+  var textColumnIndexes = [];
+  
+  // ✅ FIX: Thêm tracking index các cột ngày để xử lý serial number
+  var dateFormatColumns = ["Ngày, tháng, năm sinh", "Thời gian lưu trú (từ)", "Thời gian lưu trú (đến)"];
+  var dateColumnIndexes = [];
+  
+  // ✅ FIX: Thêm tracking index các cột số có thể mất số 0 đầu
+  var numericTextColumns = ["Số giấy tờ", "Số điện thoại"];
+  var numericTextIndexes = [];
+  
+  for (var i = 0; i < headers.length; i++) {
+    var headerName = headers[i].toString().trim();
+    if (headerName === dateColumnName) dateColumnIndex = i;
+    if (textColumns && textColumns.indexOf(headerName) !== -1) {
+      textColumnIndexes.push(i);
+    }
+    if (dateFormatColumns.indexOf(headerName) !== -1) {
+      dateColumnIndexes.push(i);
+    }
+    if (numericTextColumns.indexOf(headerName) !== -1) {
+      numericTextIndexes.push(i);
+    }
+  }
+  
+  if (dateColumnIndex === -1) return { blob: null, rowCount: 0, fileName: "Error.csv" };
+  
+  var filteredDisplayRows = [displayValues[0]];
+  
+  for (var i = 1; i < rawValues.length; i++) {
+    var cellValue = rawValues[i][dateColumnIndex];
+    if (cellValue) {
+      var rowDate = new Date(cellValue);
+      if (!isNaN(rowDate.getTime()) && isSameDate(rowDate, filterDate)) {
+        
+        // ✅ FIX: Tạo bản copy của displayValues row để sửa
+        var rowCopy = displayValues[i].slice();
+        
+        // ✅ FIX 1: Xử lý cột NGÀY - Nếu displayValue là serial number -> convert sang dd/mm/yyyy
+        for (var d = 0; d < dateColumnIndexes.length; d++) {
+          var colIdx = dateColumnIndexes[d];
+          var displayVal = rowCopy[colIdx];
+          var rawVal = rawValues[i][colIdx];
+          
+          // Phát hiện serial number: là số > 10000 (serial date) 
+          if (rawVal instanceof Date) {
+            // rawValue là Date object -> format lại chắc chắn
+            rowCopy[colIdx] = formatDateFromObject(rawVal, headerName === "Ngày, tháng, năm sinh");
+          } else if (typeof rawVal === 'number' && rawVal > 10000) {
+            // rawValue là serial number -> convert
+            var dateObj = serialToDate(rawVal);
+            rowCopy[colIdx] = formatDateFromObject(dateObj, headers[colIdx].toString().indexOf("năm sinh") !== -1);
+          }
+          // Nếu displayVal đã OK (string dạng dd/mm/yyyy) → giữ nguyên
+        }
+        
+        // ✅ FIX 2: Xử lý cột SỐ GIẤY TỜ / SĐT - Pad leading zeros
+        for (var n = 0; n < numericTextIndexes.length; n++) {
+          var colIdx = numericTextIndexes[n];
+          var rawVal = rawValues[i][colIdx];
+          var displayVal = rowCopy[colIdx];
+          
+          if (typeof rawVal === 'number') {
+            // Số bị mất leading zero → cần pad lại
+            var headerCol = headers[colIdx].toString().trim();
+            if (headerCol === "Số giấy tờ") {
+              // CCCD phải 12 số, CMND 9 số
+              var numStr = rawVal.toString();
+              if (numStr.length === 11) numStr = "0" + numStr; // 12 số CCCD
+              else if (numStr.length === 8) numStr = "0" + numStr; // 9 số CMND
+              rowCopy[colIdx] = numStr;
+            } else if (headerCol === "Số điện thoại") {
+              // SĐT VN phải 10 số
+              var numStr = rawVal.toString();
+              if (numStr.length === 9) numStr = "0" + numStr;
+              rowCopy[colIdx] = numStr;
+            }
+          }
+        }
+        
+        filteredDisplayRows.push(rowCopy);
+      }
+    }
+  }
+  
+  var rowCount = filteredDisplayRows.length - 1;
+  var csvContent = convertArrayToCSV(filteredDisplayRows, textColumnIndexes);
+  var dateStr = Utilities.formatDate(filterDate, "Asia/Ho_Chi_Minh", "dd-MM-yyyy");
+  var fileName = sheetName + "_" + dateStr + ".csv";
+  var csvBlob = Utilities.newBlob('\uFEFF' + csvContent, 'text/csv; charset=utf-8', fileName);
+  
+  return { blob: csvBlob, fileName: fileName, rowCount: rowCount, sheetName: sheetName };
+}
+
+// ============================================================================
+// ✅ EXPORT NN - ĐÃ SỬA: Xử lý date serial cho khách nước ngoài
+// ============================================================================
+function exportForeignGuestToCSV(sheet, sheetName, filterDate, dateColumnName) {
+  if (!sheet) return { blob: null, rowCount: 0, fileName: "Error.csv", sheetName: sheetName };
+  
+  try {
+    var data = sheet.getDataRange().getValues();
+    if (!data || data.length === 0) return { blob: null, rowCount: 0, fileName: "Error.csv", sheetName: sheetName };
+    
+    var headers = data[0];
+    var dateColIndex = -1;
+    for (var i = 0; i < headers.length; i++) {
+      if (headers[i].toString().trim() === dateColumnName) {
+        dateColIndex = i;
+        break;
+      }
+    }
+    
+    if (dateColIndex === -1) return { blob: null, rowCount: 0, fileName: "Error.csv", sheetName: sheetName };
+    
+    var csvLines = [];
+    csvLines.push('STT,Ho_va_ten,Ngay_sinh,Dung_den,GT,QT,So_HC,Phong,Ngay_den,Ngay_di_DK,Ngay_tra_phong,Loi_do_lieu_neu_co');
+    
+    var rowCount = 0;
+    var stt = 1;
+    
+    // ✅ FIX: Lấy displayValues song song để so sánh  
+    var displayData = sheet.getDataRange().getDisplayValues();
+    
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var cellDate = row[dateColIndex];
+      
+      if (cellDate) {
+        var rowDate = new Date(cellDate);
+        if (!isNaN(rowDate.getTime()) && isSameDate(rowDate, filterDate)) {
+          
+          var csvRow = [
+            stt.toString(),
+            cleanGuestName(row[1]),
+            safeFormatDate(row[2], displayData[i][2]),   // ✅ FIX: an toàn với serial number
+            getTextClean(row[3]),
+            getTextClean(row[4]),
+            getTextClean(row[5]),
+            safeFormatText(row[6], displayData[i][6]),    // ✅ FIX: giữ số 0 hộ chiếu
+            getTextClean(row[7]),
+            safeFormatDate(row[8], displayData[i][8]),    // ✅ FIX
+            safeFormatDate(row[9], displayData[i][9]),    // ✅ FIX
+            safeFormatDate(row[10], displayData[i][10]),  // ✅ FIX
+            ''
+          ];
+          
+          var csvLine = csvRow.map(function(cell) {
+            if (cell.indexOf(',') >= 0 || cell.indexOf('"') >= 0 || cell.indexOf('\n') >= 0) {
+              return '"' + cell.replace(/"/g, '""') + '"';
+            }
+            return cell;
+          }).join(',');
+          
+          csvLines.push(csvLine);
+          rowCount++;
+          stt++;
+        }
+      }
+    }
+    
+    var csvContent = csvLines.join('\r\n');
+    var dateStr = Utilities.formatDate(filterDate, "Asia/Ho_Chi_Minh", "dd-MM-yyyy");
+    var fileName = sheetName + "_" + dateStr + ".csv";
+    var csvBlob = Utilities.newBlob('\uFEFF' + csvContent, 'text/csv; charset=utf-8', fileName);
+    
+    return { blob: csvBlob, fileName: fileName, rowCount: rowCount, sheetName: sheetName };
+  } catch (error) {
+    Logger.log("❌ Lỗi: " + error.toString());
+    return { blob: null, rowCount: 0, fileName: "Error.csv", sheetName: sheetName };
+  }
+}
+
+// ============================================================================
+// ✅ MỚI: Hàm sửa dữ liệu cũ đã bị convert serial number
+// ============================================================================
+function fixLegacySerialDates() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("ASM_VN");
+  if (!sheet) {
+    ui.alert('❌', 'Không tìm thấy sheet ASM_VN', ui.ButtonSet.OK);
+    return;
+  }
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    ui.alert('ℹ️', 'Sheet trống', ui.ButtonSet.OK);
+    return;
+  }
+  
+  var range = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
+  var rawData = range.getValues();
+  var fixCount = 0;
+  
+  // Cột C (index 2) = Ngày sinh, Cột P (index 15) = Từ ngày, Cột Q (index 16) = Đến ngày
+  var dateCols = [2, 15, 16];
+  // Cột I (index 8) = Số giấy tờ, Cột J (index 9) = SĐT
+  var textCols = [8, 9];
+  
+  for (var i = 0; i < rawData.length; i++) {
+    var row = i + 2; // Hàng thực tế trên sheet (1-indexed, bỏ header)
+    
+    // Fix date serial numbers
+    for (var d = 0; d < dateCols.length; d++) {
+      var col = dateCols[d]; // 0-indexed
+      var val = rawData[i][col];
+      
+      if (val instanceof Date) {
+        var formatted = formatDateFromObject(val, col === 2);
+        sheet.getRange(row, col + 1).setNumberFormat("@").setValue(formatted);
+        fixCount++;
+      } else if (typeof val === 'number' && val > 10000) {
+        var dateObj = serialToDate(val);
+        var formatted = formatDateFromObject(dateObj, col === 2);
+        sheet.getRange(row, col + 1).setNumberFormat("@").setValue(formatted);
+        fixCount++;
+      }
+    }
+    
+    // Fix leading zeros  
+    for (var t = 0; t < textCols.length; t++) {
+      var col = textCols[t];
+      var val = rawData[i][col];
+      
+      if (typeof val === 'number') {
+        var str = val.toString();
+        if (col === 8) { // Số giấy tờ
+          if (str.length === 11) str = "0" + str;
+          else if (str.length === 8) str = "0" + str;
+        } else if (col === 9) { // SĐT
+          if (str.length === 9) str = "0" + str;
+        }
+        sheet.getRange(row, col + 1).setNumberFormat("@").setValue(str);
+        fixCount++;
+      }
+    }
+  }
+  
+  ui.alert('✅ Hoàn tất', 'Đã sửa ' + fixCount + ' ô dữ liệu cũ.', ui.ButtonSet.OK);
+}
+
+// ==================== HELPER FUNCTIONS ====================
+
+/**
+ * ✅ MỚI: Convert serial number (Excel/Sheets) sang Date object
+ */
+function serialToDate(serial) {
+  // Google Sheets serial: ngày 1 = 30/12/1899
+  // Excel serial: ngày 1 = 01/01/1900 (có bug ngày 29/02/1900)
+  var epoch = new Date(1899, 11, 30); // 30 Dec 1899
+  var days = Math.floor(serial);
+  var fracDay = serial - days;
+  
+  var result = new Date(epoch.getTime() + days * 86400000);
+  
+  // Thêm giờ phút giây từ phần thập phân
+  var totalSeconds = Math.round(fracDay * 86400);
+  result.setHours(Math.floor(totalSeconds / 3600));
+  result.setMinutes(Math.floor((totalSeconds % 3600) / 60));
+  result.setSeconds(totalSeconds % 60);
+  
+  return result;
+}
+
+/**
+ * ✅ MỚI: Format Date object → string dd/mm/yyyy hoặc dd/mm/yyyy HH:mm:ss
+ */
+function formatDateFromObject(dateObj, dateOnly) {
+  if (!dateObj || isNaN(dateObj.getTime())) return "";
+  
+  var d = dateObj.getDate().toString().padStart(2, '0');
+  var m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+  var y = dateObj.getFullYear();
+  
+  if (dateOnly) {
+    return d + '/' + m + '/' + y;
+  }
+  
+  var h = dateObj.getHours().toString().padStart(2, '0');
+  var min = dateObj.getMinutes().toString().padStart(2, '0');
+  var sec = dateObj.getSeconds().toString().padStart(2, '0');
+  
+  // Nếu giờ = 00:00:00 thì chỉ trả về ngày
+  if (h === '00' && min === '00' && sec === '00') {
+    return d + '/' + m + '/' + y;
+  }
+  
+  return d + '/' + m + '/' + y + ' ' + h + ':' + min + ':' + sec;
+}
+
+/**
+ * ✅ MỚI: An toàn format ngày - xử lý cả serial number lẫn string
+ */
+function safeFormatDate(rawValue, displayValue) {
+  // Nếu rawValue là Date object → format trực tiếp
+  if (rawValue instanceof Date && !isNaN(rawValue.getTime())) {
+    return formatDateCSV(rawValue);
+  }
+  
+  // Nếu rawValue là số (serial number) → convert
+  if (typeof rawValue === 'number' && rawValue > 10000) {
+    var dateObj = serialToDate(rawValue);
+    return formatDateFromObject(dateObj, true);
+  }
+  
+  // Nếu rawValue là string → kiểm tra format
+  if (typeof rawValue === 'string') {
+    var trimmed = rawValue.trim();
+    if (/^\d{2}\/\d{2}\/\d{4}/.test(trimmed)) {
+      return trimmed.split(' ')[0]; // Lấy phần ngày, bỏ giờ
+    }
+  }
+  
+  // Fallback: dùng displayValue
+  if (displayValue && displayValue.toString().trim() !== '') {
+    var dv = displayValue.toString().trim();
+    // Nếu displayValue trông giống serial number → convert
+    if (/^\d{4,5}(\.\d+)?$/.test(dv)) {
+      var serial = parseFloat(dv);
+      if (serial > 10000) {
+        var dateObj = serialToDate(serial);
+        return formatDateFromObject(dateObj, true);
+      }
+    }
+    return dv;
+  }
+  
+  return "";
+}
+
+/**
+ * ✅ MỚI: An toàn format text - giữ số 0 đầu
+ */
+function safeFormatText(rawValue, displayValue) {
+  if (typeof rawValue === 'number') {
+    return rawValue.toString();
+  }
+  if (rawValue) return rawValue.toString().trim();
+  if (displayValue) return displayValue.toString().trim();
+  return "";
+}
+
+function cleanGuestName(name) {
+  if (!name) return "";
+  
+  var text = name.toString().trim();
+  text = removeDiacritics(text);
+  text = text.toUpperCase();
+  text = text.replace(/[-_.,\/\\\(\)\[\]{}:;'"|\*#@!$%^&+=~`<>?]/g, ' ');
+  text = text.replace(/[^A-Z0-9 ]/g, '');
+  text = text.replace(/\s+/g, ' ');
+  text = text.trim();
+  
+  return text;
+}
+
+function removeDiacritics(str) {
+  if (!str) return "";
+  
+  var result = str;
+  var from = "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐäöüßÄÖÜñÑçÇæœÆŒ";
+  var to   = "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyydAAAAAAAAAAAAAAAAAEEEEEEEEEEEIIIIIOOOOOOOOOOOOOOOOOUUUUUUUUUUUYYYYYDaouAOUnNcCaoAO";
+  
+  for (var i = 0; i < from.length; i++) {
+    result = result.replace(new RegExp(from[i], 'g'), to[i]);
+  }
+  
+  try {
+    result = result.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch (e) {}
+  
+  return result;
+}
+
+function getTextClean(cell) {
+  if (!cell) return "";
+  return cell.toString().trim();
+}
+
+function formatDateCSV(cell) {
+  if (!cell) return "";
+  
+  var date;
+  
+  if (typeof cell === 'string') {
+    var str = cell.trim();
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+      return str;
+    }
+    try {
+      var parts = str.split('/');
+      if (parts.length === 3) {
+        var day = parseInt(parts[0]);
+        var month = parseInt(parts[1]) - 1;
+        var year = parseInt(parts[2]);
+        date = new Date(year, month, day);
+      }
+    } catch (e) {}
+  }
+  
+  if (!date && cell instanceof Date && !isNaN(cell.getTime())) {
+    date = cell;
+  }
+  
+  if (!date) {
+    // ✅ FIX: Kiểm tra serial number trước
+    if (typeof cell === 'number' && cell > 10000) {
+      date = serialToDate(cell);
+    } else {
+      try {
+        date = new Date(cell);
+        if (isNaN(date.getTime())) {
+          return cell.toString().trim();
+        }
+      } catch (e) {
+        return cell.toString().trim();
+      }
+    }
+  }
+  
+  if (date && !isNaN(date.getTime())) {
+    var day = date.getDate();
+    var month = date.getMonth() + 1;
+    var year = date.getFullYear();
+    
+    var dayStr = (day < 10) ? '0' + day : day.toString();
+    var monthStr = (month < 10) ? '0' + month : month.toString();
+    
+    return dayStr + '/' + monthStr + '/' + year;
+  }
+  
+  return cell.toString().trim();
+}
+
+function parseDate(dateStr) {
+  var parts = dateStr.split('/');
+  if (parts.length !== 3) return null;
+  var date = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  return isNaN(date.getTime()) ? null : date;
+}
+
+function convertArrayToCSV(data, textColumnIndexes) {
+  var csv = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = [];
+    for (var j = 0; j < data[i].length; j++) {
+      var cell = data[i][j] ? data[i][j].toString().replace(/"/g, '""') : '';
+      var isTextColumn = textColumnIndexes && textColumnIndexes.indexOf(j) !== -1;
+      
+      if (isTextColumn && i > 0 && cell !== '') {
+        cell = '="' + cell + '"';
+      } else {
+        if (cell.search(/("|,|\n|\r)/g) >= 0) cell = '"' + cell + '"';
+      }
+      row.push(cell);
+    }
+    csv.push(row.join(','));
+  }
+  return csv.join('\r\n');
+}
+
+function isSameDate(date1, date2) {
+  return date1.getDate() === date2.getDate() &&
+         date1.getMonth() === date2.getMonth() &&
+         date1.getFullYear() === date2.getFullYear();
+}
