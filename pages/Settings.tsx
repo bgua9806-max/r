@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2, RotateCw, Calculator, TrendingUp, TrendingDown, Equal, BedDouble, Calendar, Clock, Loader2 } from 'lucide-react';
+import { Plus, Trash, Save, Check, X, ShoppingCart, Database, Globe, Send, AlertTriangle, Cpu, Lock, ChefHat, Pencil, CreditCard, QrCode, Building, CheckCircle2, RotateCw, Calculator, TrendingUp, TrendingDown, Equal, BedDouble, Calendar, Clock, Loader2, Users, Key, Wallet, Tags } from 'lucide-react';
 import { Settings as SettingsType, ServiceItem, ItemCategory, WebhookConfig, RoomRecipe, BankAccount, Season, ShiftDefinition } from '../types';
 import { MOCK_SERVICES } from '../constants';
 import { storageService } from '../services/storage';
@@ -59,6 +59,17 @@ export const Settings: React.FC = () => {
   const [localSeasons, setLocalSeasons] = useState<Season[]>([]);
   const [localShifts, setLocalShifts] = useState<ShiftDefinition[]>([]);
   const [isSavingShifts, setIsSavingShifts] = useState(false);
+
+  // --- TABS STATE ---
+  const [activeTab, setActiveTab] = useState<'finance' | 'inventory' | 'operation' | 'system' | 'general'>('finance');
+
+  const TABS = [
+      { id: 'finance', label: 'Ngân Hàng', icon: CreditCard },
+      { id: 'inventory', label: 'Kho & Menu', icon: ShoppingCart },
+      { id: 'operation', label: 'Ca & Vận Hành', icon: Calendar },
+      { id: 'system', label: 'Hệ Thống & AI', icon: Cpu },
+      { id: 'general', label: 'Khác', icon: Globe }
+  ] as const;
 
   // Sync context data to local state initially
   useEffect(() => {
@@ -266,10 +277,13 @@ export const Settings: React.FC = () => {
       }
   };
 
-  const Section = ({ title, dataKey }: { title: string, dataKey: keyof SettingsType }) => (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-full">
-       <div className="flex justify-between items-center mb-4">
-          <h3 className="font-bold text-gray-800">{title}</h3>
+  const Section = ({ title, dataKey, icon: Icon }: { title: string, dataKey: keyof SettingsType, icon: any }) => (
+    <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col h-full hover:shadow transition-shadow">
+       <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <div className="text-slate-500"><Icon size={18}/></div>
+              {title}
+          </h3>
        </div>
        <div className="space-y-2 flex-1 overflow-y-auto max-h-60 custom-scrollbar pr-1">
           {(localSettings[dataKey] as string[]).map((item, idx) => (
@@ -304,76 +318,101 @@ export const Settings: React.FC = () => {
   );
 
   return (
-    <div className="space-y-6 pb-10">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 sticky top-0 z-10">
-        <div>
-           <h1 className="text-2xl font-bold text-gray-800">Cài Đặt Hệ Thống</h1>
-           <p className="text-gray-500 text-sm">Quản lý các danh mục dữ liệu dùng chung</p>
-        </div>
-        <button onClick={handleSave} className="bg-brand-600 text-white px-6 py-2 rounded-lg flex items-center gap-2 font-bold hover:bg-brand-700 shadow-md transition-transform active:scale-95">
-           <Save size={20} /> Lưu thay đổi
-        </button>
+    <div className="space-y-6 pb-12 px-2 md:px-0">
+
+      {/* TABS NAVIGATION */}
+      <div className="flex overflow-x-auto custom-scrollbar gap-2 pb-4 mb-2 md:mb-6 border-b border-slate-100 w-full">
+         {TABS.map(tab => {
+             const Icon = tab.icon;
+             return (
+                 <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-sm whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-brand-600 text-white shadow-md shadow-brand-500/20' : 'bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}
+                 >
+                     <Icon size={16}/>
+                     {tab.label}
+                 </button>
+             );
+         })}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
          
-         {/* BANK CONFIGURATION */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
-             <div className="flex justify-between items-center mb-4">
-                <div>
-                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><CreditCard size={20}/> Danh sách Tài khoản Ngân hàng (VietQR)</h3>
-                   <p className="text-xs text-slate-500 mt-1">Quản lý các tài khoản nhận tiền chuyển khoản.</p>
+         {activeTab === 'finance' && (
+           <>
+               {/* BANK CONFIGURATION */}
+               <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col lg:col-span-3 hover:shadow-md transition-shadow">
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                      <div>
+                         <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                      <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><CreditCard size={20}/></div>
+                      Danh sách Tài khoản Ngân hàng (VietQR)
+                   </h3>
+                   <p className="text-sm text-slate-500 mt-1 ml-11">Quản lý các tài khoản nhận tiền chuyển khoản.</p>
                 </div>
                 <button 
                     onClick={() => handleOpenBankModal()} 
-                    className="flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-lg border border-blue-200 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                    className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 text-sm font-bold text-blue-700 hover:bg-blue-600 hover:text-white transition-all shadow-sm"
                 >
                     <Plus size={16}/> Thêm tài khoản
                 </button>
              </div>
              
-             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                  {bankAccounts.map(bank => (
-                     <div key={bank.id} className={`p-4 rounded-xl border-2 transition-all hover:shadow-md relative group ${bank.is_default ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-100 hover:border-brand-200'}`}>
-                         <div className="flex justify-between items-start mb-2">
-                             <div className="flex items-center gap-2">
-                                 <Building size={20} className="text-slate-400"/>
-                                 <span className="font-black text-lg text-slate-800">{bank.bankId}</span>
+                     <div key={bank.id} className={`p-5 rounded-lg border-2 transition-all hover:shadow-lg relative group overflow-hidden ${bank.is_default ? 'bg-gradient-to-br from-brand-50 to-white border-brand-300' : 'bg-white border-slate-100 hover:border-brand-200'}`}>
+                         {/* Accent Strip */}
+                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${bank.is_default ? 'bg-brand-500' : 'bg-slate-200 group-hover:bg-brand-300'} transition-colors`}></div>
+                         <div className="pl-2">
+                             <div className="flex justify-between items-start mb-3">
+                                 <div className="flex items-center gap-2">
+                                     <Building size={20} className="text-slate-400 group-hover:text-brand-500 transition-colors"/>
+                                     <span className="font-black text-lg text-slate-800 tracking-tight">{bank.bankId}</span>
+                                 </div>
+                                 {bank.is_default && (
+                                     <span className="bg-brand-100 text-brand-700 text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1 border border-brand-200 shadow-sm animate-in fade-in">
+                                         <CheckCircle2 size={12}/> MẶC ĐỊNH
+                                     </span>
+                                 )}
                              </div>
-                             {bank.is_default && (
-                                 <span className="bg-brand-100 text-brand-700 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-brand-200">
-                                     <CheckCircle2 size={10}/> Mặc định
-                                 </span>
-                             )}
-                         </div>
-                         <div className="font-mono font-bold text-slate-700 text-lg tracking-wide mb-1">{bank.accountNo}</div>
-                         <div className="text-xs font-bold text-slate-500 uppercase">{bank.accountName}</div>
-                         
-                         <div className="mt-4 pt-3 border-t border-slate-200/50 flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                             {!bank.is_default && (
-                                 <button onClick={() => handleSetDefaultBank(bank)} className="text-[10px] bg-white border border-slate-200 px-2 py-1 rounded hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors">
-                                     Đặt mặc định
-                                 </button>
-                             )}
-                             <button onClick={() => handleOpenBankModal(bank)} className="p-1.5 text-blue-600 bg-blue-50 rounded hover:bg-blue-100"><Pencil size={14}/></button>
-                             <button onClick={() => { if(confirm('Xóa tài khoản này?')) deleteBankAccount(bank.id); }} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100"><Trash size={14}/></button>
+                             <div className="font-mono font-bold text-slate-700 text-xl tracking-wider mb-1">{bank.accountNo}</div>
+                             <div className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1.5"><Users size={12} className="text-slate-400"/> {bank.accountName}</div>
+                             
+                             <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                 {!bank.is_default && (
+                                     <button onClick={() => handleSetDefaultBank(bank)} className="text-xs bg-white border border-slate-200 font-bold px-3 py-1.5 rounded-lg hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-all shadow-sm">
+                                         Đặt mặc định
+                                     </button>
+                                 )}
+                                 <button onClick={() => handleOpenBankModal(bank)} className="p-1.5 text-blue-600 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-600 hover:text-white transition-colors shadow-sm"><Pencil size={16}/></button>
+                                 <button onClick={() => { if(confirm('Xóa tài khoản này?')) deleteBankAccount(bank.id); }} className="p-1.5 text-red-600 bg-red-50 border border-red-100 rounded-lg hover:bg-red-600 hover:text-white transition-colors shadow-sm"><Trash size={16}/></button>
+                             </div>
                          </div>
                      </div>
                  ))}
              </div>
          </div>
 
-         {/* --- SEASON & SHIFT CONFIGURATION (UPDATED) --- */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
-             <div className="flex justify-between items-center mb-4">
-                <div>
-                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Calendar size={20}/> Cấu Hình Mùa & Ca Làm Việc</h3>
-                   <p className="text-xs text-slate-500 mt-1">Thiết lập thời gian Mùa Cao Điểm/Thấp Điểm và giờ làm việc tương ứng.</p>
+           </>
+         )}
+
+         {activeTab === 'operation' && (
+           <>
+               {/* --- SEASON & SHIFT CONFIGURATION (UPDATED) --- */}
+               <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col lg:col-span-3 hover:shadow-md transition-shadow">
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                      <div>
+                         <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                      <div className="bg-orange-100 p-2 rounded-lg text-orange-600"><Calendar size={20}/></div>
+                      Cấu Hình Mùa & Ca Làm Việc
+                   </h3>
+                   <p className="text-sm text-slate-500 mt-1 ml-11">Thiết lập thời gian Mùa Cao Điểm/Thấp Điểm và giờ làm việc tương ứng.</p>
                 </div>
                 <button 
                     onClick={handleSaveSeasonsAndShifts}
                     disabled={isSavingShifts}
-                    className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"
+                    className="bg-brand-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-brand-700 hover:shadow-md disabled:opacity-50 flex items-center gap-2 transition-all"
                 >
                     {isSavingShifts ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>}
                     Lưu Cấu Hình Ca
@@ -383,26 +422,26 @@ export const Settings: React.FC = () => {
              {/* Seasons List (Local State) */}
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                  {localSeasons.map(season => (
-                     <div key={season.code} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                         <div className="flex justify-between items-center mb-3">
-                             <h4 className="font-bold text-slate-700 uppercase text-sm">{season.name}</h4>
-                             <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${season.code === 'PEAK' ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'}`}>{season.code}</span>
+                     <div key={season.code} className={`border rounded-lg p-5 transition-all ${season.code === 'PEAK' ? 'bg-gradient-to-br from-rose-50/50 to-white border-rose-100' : 'bg-gradient-to-br from-blue-50/50 to-white border-blue-100'}`}>
+                         <div className="flex justify-between items-center mb-4">
+                             <h4 className="font-black text-slate-700 uppercase tracking-tight">{season.name}</h4>
+                             <span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider shadow-sm border ${season.code === 'PEAK' ? 'bg-rose-100 text-rose-700 border-rose-200' : 'bg-blue-100 text-blue-700 border-blue-200'}`}>{season.code}</span>
                          </div>
-                         <div className="grid grid-cols-2 gap-4 text-xs">
+                         <div className="grid grid-cols-2 gap-5 text-sm">
                              <div>
-                                 <label className="text-slate-400 font-bold block mb-1">Bắt đầu (Tháng/Ngày)</label>
-                                 <div className="flex gap-2">
-                                     <input type="number" min="1" max="12" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.start_month} onChange={e => handleUpdateLocalSeason(season.code, 'start_month', Number(e.target.value))} />
-                                     <span className="self-center">/</span>
-                                     <input type="number" min="1" max="31" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.start_day} onChange={e => handleUpdateLocalSeason(season.code, 'start_day', Number(e.target.value))} />
+                                 <label className="text-slate-500 font-bold block mb-2 text-xs uppercase">Bắt đầu (Tháng/Ngày)</label>
+                                 <div className="flex gap-2 items-center bg-white p-1 rounded-lg border border-slate-200 shadow-sm w-fit">
+                                     <input type="number" min="1" max="12" className="w-10 border-transparent rounded text-center font-bold text-slate-700 focus:ring-0" value={season.start_month} onChange={e => handleUpdateLocalSeason(season.code, 'start_month', Number(e.target.value))} />
+                                     <span className="text-slate-300 font-light text-xl">/</span>
+                                     <input type="number" min="1" max="31" className="w-10 border-transparent rounded text-center font-bold text-slate-700 focus:ring-0" value={season.start_day} onChange={e => handleUpdateLocalSeason(season.code, 'start_day', Number(e.target.value))} />
                                  </div>
                              </div>
                              <div>
-                                 <label className="text-slate-400 font-bold block mb-1">Kết thúc (Tháng/Ngày)</label>
-                                 <div className="flex gap-2">
-                                     <input type="number" min="1" max="12" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.end_month} onChange={e => handleUpdateLocalSeason(season.code, 'end_month', Number(e.target.value))} />
-                                     <span className="self-center">/</span>
-                                     <input type="number" min="1" max="31" className="w-12 border rounded p-1 text-center font-bold bg-white" value={season.end_day} onChange={e => handleUpdateLocalSeason(season.code, 'end_day', Number(e.target.value))} />
+                                 <label className="text-slate-500 font-bold block mb-2 text-xs uppercase">Kết thúc (Tháng/Ngày)</label>
+                                 <div className="flex gap-2 items-center bg-white p-1 rounded-lg border border-slate-200 shadow-sm w-fit">
+                                     <input type="number" min="1" max="12" className="w-10 border-transparent rounded text-center font-bold text-slate-700 focus:ring-0" value={season.end_month} onChange={e => handleUpdateLocalSeason(season.code, 'end_month', Number(e.target.value))} />
+                                     <span className="text-slate-300 font-light text-xl">/</span>
+                                     <input type="number" min="1" max="31" className="w-10 border-transparent rounded text-center font-bold text-slate-700 focus:ring-0" value={season.end_day} onChange={e => handleUpdateLocalSeason(season.code, 'end_day', Number(e.target.value))} />
                                  </div>
                              </div>
                          </div>
@@ -411,42 +450,42 @@ export const Settings: React.FC = () => {
              </div>
 
              {/* Shift Definitions Table (Local State) */}
-             <div className="overflow-x-auto bg-slate-50 rounded-xl border border-slate-200">
+             <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-inner">
                  <table className="w-full text-left border-collapse text-sm">
-                     <thead className="bg-slate-100 text-slate-500 font-bold text-xs uppercase">
+                     <thead className="bg-slate-50 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
                          <tr>
-                             <th className="p-3">Tên Ca</th>
-                             <th className="p-3">Mùa Áp Dụng</th>
-                             <th className="p-3 text-center">Giờ Bắt Đầu</th>
-                             <th className="p-3 text-center">Giờ Kết Thúc</th>
-                             <th className="p-3 text-center">Hệ Số</th>
-                             <th className="p-3 text-center">Cho phép trễ (Phút)</th>
+                             <th className="p-4 border-b border-slate-200">Tên Ca</th>
+                             <th className="p-4 border-b border-slate-200">Mùa Áp Dụng</th>
+                             <th className="p-4 text-center border-b border-slate-200">Giờ Bắt Đầu</th>
+                             <th className="p-4 text-center border-b border-slate-200">Giờ Kết Thúc</th>
+                             <th className="p-4 text-center border-b border-slate-200">Hệ Số</th>
+                             <th className="p-4 text-center border-b border-slate-200">Cho phép trễ (Phút)</th>
                          </tr>
                      </thead>
-                     <tbody className="divide-y divide-slate-200">
+                     <tbody className="divide-y divide-slate-100 bg-white">
                          {localShifts.map(shift => (
-                             <tr key={shift.id} className="hover:bg-white transition-colors">
-                                 <td className="p-3 font-bold text-slate-700">{shift.name}</td>
-                                 <td className="p-3">
-                                     <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${shift.season_code === 'PEAK' ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'}`}>{shift.season_code}</span>
+                             <tr key={shift.id} className="hover:bg-slate-50/50 transition-colors">
+                                 <td className="p-4 font-bold text-slate-800">{shift.name}</td>
+                                 <td className="p-4">
+                                     <span className={`text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wide border ${shift.season_code === 'PEAK' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>{shift.season_code}</span>
                                  </td>
-                                 <td className="p-3 text-center">
-                                     <div className="flex items-center justify-center gap-1 bg-white border border-slate-200 rounded px-2 py-1 w-fit mx-auto">
-                                         <Clock size={12} className="text-slate-400"/>
-                                         <input type="time" className="bg-transparent outline-none font-mono text-xs font-bold w-16 text-center" value={shift.start_time} onChange={e => handleUpdateLocalShift(shift.id, 'start_time', e.target.value + ':00')} />
+                                 <td className="p-4 text-center">
+                                     <div className="flex items-center justify-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1.5 w-fit mx-auto shadow-sm focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-400 transition-all">
+                                         <Clock size={14} className="text-brand-500"/>
+                                         <input type="time" className="bg-transparent outline-none font-mono text-[13px] font-bold w-20 text-center text-slate-700" value={shift.start_time} onChange={e => handleUpdateLocalShift(shift.id, 'start_time', e.target.value + ':00')} />
                                      </div>
                                  </td>
-                                 <td className="p-3 text-center">
-                                     <div className="flex items-center justify-center gap-1 bg-white border border-slate-200 rounded px-2 py-1 w-fit mx-auto">
-                                         <Clock size={12} className="text-slate-400"/>
-                                         <input type="time" className="bg-transparent outline-none font-mono text-xs font-bold w-16 text-center" value={shift.end_time} onChange={e => handleUpdateLocalShift(shift.id, 'end_time', e.target.value + ':00')} />
+                                 <td className="p-4 text-center">
+                                     <div className="flex items-center justify-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1.5 w-fit mx-auto shadow-sm focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-400 transition-all">
+                                         <Clock size={14} className="text-slate-400"/>
+                                         <input type="time" className="bg-transparent outline-none font-mono text-[13px] font-bold w-20 text-center text-slate-700" value={shift.end_time} onChange={e => handleUpdateLocalShift(shift.id, 'end_time', e.target.value + ':00')} />
                                      </div>
                                  </td>
-                                 <td className="p-3 text-center">
-                                     <input type="number" step="0.1" className="w-12 border rounded text-center text-xs p-1 font-bold text-slate-600" value={shift.coefficient} onChange={e => handleUpdateLocalShift(shift.id, 'coefficient', Number(e.target.value))} />
+                                 <td className="p-4 text-center">
+                                     <input type="number" step="0.1" className="w-16 border border-slate-200 rounded-lg text-center p-2 font-bold text-brand-700 bg-white shadow-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none transition-all" value={shift.coefficient} onChange={e => handleUpdateLocalShift(shift.id, 'coefficient', Number(e.target.value))} />
                                  </td>
-                                 <td className="p-3 text-center">
-                                     <input type="number" className="w-12 border rounded text-center text-xs p-1" value={shift.grace_period_minutes} onChange={e => handleUpdateLocalShift(shift.id, 'grace_period_minutes', Number(e.target.value))} />
+                                 <td className="p-4 text-center">
+                                     <input type="number" className="w-16 border border-slate-200 rounded-lg text-center p-2 font-bold text-slate-700 bg-white shadow-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none transition-all" value={shift.grace_period_minutes} onChange={e => handleUpdateLocalShift(shift.id, 'grace_period_minutes', Number(e.target.value))} />
                                  </td>
                              </tr>
                          ))}
@@ -455,94 +494,112 @@ export const Settings: React.FC = () => {
              </div>
          </div>
 
-         {/* SYSTEM CONFIG (AI KEY) */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
-             <div className="flex justify-between items-center mb-4">
-                <div>
-                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Cpu size={20}/> Cấu hình AI (Gemini API)</h3>
-                   <p className="text-xs text-slate-500 mt-1">Quản lý API Key cho tính năng OCR và Chatbot.</p>
+           </>
+         )}
+
+         {activeTab === 'system' && (
+           <>
+               {/* SYSTEM CONFIG (AI KEY) */}
+               <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col lg:col-span-3 hover:shadow-md transition-shadow">
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                      <div>
+                         <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                       <div className="bg-purple-100 p-2 rounded-lg text-purple-600"><Cpu size={20}/></div>
+                       Cấu hình AI (Gemini API)
+                   </h3>
+                   <p className="text-sm text-slate-500 mt-1 ml-11">Quản lý API Key cho tính năng AI và Chatbot thông minh.</p>
                 </div>
-                <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200 text-xs text-blue-800">
-                    <Lock size={14}/> <span>Key được lưu trong Database (Secure)</span>
+                <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-600">
+                    <Lock size={14} className="text-emerald-500"/> <span>Key mã hóa trong Database</span>
                 </div>
              </div>
              
-             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Gemini API Key</label>
-                 <div className="flex gap-2">
+             <div className="bg-gradient-to-br from-slate-50 to-white p-5 rounded-lg border border-slate-100 shadow-inner">
+                 <label className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2 block">Cấp phép Gemini API Key</label>
+                 <div className="flex flex-col sm:flex-row gap-3">
                      <input 
                         type="password" 
-                        className="flex-1 border-2 border-slate-200 rounded-lg p-2.5 text-sm font-mono text-slate-800 focus:border-brand-500 outline-none"
-                        placeholder="AIzaSy..."
+                        className="flex-1 w-full border-2 border-slate-200 rounded-lg p-3 text-sm font-mono tracking-widest text-slate-800 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 outline-none transition-all shadow-sm"
+                        placeholder="Nhập chuỗi khóa AIzaSy..."
                         value={geminiKey}
                         onChange={e => setGeminiKey(e.target.value)}
                      />
                      <button 
                         onClick={handleSaveGeminiKey}
                         disabled={isSavingKey}
-                        className="bg-brand-600 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-md hover:bg-brand-700 flex items-center gap-2"
+                        className="bg-purple-600 text-white px-6 py-3 rounded-lg font-bold text-sm shadow-md shadow-purple-500/20 hover:bg-purple-700 hover:shadow-lg focus:ring-4 focus:ring-purple-200 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 shrink-0 w-full sm:w-auto"
                      >
-                         {isSavingKey ? 'Đang lưu...' : 'Cập nhật Key'}
+                         {isSavingKey ? <Loader2 className="animate-spin" size={18}/> : 'Cập nhật Key'}
                      </button>
                  </div>
-                 <p className="text-[10px] text-slate-400 mt-2 italic">Key này sẽ được ưu tiên sử dụng thay cho biến môi trường (Environment Variable).</p>
+                 <p className="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5"><AlertTriangle size={12} className="text-amber-500"/> Yêu cầu làm mới trang (F5) nếu các tính năng AI vẫn chưa hoạt động sau khi cập nhật.</p>
              </div>
          </div>
 
-         {/* RECIPE CONFIG */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-full lg:col-span-3">
-             {/* ... Same Recipe Content ... */}
-             <div className="flex justify-between items-center mb-4">
-                <div>
-                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><ChefHat size={20}/> Định Mức & Công Thức Phòng (Room Recipes)</h3>
-                   <p className="text-xs text-slate-500 mt-1">Thiết lập các món đồ (Amenity, Minibar, Linen) mặc định cho từng loại phòng.</p>
+           </>
+         )}
+
+         {activeTab === 'inventory' && (
+           <>
+               {/* RECIPE CONFIG */}
+               <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col h-full lg:col-span-3 hover:shadow-md transition-shadow">
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                      <div>
+                         <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                       <div className="bg-red-100 p-2 rounded-lg text-red-600"><ChefHat size={20}/></div>
+                       Định Mức & Công Thức Phòng (Room Recipes)
+                   </h3>
+                   <p className="text-sm text-slate-500 mt-1 ml-11">Thiết lập các món đồ (Amenity, Minibar, Linen) mặc định cho từng loại phòng.</p>
                 </div>
                 <button 
                     onClick={() => { setEditingRecipeKey(undefined); setEditingRecipeData(null); setRecipeModalOpen(true); }}
-                    className="bg-brand-50 text-brand-700 hover:bg-brand-100 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors border border-brand-200"
+                    className="bg-red-50 text-red-700 hover:bg-red-600 hover:text-white px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all border border-red-200 hover:border-red-600 shadow-sm"
                 >
                     <Plus size={16}/> Tạo Công Thức Mới
                 </button>
              </div>
 
              {/* Room Type Statistics Summary */}
-             <div className="flex flex-wrap gap-2 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-100 animate-in fade-in">
-                 <div className="flex items-center gap-2 pr-3 border-r border-slate-200">
-                     <span className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><BedDouble size={14}/> Tổng:</span>
-                     <span className="text-sm font-black text-slate-800">{rooms.length} phòng</span>
+             <div className="flex flex-wrap items-center gap-3 mb-6 p-4 bg-slate-50 rounded-lg border border-slate-100 animate-in fade-in shadow-inner">
+                 <div className="flex items-center gap-2 pr-4 border-r-2 border-slate-200 py-1">
+                     <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><BedDouble size={16} className="text-slate-500"/> Tổng:</span>
+                     <span className="text-lg font-black text-slate-700">{rooms.length} phòng</span>
                  </div>
-                 {Object.entries(roomTypeStats).sort((a,b) => Number(b[1]) - Number(a[1])).map(([type, count]) => (
-                     <div key={type} className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-slate-200 text-[10px] font-medium shadow-sm">
-                         <span className="text-slate-600">{type}:</span>
-                         <span className="font-black text-brand-600">{count}</span>
-                     </div>
-                 ))}
+                 <div className="flex flex-wrap gap-2">
+                     {Object.entries(roomTypeStats).sort((a,b) => Number(b[1]) - Number(a[1])).map(([type, count]) => (
+                         <div key={type} className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm hover:border-brand-300 transition-colors cursor-default">
+                             <span className="text-slate-500 font-medium">{type}:</span>
+                             <span className="font-black text-brand-600">{count}</span>
+                         </div>
+                     ))}
+                 </div>
              </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                  {Object.entries(roomRecipes).map(([key, rawRecipe]) => {
                      const recipe = rawRecipe as RoomRecipe;
                      const roomCount = roomTypeStats[key] || 0;
                      return (
-                     <div key={key} className="bg-slate-50 rounded-xl border border-slate-200 p-4 hover:border-brand-300 transition-all hover:shadow-md group">
-                         <div className="flex justify-between items-start mb-3">
+                     <div key={key} className="bg-white rounded-lg border-2 border-slate-100 p-5 hover:border-red-300 transition-all hover:shadow-lg group relative overflow-hidden">
+                         <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-bl from-red-50 to-transparent opacity-50 pointer-events-none"></div>
+                         <div className="flex justify-between items-start mb-4 relative z-10">
                              <div>
-                                 <div className="text-lg font-black text-slate-800 flex items-center gap-2">
+                                 <div className="text-xl font-black text-slate-800 flex items-center gap-2 mb-1 tracking-tight">
                                      {key}
-                                     {roomCount > 0 && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-blue-200">{roomCount} phòng</span>}
+                                     {roomCount > 0 && <span className="bg-blue-100 text-blue-700 text-[10px] px-2.5 py-1 rounded-full font-black tracking-wider border border-blue-200 shadow-sm">{roomCount} phòng</span>}
                                  </div>
-                                 <div className="text-xs text-slate-500 font-medium">{recipe.description}</div>
+                                 <div className="text-sm text-slate-500 font-medium">{recipe.description}</div>
                              </div>
-                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                             <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                  <button 
                                     onClick={() => { setEditingRecipeKey(key); setEditingRecipeData(recipe); setRecipeModalOpen(true); }}
-                                    className="p-1.5 bg-white border border-slate-200 text-blue-600 rounded-lg hover:border-blue-300"
+                                    className="p-2 bg-white border border-slate-200 text-blue-600 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-colors shadow-sm"
                                  >
                                      <Pencil size={14}/>
                                  </button>
                                  <button 
                                     onClick={() => { if(confirm(`Xóa định mức ${key}?`)) deleteRoomRecipe(key); }}
-                                    className="p-1.5 bg-white border border-slate-200 text-rose-600 rounded-lg hover:border-rose-300"
+                                    className="p-2 bg-white border border-slate-200 text-rose-600 rounded-lg hover:border-rose-400 hover:bg-rose-50 transition-colors shadow-sm"
                                  >
                                      <Trash size={14}/>
                                  </button>
@@ -550,15 +607,15 @@ export const Settings: React.FC = () => {
                          </div>
                          
                          {/* Item Summary */}
-                         <div className="flex flex-wrap gap-1.5">
-                             {(recipe.items || []).slice(0, 5).map((item, idx) => (
-                                 <span key={idx} className="text-[10px] bg-white border border-slate-100 px-2 py-1 rounded text-slate-600 font-medium">
-                                     {item.itemId} <b className="text-brand-600">x{item.quantity}</b>
+                         <div className="flex flex-wrap gap-2 relative z-10 pt-3 border-t border-slate-100">
+                             {(recipe.items || []).slice(0, 6).map((item, idx) => (
+                                 <span key={idx} className="text-xs bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-md text-slate-600 font-medium flex gap-1.5 items-center">
+                                     {item.itemId} <b className="text-brand-600 bg-brand-50 px-1 py-0.5 rounded">x{item.quantity}</b>
                                  </span>
                              ))}
-                             {(recipe.items?.length ?? 0) > 5 && (
-                                 <span className="text-[10px] bg-slate-200 px-1.5 py-0.5 rounded text-slate-500 font-bold">
-                                     +{((recipe.items?.length ?? 0) - 5)}
+                             {(recipe.items?.length ?? 0) > 6 && (
+                                 <span className="text-xs bg-slate-200 px-2.5 py-1 rounded-md text-slate-600 font-black flex items-center">
+                                     +{((recipe.items?.length ?? 0) - 6)}
                                  </span>
                              )}
                          </div>
@@ -569,18 +626,21 @@ export const Settings: React.FC = () => {
          </div>
 
          {/* ... INVENTORY ANALYSIS ... */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col lg:col-span-3">
-             <div className="flex justify-between items-center mb-6">
+         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col lg:col-span-3 hover:shadow-md transition-shadow">
+             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                 <div>
-                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Calculator size={20}/> Kiểm Tra Cân Đối Kho & Định Mức</h3>
-                   <p className="text-xs text-slate-500 mt-1">So sánh tổng nhu cầu (dựa trên số lượng phòng và công thức) với tài sản thực tế.</p>
+                   <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                       <div className="bg-emerald-100 p-2 rounded-lg text-emerald-600"><Calculator size={20}/></div>
+                       Kiểm Tra Cân Đối Kho & Định Mức
+                   </h3>
+                   <p className="text-sm text-slate-500 mt-1 ml-11">So sánh tổng nhu cầu (dựa trên số lượng phòng và công thức) với tài sản thực tế.</p>
                 </div>
                 <button 
                     onClick={() => refreshData()}
                     disabled={isLoading}
-                    className="flex items-center gap-2 bg-slate-50 text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold transition-colors"
+                    className="flex items-center gap-2 bg-slate-50 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-bold transition-all shadow-sm"
                 >
-                    <RotateCw size={14} className={isLoading ? 'animate-spin' : ''}/> Làm mới dữ liệu
+                    <RotateCw size={16} className={isLoading ? 'animate-spin' : ''}/> Làm mới dữ liệu
                 </button>
              </div>
 
@@ -641,12 +701,20 @@ export const Settings: React.FC = () => {
              </div>
          </div>
 
-         {/* Webhooks Section */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-full lg:col-span-3">
-             <div className="flex justify-between items-center mb-4">
-                <div>
-                   <h3 className="font-bold text-gray-800 flex items-center gap-2"><Globe size={20}/> Webhooks Integration</h3>
-                   <p className="text-xs text-slate-500 mt-1">Kết nối n8n/Google Apps Script. <b>Lưu ý:</b> Cấu hình Node nhận là <b>POST</b>.</p>
+           </>
+         )}
+
+         {activeTab === 'system' && (
+           <>
+               {/* Webhooks Section */}
+               <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col h-full lg:col-span-3 hover:shadow-md transition-shadow">
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                      <div>
+                         <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                       <div className="bg-teal-100 p-2 rounded-lg text-teal-600"><Globe size={20}/></div>
+                       Webhooks Integration
+                   </h3>
+                   <p className="text-sm text-slate-500 mt-1 ml-11">Kết nối n8n/Google Apps Script. <b>Lưu ý:</b> Cấu hình Node nhận là <b className="text-teal-600 bg-teal-50 px-1 rounded">POST</b>.</p>
                 </div>
              </div>
 
@@ -685,7 +753,7 @@ export const Settings: React.FC = () => {
                  </div>
                  
                  {isAddingWebhook ? (
-                    <div className="mt-4 p-4 bg-brand-50 rounded-xl border border-brand-100 animate-in fade-in">
+                    <div className="mt-4 p-4 bg-brand-50 rounded-lg border border-brand-100 animate-in fade-in">
                        <h4 className="font-bold text-xs text-brand-700 uppercase mb-2">Thêm Webhook mới</h4>
                        <div className="flex gap-2 mb-2 flex-wrap">
                           <input className="flex-[3] min-w-[200px] border rounded p-2 text-sm bg-white text-slate-900" placeholder="https://script.google.com/..." value={newWebhook.url} onChange={e => setNewWebhook({...newWebhook, url: e.target.value})} />
@@ -705,23 +773,34 @@ export const Settings: React.FC = () => {
                        </div>
                     </div>
                  ) : (
-                    <button onClick={() => setIsAddingWebhook(true)} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-brand-400 hover:text-brand-600 hover:bg-brand-50 transition-all flex items-center justify-center gap-2 mt-4 font-medium">
+                    <button onClick={() => setIsAddingWebhook(true)} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-brand-400 hover:text-brand-600 hover:bg-brand-50 transition-all flex items-center justify-center gap-2 mt-4 font-medium">
                        <Plus size={18} /> Thêm Webhook
                     </button>
                  )}
              </div>
          </div>
 
-         {/* Service Menu Section */}
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-full lg:col-span-2">
-             <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2"><ShoppingCart size={20}/> Menu Dịch Vụ / Minibar</h3>
+           </>
+         )}
+
+         {activeTab === 'inventory' && (
+           <>
+               {/* Service Menu Section */}
+               <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col h-full lg:col-span-3 hover:shadow-md transition-shadow">
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                      <div>
+                          <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                        <div className="bg-amber-100 p-2 rounded-lg text-amber-600"><ShoppingCart size={20}/></div>
+                        Menu Dịch Vụ / Minibar
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-1 ml-11">Quản lý danh sách các dịch vụ cung cấp cho khách.</p>
+                </div>
                 <button 
                     onClick={handleResetMenu}
-                    className="text-xs flex items-center gap-1 text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                    className="text-sm flex items-center gap-2 text-blue-700 bg-blue-50 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-lg transition-all font-bold shadow-sm"
                     title="Khôi phục danh sách mẫu nếu dữ liệu trống"
                 >
-                    <Database size={14}/> Nạp dữ liệu mẫu
+                    <Database size={16}/> Nạp dữ liệu mẫu
                 </button>
              </div>
              
@@ -749,7 +828,7 @@ export const Settings: React.FC = () => {
                  </div>
                  
                  {isAddingService ? (
-                    <div className="mt-4 p-4 bg-brand-50 rounded-xl border border-brand-100 animate-in fade-in">
+                    <div className="mt-4 p-4 bg-brand-50 rounded-lg border border-brand-100 animate-in fade-in">
                        <h4 className="font-bold text-xs text-brand-700 uppercase mb-2">Thêm món mới</h4>
                        <div className="flex gap-2 mb-2 flex-wrap">
                           <input className="flex-[2] min-w-[150px] border rounded p-2 text-sm bg-white text-slate-900" placeholder="Tên món (vd: Nước suối)" value={newService.name} onChange={e => setNewService({...newService, name: e.target.value})} />
@@ -771,17 +850,31 @@ export const Settings: React.FC = () => {
                        </div>
                     </div>
                  ) : (
-                    <button onClick={() => setIsAddingService(true)} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-brand-400 hover:text-brand-600 hover:bg-brand-50 transition-all flex items-center justify-center gap-2 mt-4 font-medium">
+                    <button onClick={() => setIsAddingService(true)} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-lg text-gray-400 hover:border-brand-400 hover:text-brand-600 hover:bg-brand-50 transition-all flex items-center justify-center gap-2 mt-4 font-medium">
                        <Plus size={18} /> Thêm dịch vụ
                     </button>
                  )}
              </div>
          </div>
 
-         <Section title="Nguồn Khách" dataKey="sources" />
-         <Section title="Hình Thức Thuê" dataKey="room_methods" />
-         <Section title="Danh Mục Chi Phí" dataKey="expense_categories" />
-         <Section title="Trạng Thái Phòng" dataKey="room_status" />
+           </>
+         )}
+
+         {activeTab === 'general' && (
+           <>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:col-span-3 animate-in fade-in">
+                   <Section title="Nguồn Khách" dataKey="sources" icon={Globe} />
+             <Section title="Hình Thức Thuê" dataKey="room_methods" icon={Clock} />
+             <Section title="Danh Mục Chi Phí" dataKey="expense_categories" icon={CreditCard} />
+             <Section title="Trạng Thái Phòng" dataKey="room_status" icon={TrendingUp} />
+          </div>
+               <div className="lg:col-span-3 flex justify-end mt-2">
+                   <button onClick={handleSave} className="bg-brand-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 font-bold hover:bg-brand-700 shadow-lg shadow-brand-500/20 transition-all active:scale-95 group">
+                       <Save size={20} className="group-hover:scale-110 transition-transform" /> Lưu thay đổi
+                   </button>
+               </div>
+           </>
+         )}
       </div>
 
       <RecipeModal 

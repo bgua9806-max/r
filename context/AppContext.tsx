@@ -37,6 +37,7 @@ interface AppContextType {
   bankAccounts: BankAccount[];
   salaryAdvances: SalaryAdvance[];
   violations: Violation[];
+  guestProfiles: GuestProfile[];
   
   settings: Settings;
   roomRecipes: Record<string, RoomRecipe>;
@@ -114,6 +115,7 @@ interface AppContextType {
   setAppConfig: (config: {key: string, value: string, description?: string}) => Promise<void>;
   
   addGuestProfile: (p: GuestProfile) => Promise<void>;
+  updateGuestProfile: (p: GuestProfile) => Promise<void>;
   
   syncOtaOrders: (orders?: OtaOrder[], silent?: boolean) => Promise<void>;
   queryOtaOrders: (params: { page: number, pageSize: number, tab: string, search: string, dateFilter?: any }) => Promise<{ data: OtaOrder[], hasMore: boolean }>;
@@ -213,6 +215,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
   const [violations, setViolations] = useState<Violation[]>([]);
+  const [guestProfiles, setGuestProfiles] = useState<GuestProfile[]>([]);
   
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [shiftDefinitions, setShiftDefinitions] = useState<ShiftDefinition[]>([]);
@@ -259,7 +262,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
           const [
               facs, rms, bks, svcs, trans, collabs, tasks, invTrans, shfts, schs, adjs, leaves, logs, whs, advs, vios,
-              seasonsData, shiftsData
+              seasonsData, shiftsData, gProfiles
           ] = await Promise.all([
               storageService.getFacilities(),
               storageService.getRooms(),
@@ -278,7 +281,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               storageService.getSalaryAdvances(),
               storageService.getViolations(),
               storageService.getSeasons(),
-              storageService.getShiftDefinitions()
+              storageService.getShiftDefinitions(),
+              storageService.getGuestProfiles()
           ]);
 
           setFacilities(facs);
@@ -299,6 +303,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setViolations(vios);
           setSeasons(seasonsData);
           setShiftDefinitions(shiftsData);
+          setGuestProfiles(gProfiles);
           
           if (full) {
               await syncOtaOrders(undefined, true);
@@ -781,7 +786,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const getGeminiApiKey = async () => await storageService.getAppConfig('GEMINI_API_KEY');
   const setAppConfig = async (config: {key: string, value: string, description?: string}) => { await storageService.setAppConfig(config); };
-  const addGuestProfile = async (p: GuestProfile) => { await storageService.addGuestProfile(p); };
+  const addGuestProfile = async (p: GuestProfile) => { await storageService.addGuestProfile(p); setGuestProfiles(await storageService.getGuestProfiles()); };
+  const updateGuestProfile = async (p: GuestProfile) => { await storageService.updateGuestProfile(p); setGuestProfiles(await storageService.getGuestProfiles()); };
 
   const addBankAccount = async (b: BankAccount) => { await storageService.addBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
   const updateBankAccount = async (b: BankAccount) => { await storageService.updateBankAccount(b); setBankAccounts(await storageService.getBankAccounts()); };
@@ -1102,7 +1108,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser, setCurrentUser, isLoading, isInitialized,
       facilities, rooms, bookings, services, transactions, collaborators,
       housekeepingTasks, inventoryTransactions, shifts, schedules, adjustments,
-      leaveRequests, otaOrders, timeLogs, bankAccounts, salaryAdvances, violations,
+      leaveRequests, otaOrders, timeLogs, bankAccounts, salaryAdvances, violations, guestProfiles,
       settings, roomRecipes, webhooks, currentShift, toasts,
       
       // New State
@@ -1122,7 +1128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       upsertSchedule, deleteSchedule, upsertAdjustment,
       updateSettings, updateRoomRecipe, deleteRoomRecipe,
       addWebhook, updateWebhook, deleteWebhook, triggerWebhook,
-      getGeminiApiKey, setAppConfig, addGuestProfile,
+      getGeminiApiKey, setAppConfig, addGuestProfile, updateGuestProfile,
       addBankAccount, updateBankAccount, deleteBankAccount,
       
       syncOtaOrders, queryOtaOrders, updateOtaOrder, deleteOtaOrder, confirmOtaCancellation,

@@ -588,6 +588,7 @@ export const storageService = {
             facilityName: b.facilityName || b.facilityname,
             roomCode: b.roomCode || b.roomcode,
             customerName: b.customerName || b.customername,
+            customerPhone: b.customerPhone || b.customerphone,
         };
 
         let isDeclared = mappedBooking.isDeclared;
@@ -952,6 +953,27 @@ export const storageService = {
       if (IS_USING_MOCK) return { error: null };
       const { error } = await supabase.from('guest_profiles').insert(item);
       if (error && !isTableMissingError(error)) logError('Error adding guest profile', error);
+      return { error };
+  },
+
+  getGuestProfiles: async (): Promise<GuestProfile[]> => {
+      return safeFetch(
+          supabase.from('guest_profiles').select('*').order('created_at', { ascending: false }),
+          [], 'guest_profiles'
+      );
+  },
+
+  updateGuestProfile: async (item: GuestProfile) => {
+      if (IS_USING_MOCK) return { error: null };
+      const { error } = await supabase.from('guest_profiles').update({
+          tags: item.tags,
+          notes: item.notes,
+          preferences: item.preferences,
+          vip_tier: item.vip_tier,
+          full_name: item.full_name,
+          phone: item.phone
+      }).eq('id', item.id);
+      if (error && !isTableMissingError(error)) logError('Error updating guest profile', error);
       return { error };
   },
 

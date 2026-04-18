@@ -405,6 +405,11 @@ export interface GuestProfile {
   booking_id?: string;
   staff_id?: string;
   scan_data_json?: string; // Store raw JSON from OCR for backup
+  // CRM Phase 2 fields
+  tags?: string;         // Comma-separated: "VIP,OTA-Agoda,Loyal"
+  notes?: string;        // Ghi chú nội bộ nhân viên
+  preferences?: string;  // Sở thích phòng, dị ứng, yêu cầu đặc biệt
+  vip_tier?: string;     // 'Bronze' | 'Silver' | 'Gold' | 'Platinum'
 }
 
 // Interface for Sheet Import
