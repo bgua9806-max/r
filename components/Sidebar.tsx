@@ -57,12 +57,12 @@ export const Sidebar: React.FC<{ isOpen: boolean; toggle: () => void }> = ({ isO
       {/* Header Sidebar */}
       <div className={`h-16 flex items-center border-b border-slate-800/80 bg-[#020617] ${(!isOpen && window.innerWidth >= 768) ? 'justify-center px-0' : 'justify-between px-4'}`}>
         <div className={`flex items-center overflow-hidden whitespace-nowrap ${(!isOpen && window.innerWidth >= 768) ? 'justify-center' : 'gap-3'}`}>
-          <div className="w-9 h-9 rounded bg-gradient-to-tr from-amber-200 via-yellow-400 to-amber-600 flex items-center justify-center text-slate-900 shrink-0 shadow-lg border border-amber-200">
-             <span className="font-black font-sans text-xl leading-none mt-0.5 tracking-tighter">M</span>
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-amber-300 via-yellow-400 to-amber-600 flex items-center justify-center text-slate-900 shrink-0 shadow-lg shadow-amber-500/20 ring-1 ring-amber-300/30">
+             <span className="font-black font-sans text-xl leading-none tracking-tighter">M</span>
           </div>
           <div className={`transition-all duration-300 flex flex-col justify-center ${(isOpen || window.innerWidth < 768) ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
-             <h1 className="font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-yellow-500 text-[15px] tracking-widest uppercase leading-none">PRESTIGE STAY</h1>
-             <span className="text-[10px] text-amber-500/70 font-bold tracking-widest mt-0.5">0888 991 823</span>
+             <h1 className="font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-yellow-400 text-[15px] tracking-widest uppercase leading-none">PRESTIGE STAY</h1>
+             <span className="text-[9px] text-slate-500 font-semibold tracking-[0.2em] mt-1 uppercase">Hotel Management</span>
           </div>
         </div>
         
