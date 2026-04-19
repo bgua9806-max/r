@@ -642,7 +642,12 @@ export const storageService = {
         isdeclared: item.isDeclared, 
         groupid: payload.groupId,
         groupname: payload.groupName,
-        isgroupleader: payload.isGroupLeader
+        isgroupleader: payload.isGroupLeader,
+        // Explicitly map camelCase → lowercase
+        customerphone: item.customerPhone || payload.customerPhone || payload.customerphone || '',
+        customername: item.customerName || payload.customerName || payload.customername || '',
+        roomcode: item.roomCode || payload.roomCode || payload.roomcode || '',
+        facilityname: item.facilityName || payload.facilityName || payload.facilityname || '',
     };
     
     delete dbPayload.lendingJson;
@@ -650,6 +655,11 @@ export const storageService = {
     delete dbPayload.groupId;
     delete dbPayload.groupName;
     delete dbPayload.isGroupLeader;
+    // Remove camelCase duplicates
+    delete dbPayload.customerPhone;
+    delete dbPayload.customerName;
+    delete dbPayload.roomCode;
+    delete dbPayload.facilityName;
 
     const { error } = await supabase.from('bookings').insert(dbPayload);
     if (error) logError('Error adding booking', error);
@@ -688,7 +698,12 @@ export const storageService = {
         isdeclared: item.isDeclared,
         groupid: payload.groupId,
         groupname: payload.groupName,
-        isgroupleader: payload.isGroupLeader
+        isgroupleader: payload.isGroupLeader,
+        // Explicitly map camelCase → lowercase to prevent duplicate key conflicts
+        customerphone: item.customerPhone || payload.customerPhone || payload.customerphone || '',
+        customername: item.customerName || payload.customerName || payload.customername || '',
+        roomcode: item.roomCode || payload.roomCode || payload.roomcode || '',
+        facilityname: item.facilityName || payload.facilityName || payload.facilityname || '',
     };
     
     delete dbPayload.lendingJson;
@@ -696,6 +711,11 @@ export const storageService = {
     delete dbPayload.groupId;
     delete dbPayload.groupName;
     delete dbPayload.isGroupLeader;
+    // Remove camelCase duplicates
+    delete dbPayload.customerPhone;
+    delete dbPayload.customerName;
+    delete dbPayload.roomCode;
+    delete dbPayload.facilityName;
 
     const { error } = await supabase.from('bookings').update(dbPayload).eq('id', item.id);
     if (error) logError('Error updating booking', error);
