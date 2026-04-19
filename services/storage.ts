@@ -610,56 +610,52 @@ export const storageService = {
 
   addBooking: async (item: Booking) => {
     if (IS_USING_MOCK) return;
-    const payload: any = { ...item };
-    
+
+    // Pack extra flags into cleaningJson
+    let cleaningJson = item.cleaningJson || '{}';
     try {
-        const cleanObj = payload.cleaningJson ? JSON.parse(payload.cleaningJson) : {};
-        if (payload.isDeclared) cleanObj.isDeclared = true;
-        else delete cleanObj.isDeclared;
-
-        if (payload.depositRefunded) cleanObj.depositRefunded = true;
-        else delete cleanObj.depositRefunded;
-        
-        if (payload.depositAmount) cleanObj.depositAmount = payload.depositAmount;
-        else delete cleanObj.depositAmount;
-
-        payload.cleaningJson = JSON.stringify(cleanObj);
+        const cleanObj = JSON.parse(cleaningJson);
+        if (item.isDeclared) cleanObj.isDeclared = true; else delete cleanObj.isDeclared;
+        if (item.depositRefunded) cleanObj.depositRefunded = true; else delete cleanObj.depositRefunded;
+        if (item.depositAmount) cleanObj.depositAmount = item.depositAmount; else delete cleanObj.depositAmount;
+        cleaningJson = JSON.stringify(cleanObj);
     } catch (e) {
-        payload.cleaningJson = JSON.stringify({ 
-            isDeclared: payload.isDeclared, 
-            depositRefunded: payload.depositRefunded,
-            depositAmount: payload.depositAmount
-        });
+        cleaningJson = JSON.stringify({ isDeclared: item.isDeclared, depositRefunded: item.depositRefunded, depositAmount: item.depositAmount });
     }
-    delete payload.isDeclared; 
-    delete payload.depositRefunded;
-    delete payload.depositAmount;
 
-    const dbPayload = {
-        ...payload,
-        lendingjson: payload.lendingJson,
-        guestsjson: payload.guestsJson,
-        isdeclared: item.isDeclared, 
-        groupid: payload.groupId,
-        groupname: payload.groupName,
-        isgroupleader: payload.isGroupLeader,
-        // Explicitly map camelCase → lowercase
-        customerphone: item.customerPhone || payload.customerPhone || payload.customerphone || '',
-        customername: item.customerName || payload.customerName || payload.customername || '',
-        roomcode: item.roomCode || payload.roomCode || payload.roomcode || '',
-        facilityname: item.facilityName || payload.facilityName || payload.facilityname || '',
+    // WHITELIST: Only send known DB columns mapping exactly to supabase
+    const dbPayload: any = {
+        id: item.id,
+        facilityName: item.facilityName,
+        roomCode: item.roomCode,
+        createdDate: item.createdDate,
+        customerName: item.customerName,
+        customerPhone: item.customerPhone || '',
+        source: item.source,
+        collaborator: item.collaborator,
+        paymentMethod: item.paymentMethod || '',
+        checkinDate: item.checkinDate,
+        checkoutDate: item.checkoutDate,
+        status: item.status,
+        actualCheckIn: item.actualCheckIn,
+        actualCheckOut: item.actualCheckOut,
+        price: item.price,
+        extraFee: item.extraFee,
+        totalRevenue: item.totalRevenue,
+        note: item.note || '',
+        paymentsJson: item.paymentsJson,
+        remainingAmount: item.remainingAmount,
+        cleaningJson: cleaningJson,
+        assignedCleaner: item.assignedCleaner || '',
+        servicesJson: item.servicesJson || '[]',
+        // DB originally used these as lowercase
+        lendingjson: item.lendingJson || '[]',
+        guestsjson: item.guestsJson || '[]',
+        isdeclared: !!item.isDeclared,
+        groupid: item.groupId || null,
+        groupname: item.groupName || null,
+        isgroupleader: !!item.isGroupLeader,
     };
-    
-    delete dbPayload.lendingJson;
-    delete dbPayload.guestsJson;
-    delete dbPayload.groupId;
-    delete dbPayload.groupName;
-    delete dbPayload.isGroupLeader;
-    // Remove camelCase duplicates
-    delete dbPayload.customerPhone;
-    delete dbPayload.customerName;
-    delete dbPayload.roomCode;
-    delete dbPayload.facilityName;
 
     const { error } = await supabase.from('bookings').insert(dbPayload);
     if (error) logError('Error adding booking', error);
@@ -667,55 +663,50 @@ export const storageService = {
 
   updateBooking: async (item: Booking) => {
     if (IS_USING_MOCK) return;
-    const payload: any = { ...item };
+
+    // Pack extra flags into cleaningJson
+    let cleaningJson = item.cleaningJson || '{}';
     try {
-        const cleanObj = payload.cleaningJson ? JSON.parse(payload.cleaningJson) : {};
-        if (payload.isDeclared) cleanObj.isDeclared = true;
-        else delete cleanObj.isDeclared;
-        
-        if (payload.depositRefunded) cleanObj.depositRefunded = true;
-        else delete cleanObj.depositRefunded;
-        
-        if (payload.depositAmount) cleanObj.depositAmount = payload.depositAmount;
-        else delete cleanObj.depositAmount;
-
-        payload.cleaningJson = JSON.stringify(cleanObj);
+        const cleanObj = JSON.parse(cleaningJson);
+        if (item.isDeclared) cleanObj.isDeclared = true; else delete cleanObj.isDeclared;
+        if (item.depositRefunded) cleanObj.depositRefunded = true; else delete cleanObj.depositRefunded;
+        if (item.depositAmount) cleanObj.depositAmount = item.depositAmount; else delete cleanObj.depositAmount;
+        cleaningJson = JSON.stringify(cleanObj);
     } catch (e) {
-        payload.cleaningJson = JSON.stringify({ 
-            isDeclared: payload.isDeclared, 
-            depositRefunded: payload.depositRefunded,
-            depositAmount: payload.depositAmount
-        });
+        cleaningJson = JSON.stringify({ isDeclared: item.isDeclared, depositRefunded: item.depositRefunded, depositAmount: item.depositAmount });
     }
-    delete payload.isDeclared;
-    delete payload.depositRefunded;
-    delete payload.depositAmount;
 
-    const dbPayload = {
-        ...payload,
-        lendingjson: payload.lendingJson,
-        guestsjson: payload.guestsJson,
-        isdeclared: item.isDeclared,
-        groupid: payload.groupId,
-        groupname: payload.groupName,
-        isgroupleader: payload.isGroupLeader,
-        // Explicitly map camelCase → lowercase to prevent duplicate key conflicts
-        customerphone: item.customerPhone || payload.customerPhone || payload.customerphone || '',
-        customername: item.customerName || payload.customerName || payload.customername || '',
-        roomcode: item.roomCode || payload.roomCode || payload.roomcode || '',
-        facilityname: item.facilityName || payload.facilityName || payload.facilityname || '',
+    // WHITELIST: Only send known DB columns
+    const dbPayload: any = {
+        facilityName: item.facilityName,
+        roomCode: item.roomCode,
+        customerName: item.customerName,
+        customerPhone: item.customerPhone || '',
+        source: item.source,
+        collaborator: item.collaborator,
+        paymentMethod: item.paymentMethod || '',
+        checkinDate: item.checkinDate,
+        checkoutDate: item.checkoutDate,
+        status: item.status,
+        actualCheckIn: item.actualCheckIn,
+        actualCheckOut: item.actualCheckOut,
+        price: item.price,
+        extraFee: item.extraFee,
+        totalRevenue: item.totalRevenue,
+        note: item.note || '',
+        paymentsJson: item.paymentsJson,
+        remainingAmount: item.remainingAmount,
+        cleaningJson: cleaningJson,
+        assignedCleaner: item.assignedCleaner || '',
+        servicesJson: item.servicesJson || '[]',
+        // DB originally used these as lowercase
+        lendingjson: item.lendingJson || '[]',
+        guestsjson: item.guestsJson || '[]',
+        isdeclared: !!item.isDeclared,
+        groupid: item.groupId || null,
+        groupname: item.groupName || null,
+        isgroupleader: !!item.isGroupLeader,
     };
-    
-    delete dbPayload.lendingJson;
-    delete dbPayload.guestsJson;
-    delete dbPayload.groupId;
-    delete dbPayload.groupName;
-    delete dbPayload.isGroupLeader;
-    // Remove camelCase duplicates
-    delete dbPayload.customerPhone;
-    delete dbPayload.customerName;
-    delete dbPayload.roomCode;
-    delete dbPayload.facilityName;
 
     const { error } = await supabase.from('bookings').update(dbPayload).eq('id', item.id);
     if (error) logError('Error updating booking', error);
