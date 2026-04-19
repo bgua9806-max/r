@@ -31,3 +31,11 @@ html { scroll-behavior: smooth; }
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-enter { animation: enter 0.3s ease-out forwards; }
+
+/* CSS Compensation for 100vh with UI Zoom */
+.h-screen {
+  height: calc(100vh / var(--ui-zoom, 1)) !important;
+}
+.min-h-screen {
+  min-height: calc(100vh / var(--ui-zoom, 1)) !important;
+}

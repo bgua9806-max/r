@@ -63,6 +63,20 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     };
     window.addEventListener('resize', handleResize);
     
+    // Init Zoom logic
+    const initZoom = () => {
+      const mobile = window.innerWidth <= 768;
+      if (mobile) {
+        document.body.style.zoom = "100%";
+        document.documentElement.style.setProperty('--ui-zoom', "1");
+      } else {
+        const currentZoom = localStorage.getItem('cf_ui_zoom') || '100%';
+        document.body.style.zoom = currentZoom;
+        document.documentElement.style.setProperty('--ui-zoom', (parseFloat(currentZoom) / 100).toString());
+      }
+    };
+    initZoom();
+
     // Check connection status periodically
     const checkInterval = setInterval(() => {
         if (storageService.isUsingMock()) setIsMockData(true);

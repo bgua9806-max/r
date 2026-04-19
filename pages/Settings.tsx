@@ -60,6 +60,15 @@ export const Settings: React.FC = () => {
   const [localShifts, setLocalShifts] = useState<ShiftDefinition[]>([]);
   const [isSavingShifts, setIsSavingShifts] = useState(false);
 
+  // --- UI ZOOM STATE ---
+  const [uiZoom, setUiZoom] = useState(localStorage.getItem('cf_ui_zoom') || '100%');
+  const applyZoom = (zoomValue: string) => {
+    setUiZoom(zoomValue);
+    localStorage.setItem('cf_ui_zoom', zoomValue);
+    document.body.style.zoom = zoomValue;
+    document.documentElement.style.setProperty('--ui-zoom', (parseFloat(zoomValue) / 100).toString());
+  };
+
   // --- TABS STATE ---
   const [activeTab, setActiveTab] = useState<'finance' | 'inventory' | 'operation' | 'system' | 'general'>('finance');
 
@@ -533,6 +542,33 @@ export const Settings: React.FC = () => {
                      </button>
                  </div>
                  <p className="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5"><AlertTriangle size={12} className="text-amber-500"/> Yêu cầu làm mới trang (F5) nếu các tính năng AI vẫn chưa hoạt động sau khi cập nhật.</p>
+             </div>
+         </div>
+
+         {/* SYSTEM CONFIG (UI ZOOM) */}
+         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex flex-col lg:col-span-3 hover:shadow-md transition-shadow mt-6">
+             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                 <div>
+                     <h3 className="font-bold text-slate-800 flex items-center gap-3">
+                         <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Globe size={20}/></div>
+                         Tỷ lệ hiển thị hệ thống (UI Zoom)
+                     </h3>
+                     <p className="text-sm text-slate-500 mt-1 ml-11">Thu nhỏ giao diện để hiển thị được nhiều thông tin hơn (Chỉ áp dụng trên máy tính).</p>
+                 </div>
+             </div>
+             <div className="flex flex-wrap gap-3">
+                 {['80%', '90%', '100%', '110%', '120%'].map((zoom) => (
+                     <button
+                         key={zoom}
+                         onClick={(e) => {
+                             e.preventDefault();
+                             applyZoom(zoom);
+                         }}
+                         className={`px-5 py-2.5 rounded-lg font-bold transition-all border-2 ${uiZoom === zoom ? 'bg-brand-50 border-brand-500 text-brand-700 shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-brand-300 hover:bg-slate-50'}`}
+                     >
+                         {zoom}
+                     </button>
+                 ))}
              </div>
          </div>
 
