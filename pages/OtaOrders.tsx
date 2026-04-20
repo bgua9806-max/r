@@ -379,6 +379,7 @@ export const OtaOrders: React.FC = () => {
                     <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
                         <tr>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[140px]">Nguồn / Mã</th>
+                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[100px]">Ngày đặt</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[200px]">Khách hàng</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider min-w-[200px]">Loại phòng & Chế độ</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center w-[150px]">Thời gian</th>
@@ -389,7 +390,7 @@ export const OtaOrders: React.FC = () => {
                     <tbody className="divide-y divide-slate-100">
                         {displayData.length === 0 && !isFetching ? (
                             <tr>
-                                <td colSpan={6} className="p-12 text-center text-slate-400">
+                                <td colSpan={7} className="p-12 text-center text-slate-400">
                                     <CloudLightning size={48} className="mx-auto mb-2 opacity-30"/>
                                     <p className="text-sm font-medium">
                                         {searchTerm ? 'Không tìm thấy kết quả phù hợp.' : 'Không có đơn hàng nào.'}
@@ -455,6 +456,18 @@ export const OtaOrders: React.FC = () => {
                                                         </div>
                                                     </div>
                                                 )}
+                                            </div>
+                                        </td>
+
+                                        {/* COL 1.5: ORDER DATE (Ngày đặt) */}
+                                        <td className="p-4 align-top">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="text-sm font-medium text-slate-700">
+                                                    {isValid(orderEmailDate) ? format(orderEmailDate, 'dd/MM/yyyy') : '--'}
+                                                </div>
+                                                <div className="text-[10px] text-slate-400 font-medium">
+                                                    {isValid(orderEmailDate) ? format(orderEmailDate, 'HH:mm') : ''}
+                                                </div>
                                             </div>
                                         </td>
 
@@ -595,7 +608,7 @@ export const OtaOrders: React.FC = () => {
                         )}
                         {/* INFINITE SCROLL LOADER */}
                         <tr ref={observerTarget}>
-                            <td colSpan={6} className="p-4 text-center">
+                            <td colSpan={7} className="p-4 text-center">
                                 {isFetching && (
                                     <div className="flex items-center justify-center gap-2 text-slate-400 text-sm">
                                         <Loader2 className="animate-spin" size={20}/> Đang tải thêm dữ liệu...
@@ -662,8 +675,15 @@ export const OtaOrders: React.FC = () => {
                                     )}
                                 </div>
                                 <div className="text-right">
-                                    <span className="text-[10px] text-slate-400 font-bold mr-1">#</span>
-                                    <span className="font-mono text-sm font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">{order.bookingCode}</span>
+                                    <div className="mb-1">
+                                        <span className="text-[10px] text-slate-400 font-bold mr-1">#</span>
+                                        <span className="font-mono text-sm font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">{order.bookingCode}</span>
+                                    </div>
+                                    {isValid(orderEmailDate) && (
+                                        <div className="text-[10px] text-slate-500 font-medium">
+                                            {format(orderEmailDate, 'HH:mm dd/MM/yyyy')}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
