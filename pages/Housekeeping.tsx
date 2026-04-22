@@ -463,7 +463,7 @@ export const Housekeeping: React.FC = () => {
   };
   
   return (
-    <div className="space-y-6 animate-enter h-[calc(100vh-100px)] flex flex-col">
+    <div className="space-y-6 animate-enter h-[calc(100vh/var(--ui-zoom,1)-100px)] flex flex-col">
       {/* TOOLBAR - MOBILE OPTIMIZED (COMPACT HORIZONTAL SCROLL) */}
       <div className="md:hidden bg-white p-3 rounded-xl border border-slate-200 shadow-sm shrink-0 mb-2">
           {/* Row 1: Header & Tools */}
