@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+code_appscript_dong_bo_hoa_don/
+convert-to-pdf.mjs
+test_db2.json

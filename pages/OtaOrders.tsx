@@ -18,15 +18,21 @@ const processOtaGroups = (orders: OtaOrder[]) => {
     // 1. Grouping Phase
     orders.forEach(order => {
         let groupKey = order.id; // Default unique key
+        const bookingCodeStr = order.bookingCode || '';
+        const baseCode = bookingCodeStr.split('_')[0]; // Lấy mã gốc trước dấu _
 
         // Logic 1: Expedia Style (8 ký tự đầu giống nhau)
-        if (order.platform === 'Expedia' && order.bookingCode && order.bookingCode.length >= 8) {
-            const prefix = order.bookingCode.substring(0, 8);
+        if (order.platform === 'Expedia' && bookingCodeStr && bookingCodeStr.length >= 8) {
+            const prefix = bookingCodeStr.substring(0, 8);
             // Unique key combining platform + prefix + checkin (avoid collision with different dates)
             const checkInStr = order.checkIn ? order.checkIn.substring(0,10) : 'N/A';
             groupKey = `EXP_${prefix}_${checkInStr}`; 
         } 
-        // Logic 2: General (Same Guest + Same CheckIn + Same Platform)
+        // Logic 2: Chung mã gốc (áp dụng cho các mã bị nối thêm _YYYY-MM-DD hoặc _ROW)
+        else if (baseCode && baseCode.length >= 5) {
+            groupKey = `BASECODE_${baseCode}`;
+        }
+        // Logic 3: General (Same Guest + Same CheckIn + Same Platform)
         else {
             const safeName = (order.guestName || '').toLowerCase().trim();
             const safeDate = order.checkIn ? order.checkIn.substring(0, 10) : 'N/A';
@@ -245,6 +251,19 @@ export const OtaOrders: React.FC = () => {
           if (activeTab === 'Pending') {
               setListData(prev => prev.filter(o => o.id !== order.id));
           }
+          fetchData(true);
+      }
+  };
+
+  const handleDeleteOrder = async (order: OtaOrder) => {
+      if (confirm(`Xác nhận XÓA VĨNH VIỄN đơn ${order.bookingCode}? Hành động này không thể hoàn tác.`)) {
+          try {
+              await deleteOtaOrder(order.id);
+              notify('Đã xóa đơn hàng', 'success');
+              setListData(prev => prev.filter(p => p.id !== order.id));
+          } catch (e) {
+              notify('Lỗi khi xóa đơn', 'error');
+          }
       }
   };
 
@@ -378,7 +397,7 @@ export const OtaOrders: React.FC = () => {
                 <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
                         <tr>
-                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[140px]">Nguồn / Mã</th>
+                            <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider min-w-[180px]">Nguồn / Mã</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[100px]">Ngày đặt</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider w-[200px]">Khách hàng</th>
                             <th className="p-4 text-[11px] font-black text-slate-400 uppercase tracking-wider min-w-[200px]">Loại phòng & Chế độ</th>
@@ -558,49 +577,62 @@ export const OtaOrders: React.FC = () => {
 
                                         {/* COL 6: ACTIONS */}
                                         <td className="p-4 align-top text-center sticky right-0 bg-white group-hover:bg-white transition-colors z-10 border-l border-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.02)]">
-                                            {isCancelled ? (
-                                                /* CANCELLED STATE ACTION */
-                                                order.assignedRoom ? (
-                                                    !isReadOnly && (
-                                                    <button 
-                                                        onClick={() => handleResolveConflict(order)}
-                                                        className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5 animate-pulse"
-                                                    >
-                                                        <span>XÁC NHẬN HỦY</span>
-                                                        <span className="opacity-80">(Giải phóng phòng)</span>
-                                                    </button>
+                                            <div className="flex flex-col gap-1.5 w-full">
+                                                {isCancelled ? (
+                                                    /* CANCELLED STATE ACTION */
+                                                    order.assignedRoom ? (
+                                                        !isReadOnly && (
+                                                        <button 
+                                                            onClick={() => handleResolveConflict(order)}
+                                                            className="w-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex flex-col items-center gap-0.5 animate-pulse"
+                                                        >
+                                                            <span>XÁC NHẬN HỦY</span>
+                                                            <span className="opacity-80">(Giải phóng phòng)</span>
+                                                        </button>
+                                                        )
+                                                    ) : (
+                                                        !isReadOnly && (
+                                                        <button 
+                                                            onClick={() => handleConfirmCancel(order)}
+                                                            className="w-full bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
+                                                        >
+                                                            <Trash2 size={14}/> Xác nhận Hủy
+                                                        </button>
+                                                        )
                                                     )
+                                                ) : isConfirmed ? (
+                                                    /* CONFIRMED (HISTORY) STATE */
+                                                    <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full bg-slate-100 text-slate-500 border-slate-200">
+                                                        Đã lưu
+                                                    </span>
+                                                ) : order.status === 'Assigned' ? (
+                                                    /* ASSIGNED STATE */
+                                                    <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full truncate max-w-[100px] bg-green-50 text-green-700 border-green-200" title={order.assignedRoom}>
+                                                        {order.assignedRoom || 'Đã xếp'}
+                                                    </span>
                                                 ) : (
+                                                    /* PENDING STATE ACTION */
                                                     !isReadOnly && (
                                                     <button 
-                                                        onClick={() => handleConfirmCancel(order)}
-                                                        className="w-full bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1"
+                                                        onClick={() => handleAssignRoom(order)}
+                                                        className="w-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95"
                                                     >
-                                                        <Trash2 size={14}/> Xác nhận Hủy
+                                                        Xếp phòng
                                                     </button>
                                                     )
-                                                )
-                                            ) : isConfirmed ? (
-                                                /* CONFIRMED (HISTORY) STATE */
-                                                <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full bg-slate-100 text-slate-500 border-slate-200">
-                                                    Đã lưu
-                                                </span>
-                                            ) : order.status === 'Assigned' ? (
-                                                /* ASSIGNED STATE */
-                                                <span className="inline-block px-3 py-1.5 rounded-lg text-[10px] font-black border uppercase w-full truncate max-w-[100px] bg-green-50 text-green-700 border-green-200" title={order.assignedRoom}>
-                                                    {order.assignedRoom || 'Đã xếp'}
-                                                </span>
-                                            ) : (
-                                                /* PENDING STATE ACTION */
-                                                !isReadOnly && (
+                                                )}
+
+                                                {/* DELETE ACTION */}
+                                                {!isReadOnly && (
                                                 <button 
-                                                    onClick={() => handleAssignRoom(order)}
-                                                    className="w-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm transition-all active:scale-95"
+                                                    onClick={() => handleDeleteOrder(order)}
+                                                    className="w-full text-slate-400 hover:text-red-500 hover:bg-red-50 text-[10px] font-bold py-1.5 rounded transition-colors flex items-center justify-center gap-1"
+                                                    title="Xóa vĩnh viễn đơn hàng này"
                                                 >
-                                                    Xếp phòng
+                                                    <Trash2 size={12}/> Xóa đơn
                                                 </button>
-                                                )
-                                            )}
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 )
