@@ -1,0 +1,4004 @@
+/**
+ * ============================================================================
+ * BOOKING AUTOMATION SYSTEM - VERSION 25 (CONFIG-DRIVEN)
+ * ============================================================================
+ * 
+ * THAY ĐỔI CHÍNH V25:
+ * - Giữ nguyên 100% tính năng V23 (Booking + Cancellation)
+ * - Thêm Sheet "Platform_Config" để cấu hình nguồn email qua Google Sheets
+ * - SEARCH_QUERY được build tự động từ config (không cần sửa code)
+ * - Hỗ trợ bật/tắt từng platform (ON/OFF)
+ * - Hỗ trợ toán tử && cho nhiều từ khóa đồng thời
+ * - Thêm hỗ trợ Traveloka (giá tiền + payment status)
+ * - Thêm regex quét Payment Status cho Expedia
+ * - OVERRIDE: Giá trị regex luôn ghi đè AI nếu tìm được
+ */
+
+
+
+// ============================================================================
+// MODULE 1: CẤU HÌNH HỆ THỐNG (V25 - CONFIG-DRIVEN)
+// ============================================================================
+
+
+
+var CONFIG = {
+  OPENAI_API_KEY: 'YOUR_OPENAI_API_KEY_HERE', // ⚠️ Thay bằng key thật trên Apps Script
+
+  // --- DÁN ID FILE GOOGLE SHEET VÀO ĐÂY ---
+  SPREADSHEET_ID: '1C7-rrnHiFsBxcCRdxZ9DSWTHcejYD93BAYgJtxRF-xw',
+
+  SHEET_DATA_NAME: 'Booking_Master_DB_Final_V20', 
+  SHEET_LOG_NAME: 'System_Logs',
+  SHEET_CONFIG_NAME: 'Platform_Config',  // ✅ V25: Sheet cấu hình platform
+  MODEL_NAME: 'gpt-4o-mini',
+  BATCH_SIZE: 20,
+  USE_STRUCTURED_AI_INPUT: true,  // ? V2: G?i input Markdown c? c?u tr?c cho AI d? ??c h?n
+
+  // --- LABEL GMAIL ---
+  LABEL_PROCESSED: 'Booking/Processed',
+  LABEL_CANCELLED: 'Booking/Cancelled',
+
+  // --- V2 TEST MODE ---
+  TEST_LABEL_NAME: 'Test Booking',
+  TEST_RESULT_SHEET_NAME: 'AI_Test_Results',
+  TEST_BATCH_SIZE: 5,
+
+  // --- DAILY RATE SPLIT (ưu tiên Trip.com trước) ---
+  SPLIT_TRIPCOM_BY_DAILY_RATE: true,
+  SPLIT_AGODA_BY_DAILY_RATE: true,
+  SPLIT_EXPEDIA_BY_DAILY_RATE: true,
+  SPLIT_TRAVELOKA_BY_DAILY_RATE: true,
+  SPLIT_AIRBNB_BY_DAILY_RATE: false, // Tạm tắt: Airbnb chưa có mẫu daily-rate chuẩn, tránh tự chia quá nhiều dòng
+  SPLIT_BOOKINGCOM_BY_UNIT: true, // Booking.com PDF từ Drive: tách từng unit/phòng trong file PDF
+  DAILY_RATE_FALLBACK: 'single_total', // single_total = không lấy được giá ngày thì ghi 1 dòng tổng như cũ
+  
+  // --- GOOGLE DRIVE PDF AUTOMATION ---
+  DRIVE_FOLDER_PENDING: '1ac1bje7-UyQ0HWe8M5krk6OuCzDSHNPe', // Thư mục nhận file
+  DRIVE_FOLDER_DONE: '1iZDRcbrhp54-6vrgxkgofN4bXULQOv5t',       // Thư mục hoàn tất
+  DRIVE_BATCH_SIZE: 5                                      // Số lượng xử lý mỗi lần (chống timeout)
+};
+
+
+
+
+// ============================================================================
+// MODULE 1.5: SETUP TỰ ĐỘNG / KHỞI TẠO HỆ THỐNG
+// ============================================================================
+
+/**
+ * ✅ SETUP V2: Chạy 1 lần sau khi dán code lên Apps Script.
+ * Hàm này kiểm tra thiếu gì thì tạo cái đó, cái nào có rồi thì bỏ qua.
+ *
+ * Tự động khởi tạo:
+ * - Sheet dữ liệu Booking_Master_DB_Final_V20
+ * - Sheet System_Logs
+ * - Sheet Platform_Config
+ * - Sheet AI_Test_Results
+ * - Gmail labels: Booking/Processed, Booking/Cancelled, Test Booking
+ * - Time trigger chạy mainAutoProcess1 mỗi 5 phút nếu chưa có
+ */
+function setupBookingAutomationV2() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var setupLogs = [];
+
+  setupLogs.push(ensureCoreSheet_(ss, CONFIG.SHEET_DATA_NAME));
+  setupLogs.push(ensureLogSheet_(ss));
+  setupLogs.push(ensurePlatformConfigSheet_(ss));
+  setupLogs.push(ensureTestResultSheet_(ss));
+
+  setupLogs.push(ensureGmailLabel_(CONFIG.LABEL_PROCESSED));
+  setupLogs.push(ensureGmailLabel_(CONFIG.LABEL_CANCELLED));
+  setupLogs.push(ensureGmailLabel_(CONFIG.TEST_LABEL_NAME));
+
+  setupLogs.push(ensureTimeTrigger_("mainAutoProcess1", 5));
+
+  var logSheet = getOrCreateSheet(ss, CONFIG.SHEET_LOG_NAME);
+  logSheet.appendRow([new Date(), "✅ SETUP V2 HOÀN TẤT:\n" + setupLogs.join("\n")]);
+}
+
+/**
+ * ✅ SETUP + RUN NGAY:
+ * Dùng hàm này nếu bạn muốn vừa khởi tạo thiếu gì tạo đó, vừa chạy quét booking ngay lập tức.
+ * Lưu ý: setupBookingAutomationV2() chỉ tạo trigger; trigger sẽ chạy theo lịch sau đó, không chạy tức thì.
+ */
+function setupAndRunBookingAutomationV2() {
+  setupBookingAutomationV2();
+  mainAutoProcess1();
+}
+
+/**
+ * ✅ SETUP + TEST NGAY:
+ * Dùng hàm này nếu bạn muốn setup xong rồi chạy test các email có label Test Booking ngay.
+ */
+function setupAndRunTestBookingV2() {
+  setupBookingAutomationV2();
+  testStructuredAIFromLabel();
+}
+
+/**
+ * Xóa và tạo lại trigger chính nếu bạn muốn chủ động reset lịch chạy.
+ * Mặc định không cần dùng; setupBookingAutomationV2() đã tự bỏ qua nếu trigger tồn tại.
+ */
+function resetMainAutoProcessTriggerV2() {
+  deleteTriggersByHandler_("mainAutoProcess1");
+  ensureTimeTrigger_("mainAutoProcess1", 5);
+  logToSheet(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), "✅ Đã reset trigger mainAutoProcess1 mỗi 5 phút.");
+}
+
+function ensureCoreSheet_(ss, sheetName) {
+  var existed = !!ss.getSheetByName(sheetName);
+  var sheet = getOrCreateSheet(ss, sheetName);
+  if (!existed) return "CREATED sheet: " + sheetName;
+
+  // Nếu sheet đã có nhưng trống, bổ sung header an toàn.
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      "Ngày Email", "Platform", "Tên Khách Sạn", "Mã BK", "Tên Khách",
+      "Check-in", "Check-out", "Loại Phòng", "SL Phòng", "Số Khách",
+      "Tổng Tiền (Gross)", "Hoa Hồng (Comm)", "Khoản Bù Trù", "Chương Trình Khác", "Thực Nhận (Net)",
+      "Ăn Sáng", "Thanh Toán", "Yêu Cầu Đặc Biệt", "Trạng Thái", "Xếp Phòng", "DATE CANCELLED"
+    ]);
+    sheet.setFrozenRows(1);
+    applyDuplicateBookingHighlight_(sheet);
+    return "REPAIRED empty sheet header: " + sheetName;
+  }
+  applyDuplicateBookingHighlight_(sheet);
+  return "OK sheet exists: " + sheetName;
+}
+
+function ensureLogSheet_(ss) {
+  var existed = !!ss.getSheetByName(CONFIG.SHEET_LOG_NAME);
+  var sheet = getOrCreateSheet(ss, CONFIG.SHEET_LOG_NAME);
+  return existed ? "OK sheet exists: " + CONFIG.SHEET_LOG_NAME : "CREATED sheet: " + CONFIG.SHEET_LOG_NAME;
+}
+
+function ensurePlatformConfigSheet_(ss) {
+  var existed = !!ss.getSheetByName(CONFIG.SHEET_CONFIG_NAME);
+  var sheet = getOrCreateConfigSheet(ss);
+
+  // Nếu sheet mới tạo hoặc chỉ có header → điền đủ 5 platform mặc định
+  if (sheet.getLastRow() < 2) {
+    var defaultPlatforms = [
+      ["Agoda",     "ON", "",                          "Agoda Booking ID && CONFIRMED",              "Agoda Booking ID && CANCELLED",           "no-reply@agoda.com"],
+      ["Expedia",   "ON", "",                          "Expedia - Đặt phòng mới",                   "Expedia - Hủy đặt phòng",                ""],
+      ["Trip.com",  "ON", "auto_reservation@trip.com", "Action required - New booking received || Trip.com - Thông báo đơn đặt mới || Booking no.", "Cancellation request accepted", "auto_reservation@trip.com"],
+      ["Airbnb",    "ON", "automated@airbnb.com",    "Đã xác nhận đặt phòng",                     "Đã hủy",                                 "automated@airbnb.com"],
+      ["Traveloka", "ON", "hotel@traveloka.com",       "CONFIRMED - Traveloka Itinerary",            "",                                        ""]
+    ];
+
+    for (var i = 0; i < defaultPlatforms.length; i++) {
+      sheet.appendRow(defaultPlatforms[i]);
+    }
+    return "REPAIRED Platform_Config: added " + defaultPlatforms.length + " default platforms";
+  }
+  return existed ? "OK sheet exists: " + CONFIG.SHEET_CONFIG_NAME : "CREATED sheet: " + CONFIG.SHEET_CONFIG_NAME;
+}
+
+function ensureTestResultSheet_(ss) {
+  var existed = !!ss.getSheetByName(CONFIG.TEST_RESULT_SHEET_NAME);
+  getOrCreateTestResultSheet(ss);
+  return existed ? "OK sheet exists: " + CONFIG.TEST_RESULT_SHEET_NAME : "CREATED sheet: " + CONFIG.TEST_RESULT_SHEET_NAME;
+}
+
+function ensureGmailLabel_(labelName) {
+  if (!labelName) return "SKIP empty Gmail label";
+  var label = GmailApp.getUserLabelByName(labelName);
+  if (label) return "OK Gmail label exists: " + labelName;
+  GmailApp.createLabel(labelName);
+  return "CREATED Gmail label: " + labelName;
+}
+
+function ensureTimeTrigger_(handlerName, everyMinutes) {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction && triggers[i].getHandlerFunction() === handlerName) {
+      return "OK trigger exists: " + handlerName;
+    }
+  }
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .everyMinutes(everyMinutes || 5)
+    .create();
+
+  return "CREATED trigger: " + handlerName + " every " + (everyMinutes || 5) + " minutes";
+}
+
+function deleteTriggersByHandler_(handlerName) {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction && triggers[i].getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+}
+
+
+// ============================================================================
+// MODULE 2: HÀM ĐIỀU KHIỂN CHÍNH (V25 - CONFIG-DRIVEN)
+// ============================================================================
+
+
+/**
+ * ✨ V25: Config-Driven - Đọc cấu hình từ Sheet Platform_Config
+ * - Tự động build SEARCH_QUERY từ config
+ * - Phát hiện platform động (không hardcode)
+ * - Hỗ trợ bật/tắt từng platform (ON/OFF)
+ */
+function mainAutoProcess1() {
+  try {
+    var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ V25: Đọc config từ Sheet + Build Search Query động
+    // ═══════════════════════════════════════════════════════════════════
+    var platformConfigs = loadPlatformConfig(ss);
+    if (platformConfigs.length === 0) {
+      logToSheet(ss, "⚠️ Không có platform nào đang ON trong Platform_Config.");
+      return;
+    }
+    var searchQuery = buildSearchQuery(platformConfigs);
+
+    var threads;
+    try {
+      threads = GmailApp.search(searchQuery, 0, CONFIG.BATCH_SIZE);
+    } catch (e) {
+      if (e.toString().indexOf("too many times") > -1) return;
+      throw e;
+    }
+
+    if (threads.length === 0) return; 
+
+
+    logToSheet(ss, "🚀 Phát hiện " + threads.length + " thread email trong danh sách quét.");
+
+
+    var sheetData = getOrCreateSheet(ss, CONFIG.SHEET_DATA_NAME);
+    var existingIds = getExistingBookingIds(sheetData);
+    var processedCount = 0;
+    var skippedOldCount = 0;
+    var skippedDuplicateCount = 0;
+    var cancelledCount = 0;
+
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 🔄 VÒNG LẶP THREAD
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    for (var i = 0; i < threads.length; i++) {
+      var messages = threads[i].getMessages();
+
+      logToSheet(ss, "📧 Thread #" + (i + 1) + " có " + messages.length + " email. Bắt đầu quét...");
+
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 🔁 VÒNG LẶP EMAIL TRONG THREAD (V25 - DYNAMIC)
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      for (var j = 0; j < messages.length; j++) {
+        var message = messages[j];
+        var subject = message.getSubject();
+        var fromEmail = message.getFrom();
+
+        // 1️⃣ Kiểm tra thời gian
+        if (isEmailTooOld(message.getDate(), 30)) { 
+          skippedOldCount++;
+          continue;
+        }
+
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ✅ V25: KIỂM TRA EMAIL HỦY (DYNAMIC từ config)
+        // ═══════════════════════════════════════════════════════════════════
+        if (isCancellationFromConfig(subject, fromEmail, platformConfigs)) {
+          var cancelResult = processCancellationEmail(message, subject, fromEmail, sheetData, ss);
+          if (cancelResult) {
+            cancelledCount++;
+            message.markRead();
+            applyGmailLabel(message, CONFIG.LABEL_CANCELLED);
+
+            // ✅ SYNC HỦY LÊN SUPABASE (THAY THẾ N8N)
+            var cancelBookingId = quickFindID(getDeepCleanBody(message), subject);
+            if (cancelBookingId) {
+              syncCancellationToSupabase_(cancelBookingId, new Date().toISOString(), ss);
+            }
+          }
+          continue;
+        }
+
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 XỬ LÝ BOOKING MỚI
+        // ═══════════════════════════════════════════════════════════════════
+
+        var plainText = getDeepCleanBody(message);
+
+
+        // 3️⃣ Kiểm tra trùng lặp ID (Fast Check)
+        var quickID = quickFindID(plainText, subject);
+        if (quickID && existingIds.includes(quickID)) {
+          skippedDuplicateCount++;
+          continue;
+        }
+
+
+        // 4️⃣ Xử lý chi tiết
+        var success = processSingleEmailCore(message, plainText, sheetData, existingIds, ss);
+        if (success) processedCount++;
+      }
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    }
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+    // 📊 BÁO CÁO TỔNG HỢP
+    var summaryMessage = "✅ HOÀN THÀNH:\n" +
+      "  • Threads quét: " + threads.length + "\n" +
+      "  • Booking mới xử lý: " + processedCount + "\n" +
+      "  • Booking hủy xử lý: " + cancelledCount + "\n" +
+      "  • Email cũ (bỏ qua): " + skippedOldCount + "\n" +
+      "  • Email trùng ID (bỏ qua): " + skippedDuplicateCount;
+
+    logToSheet(ss, summaryMessage);
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 📂 QUÉT THÊM GOOGLE DRIVE PDF (NẾU CÓ)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    processDriveBookings(sheetData, existingIds, ss);
+
+  } catch (e) {
+    Logger.log("CRITICAL ERROR: " + e.toString());
+    logToSheet(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), "❌ LỖI NGHIÊM TRỌNG: " + e.toString());
+  }
+}
+
+
+
+// ============================================================================
+// MODULE 3: BỘ XỬ LÝ TRUNG TÂM (V25 - OVERRIDE TẤT CẢ GIÁ TRỊ REGEX)
+// ============================================================================
+
+
+function processSingleEmailCore(message, plainText, sheet, existingIds, ss) {
+  // plainText = nội dung đầy đủ, dùng cho daily rate extraction.
+  try {
+    // 1. Cắt gọt nội dung thông minh
+    var smartContext = getHeadAndTail(plainText);
+
+    // 2. Phân loại Platform
+    var platform = detectPlatform(smartContext, message.getSubject());
+
+    // 3. Quét dữ liệu cứng (Đã Fix lỗi Agoda Surcharge)
+    var hardData = scanDataByPlatform(smartContext, platform);
+
+    // 4. Gọi AI
+    // ✅ V2: Chuyển plain text đã clean sang Markdown có cấu trúc trước khi gửi AI.
+    // Có thể tắt nhanh bằng CONFIG.USE_STRUCTURED_AI_INPUT = false để quay về format cũ.
+    var aiInput = CONFIG.USE_STRUCTURED_AI_INPUT
+      ? buildStructuredAIInput(message, smartContext, hardData, platform)
+      : smartContext;
+
+    var finalData = callOpenAI(aiInput, hardData, platform);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ EXPEDIA: Mặc định số lượng phòng luôn = 1
+    // ═══════════════════════════════════════════════════════════════════
+    if (platform === "Expedia") {
+      finalData.rooms = 1;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ AIRBNB: Ngày dạng "Th 2, 4 thg 5" rất dễ bị AI hiểu nhầm.
+    // Ưu tiên ngày quét cứng từ email: "Th 2" là thứ, "4 thg 5" mới là ngày/tháng.
+    // ═══════════════════════════════════════════════════════════════════
+    if (hardData.check_in) {
+      finalData.check_in = hardData.check_in;
+    }
+    if (hardData.check_out) {
+      finalData.check_out = hardData.check_out;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ V25: OVERRIDE - Giá trị regex GHI ĐÈ lên AI cho TẤT CẢ platform
+    // Nếu scanDataByPlatform quét được giá trị khác "0" → dùng nó thay AI
+    // ═══════════════════════════════════════════════════════════════════
+    if (hardData.total_price && hardData.total_price !== "0") {
+      finalData.total_price = hardData.total_price;
+    }
+    if (hardData.net_rate && hardData.net_rate !== "0") {
+      finalData.net_rate = hardData.net_rate;
+    }
+    if (hardData.commission && hardData.commission !== "0") {
+      finalData.commission = hardData.commission;
+    }
+    if (hardData.surcharge && hardData.surcharge !== "0") {
+      finalData.surcharge = hardData.surcharge;
+    }
+    if (hardData.other_programs && hardData.other_programs !== "0") {
+      finalData.other_programs = hardData.other_programs;
+    }
+    if (hardData.payment_status) {
+      finalData.payment_status = hardData.payment_status;
+    }
+    if (hardData.has_breakfast) {
+      finalData.breakfast = hardData.has_breakfast;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ V23.1: TRIP.COM - Chuẩn hóa tên khách (xóa dấu "/" giữa họ và tên)
+    // VD: "HOANG/Thi Lan Phuong" → "HOANG Thi Lan Phuong"
+    // ═══════════════════════════════════════════════════════════════════
+    if (platform === "Trip.com" && finalData && finalData.guest_name) {
+      finalData.guest_name = finalData.guest_name.replace(/\//g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ LÀM SẠCH SỐ TIỀN: Loại bỏ dấu phẩy và dấu chấm trước khi ghi vào sheet
+    // ═══════════════════════════════════════════════════════════════════
+    if (finalData) {
+      finalData.total_price = cleanMoneyString(finalData.total_price);
+      finalData.net_rate = cleanMoneyString(finalData.net_rate);
+      finalData.commission = cleanMoneyString(finalData.commission);
+      finalData.surcharge = cleanMoneyString(finalData.surcharge);
+      finalData.other_programs = cleanMoneyString(finalData.other_programs);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ V26: FORMAT LẠI TÊN PHÒNG -> (MÃ PHÒNG (xSỐ LƯỢNG)) Ngoại trừ Traveloka
+    // ═══════════════════════════════════════════════════════════════════
+    var finalRoomType = finalData.room_type;
+    
+    if (platform !== "Traveloka" && finalRoomType) {
+      // Tìm mã phòng:
+      // 1: Dạng chuẩn 1G1M8, 2G 1M2, 2G1M6, v.v. (Có số và chữ G, M)
+      // 2: Dạng đặc biệt toàn chữ (Ví dụ: GLGN) thường nằm cuối tên phòng hoặc trong ngoặc
+      var roomCodeMatch = finalRoomType.match(/(\d+G\s*\d+M\d+)/i); // Kiểm tra dạng 1G1M8 trước
+      if (!roomCodeMatch) {
+         roomCodeMatch = finalRoomType.match(/\(([A-Z0-9]{3,})\)/i); // Kiểm tra dạng (GLGN), (STD) v.v.
+      }
+      
+      if (roomCodeMatch) {
+        // Xóa khoảng trắng trong mã (VD: "2G 1M2" -> "2G1M2")
+        var roomCode = roomCodeMatch[1].replace(/\s+/g, '').toUpperCase();
+        var roomQty = finalData.rooms || 1;
+        finalRoomType = roomCode + ' (x' + roomQty + ')';
+      }
+    }
+
+    // 5. Kiểm tra và Ghi
+    if (finalData && finalData.booking_id) {
+      var currentId = finalData.booking_id.toString().trim();
+
+      if (existingIds.includes(currentId) && !(platform === "Trip.com" && CONFIG.SPLIT_TRIPCOM_BY_DAILY_RATE)) {
+        logToSheet(ss, "⚠️ Bỏ qua ID trùng (AI Check): " + currentId);
+      } else {
+        var rowsWritten = writeBookingRowsToSheet_(sheet, message, finalData, finalRoomType, platform, plainText, existingIds, "SUCCESS");
+
+        if (rowsWritten > 0) {
+          existingIds.push(currentId);
+          logToSheet(ss, "✅ Đã lưu: " + currentId + " (" + finalData.platform + ") - " + rowsWritten + " dòng");
+
+          // ✅ SYNC TRỰC TIẾP LÊN SUPABASE (THAY THẾ N8N)
+          syncBookingToSupabase_(finalData, ss);
+
+          message.markRead();
+          applyGmailLabel(message, CONFIG.LABEL_PROCESSED);
+          return true;
+        } else {
+          logToSheet(ss, "⚠️ Bỏ qua vì trùng toàn bộ dòng ngày: " + currentId);
+        }
+      }
+    } else {
+      message.markRead();
+    }
+  } catch (e) {
+    logToSheet(ss, "❌ Lỗi xử lý email: " + e.toString());
+  }
+  return false;
+}
+
+
+
+
+// ============================================================================
+// MODULE 3.5: DAILY RATE SPLIT - TRIP.COM TRƯỚC
+// ============================================================================
+
+function writeBookingRowsToSheet_(sheet, message, finalData, finalRoomType, platform, cleanText, existingIds, statusValue) {
+  var rows = buildBookingRowsByPlatform_(message, finalData, finalRoomType, platform, cleanText, statusValue || "SUCCESS");
+  var written = 0;
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var bookingId = row[3] ? row[3].toString().trim() : "";
+    var checkInKey = formatDateKey_(row[5]);
+    var compositeKey = bookingId + "__" + checkInKey;
+
+    // Với row daily, chống trùng theo booking_id + ngày check-in.
+    // Với row tổng, checkInKey vẫn là ngày check-in tổng nên vẫn an toàn.
+    if (bookingId && hasBookingDateKey_(sheet, compositeKey)) {
+      continue;
+    }
+
+    sheet.appendRow(row);
+    written++;
+  }
+
+  if (written > 0) {
+    paintDuplicateBookingRows_(sheet);
+  }
+
+  return written;
+}
+
+function buildBookingRowsByPlatform_(message, finalData, finalRoomType, platform, cleanText, statusValue) {
+  if (platform === "Trip.com" && CONFIG.SPLIT_TRIPCOM_BY_DAILY_RATE) {
+    var dailyRates = extractTripComDailyRates(cleanText, finalData);
+    if (dailyRates && dailyRates.length > 0) {
+      var rows = [];
+      for (var i = 0; i < dailyRates.length; i++) {
+        rows.push(buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, dailyRates[i]));
+      }
+      return rows;
+    }
+  }
+
+  if (platform === "Agoda" && CONFIG.SPLIT_AGODA_BY_DAILY_RATE) {
+    var agodaDailyRates = extractAgodaDailyRates(cleanText, finalData);
+    if (agodaDailyRates && agodaDailyRates.length > 0) {
+      var rows = [];
+      for (var i = 0; i < agodaDailyRates.length; i++) {
+        rows.push(buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, agodaDailyRates[i]));
+      }
+      return rows;
+    }
+  }
+
+  if (platform === "Expedia" && CONFIG.SPLIT_EXPEDIA_BY_DAILY_RATE) {
+    var expediaDailyRates = extractExpediaDailyRates(cleanText, finalData);
+    if (expediaDailyRates && expediaDailyRates.length > 0) {
+      var rows = [];
+      for (var i = 0; i < expediaDailyRates.length; i++) {
+        rows.push(buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, expediaDailyRates[i]));
+      }
+      return rows;
+    }
+  }
+
+  if (platform === "Traveloka" && CONFIG.SPLIT_TRAVELOKA_BY_DAILY_RATE) {
+    var travelokaDailyRates = extractTravelokaDailyRates(cleanText, finalData);
+    if (travelokaDailyRates && travelokaDailyRates.length > 0) {
+      var rows = [];
+      for (var i = 0; i < travelokaDailyRates.length; i++) {
+        rows.push(buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, travelokaDailyRates[i]));
+      }
+      return rows;
+    }
+  }
+
+  if (platform === "Airbnb" && CONFIG.SPLIT_AIRBNB_BY_DAILY_RATE) {
+    var airbnbDailyRates = extractAirbnbDailyRates(cleanText, finalData);
+    if (airbnbDailyRates && airbnbDailyRates.length > 0) {
+      var rows = [];
+      for (var i = 0; i < airbnbDailyRates.length; i++) {
+        rows.push(buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, airbnbDailyRates[i]));
+      }
+      return rows;
+    }
+  }
+
+  // Fallback: giữ nguyên 1 dòng tổng như cơ chế cũ.
+  return [buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, null)];
+}
+
+function buildBookingSheetRow_(message, finalData, finalRoomType, statusValue, dailyRate) {
+  var checkInDate = dailyRate ? dailyRate.check_in : parseDateToSheetFormat(finalData.check_in);
+  var checkOutDate = dailyRate ? dailyRate.check_out : parseDateToSheetFormat(finalData.check_out);
+
+  return [
+    message.getDate(),
+    finalData.platform,
+    finalData.hotel_name,
+    finalData.booking_id,
+    finalData.guest_name,
+    checkInDate,
+    checkOutDate,
+    finalRoomType,
+    finalData.rooms,
+    finalData.occupancy,
+    dailyRate ? cleanMoneyString(dailyRate.gross) : finalData.total_price,
+    dailyRate ? cleanMoneyString(dailyRate.commission) : finalData.commission,
+    dailyRate ? cleanMoneyString(dailyRate.surcharge || finalData.surcharge) : finalData.surcharge,
+    dailyRate ? cleanMoneyString(dailyRate.other_programs || finalData.other_programs) : finalData.other_programs,
+    dailyRate ? cleanMoneyString(dailyRate.net_rate) : finalData.net_rate,
+    finalData.breakfast,
+    finalData.payment_status,
+    finalData.special_requests,
+    statusValue || "SUCCESS",
+    "",
+    ""
+  ];
+}
+
+/**
+ * Trip.com daily rates parser.
+ * Email Trip.com gốc là HTML tiếng Anh. Sau khi getDeepCleanBody() convert,
+ * các block daily rate có dạng:
+ *   Jun 14 (1 room(s))
+ *   Original room rate (incl. taxes and fees) 964706.00*1
+ *   Discounts -405177.00*1
+ *   Final room rate (incl. taxes and fees) 559529.00*1
+ *   Your payout 559529.00*1
+ *
+ * Hoặc phiên bản tiếng Việt (fallback):
+ *   Ngày 14 tháng 6 (1 phòng)
+ *   Giá phòng ban đầu ... 964706.00*1
+ *   Khoản thanh toán của bạn 559529.00*1
+ */
+function normalizeBookingComPdfToMarkdown_(rawText, fileName) {
+  var text = rawText || "";
+  var lines = text.split(/\r?\n/).map(function(line) { return (line || '').trim(); }).filter(function(line) { return line; });
+  var md = [];
+  var bookingId = (text.match(/Booking\s*number:?\s*(\d+)/i) || text.match(/(?:mã|ma)\s*(?:đặt|dat)?\s*(?:phòng|phong|booking)?\s*:?\s*(\d{6,})/i) || [null, ''])[1];
+  var guest = extractBookingComValueAfterLabel_(lines, /Guest information|Thông tin khách/i);
+  var totalGuests = extractBookingComValueAfterLabel_(lines, /Total guests|Tổng số khách/i);
+  var rooms = extractBookingComValueAfterLabel_(lines, /Total units\/rooms|Tổng số phòng|Tổng số căn/i);
+  var checkIn = extractBookingComValueAfterLabel_(lines, /Check-?in|Nhận phòng/i);
+  var checkOut = extractBookingComValueAfterLabel_(lines, /Check-?out|Trả phòng/i);
+  var stay = extractBookingComValueAfterLabel_(lines, /Length of stay|Thời gian lưu trú/i);
+  var totalPrice = extractBookingComMoneyNearLabel_(lines, /Total price|Tổng giá/i);
+  var commission = extractBookingComMoneyNearLabel_(lines, /Commission|Hoa hồng/i);
+  var commissionable = extractBookingComMoneyNearLabel_(lines, /Commissionable amount|Khoản có tính hoa hồng/i);
+
+  md.push('# Booking.com PDF Normalized Markdown');
+  md.push('- Source file: ' + (fileName || 'Drive PDF'));
+  md.push('- Booking number: ' + bookingId);
+  md.push('- Guest name: ' + guest);
+  md.push('- Total guests: ' + totalGuests);
+  md.push('- Total units/rooms: ' + rooms);
+  md.push('- Check-in: ' + checkIn);
+  md.push('- Check-out: ' + checkOut);
+  md.push('- Length of stay: ' + stay);
+  md.push('');
+  md.push('## Financial Summary');
+  md.push('- Total price: ' + totalPrice);
+  md.push('- Commission: ' + commission);
+  md.push('- Commissionable amount: ' + commissionable);
+  md.push('');
+  md.push('## Room And Daily Rate Lines');
+
+  var currentRoomNo = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (/room|apartment|suite|villa|studio|bungalow/i.test(line) && /\b\d+G\s*\d+M\d+\b/i.test(line)) {
+      currentRoomNo++;
+      md.push('');
+      md.push('### Room ' + currentRoomNo);
+      md.push('- Room type: ' + line);
+      if (lines[i + 1] && /meal|breakfast|ăn sáng|bữa sáng|bao gồm bữa ăn|bao gồm bữa sáng/i.test(lines[i + 1])) {
+        md.push('- Meal: ' + lines[i + 1]);
+      }
+      continue;
+    }
+
+    if (/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b/i.test(line) && /VND\s*[\d.,]+/i.test(line)) {
+      md.push('- Daily rate: ' + line);
+      continue;
+    }
+
+    if (/(\d{1,2})\s*-\s*(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/i.test(line) && /VND\s*[\d.,]+/i.test(line)) {
+      md.push('- Range rate: ' + line);
+      continue;
+    }
+
+    if (/Total unit\/room price|Tổng giá căn\/phòng/i.test(line)) {
+      var money = extractBookingComMoneyFromNearbyLines_(lines, i, 3);
+      md.push('- Unit total: ' + money);
+    }
+  }
+
+  md.push('');
+  md.push('## Raw Text');
+  md.push('```text');
+  md.push(text);
+  md.push('```');
+  return md.join('\n');
+}
+
+function extractBookingComValueAfterLabel_(lines, labelRegex) {
+  for (var i = 0; i < lines.length; i++) {
+    if (labelRegex.test(lines[i])) return lines[i + 1] || '';
+    var sameLine = lines[i].match(new RegExp(labelRegex.source + '\\s*:?\\s*(.+)$', 'i'));
+    if (sameLine) return sameLine[1];
+  }
+  return '';
+}
+
+function extractBookingComMoneyNearLabel_(lines, labelRegex) {
+  for (var i = 0; i < lines.length; i++) {
+    if (labelRegex.test(lines[i])) return extractBookingComMoneyFromNearbyLines_(lines, i, 3);
+  }
+  return '';
+}
+
+function extractBookingComMoneyFromNearbyLines_(lines, startIndex, lookAhead) {
+  for (var j = startIndex; j <= Math.min(lines.length - 1, startIndex + lookAhead); j++) {
+    var m = (lines[j] || '').match(/VND\s*[\d.,]+/i);
+    if (m) return m[0];
+  }
+  return '';
+}
+
+function extractBookingComUnitRates(cleanText, finalData) {
+  var text = cleanText || "";
+  var checkInBase = parseDateToSheetFormat(finalData.check_in);
+  var year = inferBookingYear_(checkInBase, finalData.check_in);
+  var lines = text.split(/\r?\n/).map(function(line) { return (line || '').trim(); }).filter(function(line) { return line; });
+
+  // Xây dựng danh sách room blocks
+  // Mỗi block bắt đầu khi gặp header phòng (Room/Apartment/Suite... + mã phòng)
+  var blocks = [];
+  var currentBlock = null;
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // Phát hiện header phòng mới → lưu block cũ, bắt đầu block mới
+    if (/room|apartment|suite|villa|studio|bungalow/i.test(line) && /\b\d+G\s*\d+M\d+\b/i.test(line)) {
+      if (currentBlock) blocks.push(currentBlock);
+      var blockMeal = (lines[i + 1] && /meal|breakfast|ăn sáng|bữa sáng|bao gồm/i.test(lines[i + 1])) ? lines[i + 1] : "";
+      currentBlock = {
+        room_type: line,
+        meal: blockMeal,
+        dailyPrices: [],
+        firstCheckIn: null,
+        lastCheckOut: null
+      };
+      continue;
+    }
+
+    if (!currentBlock) continue;
+
+    // Giá từng ngày: "15 May 2026 ... 1 x VND 400.950"
+    var singleDateMatch = line.match(/(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b/i);
+    var priceMatch = line.match(/(?:\d+\s*x\s*)?VND\s*([\d.,]+)/i);
+
+    if (singleDateMatch && priceMatch) {
+      var monthNum = monthNameToNumber_(singleDateMatch[2]);
+      var day = parseInt(singleDateMatch[1], 10);
+      var dateYear = parseInt(singleDateMatch[3], 10) || year;
+      if (monthNum) {
+        var stayDate = new Date(dateYear, monthNum - 1, day);
+        var nextDate = new Date(stayDate.getTime());
+        nextDate.setDate(nextDate.getDate() + 1);
+        var gross = parseFloat(cleanMoneyString(priceMatch[1])) || 0;
+
+        if (!currentBlock.firstCheckIn || stayDate < currentBlock.firstCheckIn) {
+          currentBlock.firstCheckIn = stayDate;
+        }
+        if (!currentBlock.lastCheckOut || nextDate > currentBlock.lastCheckOut) {
+          currentBlock.lastCheckOut = nextDate;
+        }
+        currentBlock.dailyPrices.push(gross);
+      }
+      continue;
+    }
+
+    // Khoảng ngày: "28 - 29 Mar 2026 ... 1 x VND 684.000"
+    var rangeMatch = line.match(/(\d{1,2})\s*-\s*(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/i);
+    if (rangeMatch && priceMatch) {
+      var rMonthNum = monthNameToNumber_(rangeMatch[3]);
+      var startDay = parseInt(rangeMatch[1], 10);
+      var endDay = parseInt(rangeMatch[2], 10);
+      var rYear = parseInt(rangeMatch[4], 10) || year;
+      if (rMonthNum) {
+        var rangeStart = new Date(rYear, rMonthNum - 1, startDay);
+        var rangeEnd = new Date(rYear, rMonthNum - 1, endDay);
+        var rangeGross = parseFloat(cleanMoneyString(priceMatch[1])) || 0;
+
+        if (!currentBlock.firstCheckIn || rangeStart < currentBlock.firstCheckIn) {
+          currentBlock.firstCheckIn = rangeStart;
+        }
+        if (!currentBlock.lastCheckOut || rangeEnd > currentBlock.lastCheckOut) {
+          currentBlock.lastCheckOut = rangeEnd;
+        }
+        currentBlock.dailyPrices.push(rangeGross);
+      }
+      continue;
+    }
+  }
+
+  // Đẩy block cuối cùng
+  if (currentBlock) blocks.push(currentBlock);
+
+  if (blocks.length === 0) return [];
+
+  // Chuyển từng block thành 1 dòng kết quả
+  var totalPrice = parseFloat(cleanMoneyString(finalData.total_price)) || 0;
+  var totalCommission = parseFloat(cleanMoneyString(finalData.commission)) || 0;
+  var totalNet = parseFloat(cleanMoneyString(finalData.net_rate)) || 0;
+
+  var rates = [];
+  for (var b = 0; b < blocks.length; b++) {
+    var block = blocks[b];
+    if (block.dailyPrices.length === 0) continue;
+
+    // Cộng tổng giá các ngày trong block này
+    var blockGross = 0;
+    for (var p = 0; p < block.dailyPrices.length; p++) {
+      blockGross += block.dailyPrices[p];
+    }
+
+    // Tính hoa hồng và thực nhận theo tỷ lệ
+    var blockCommission = totalPrice > 0 ? Math.round(blockGross * totalCommission / totalPrice) : 0;
+    var blockNet = totalPrice > 0 ? Math.round(blockGross * totalNet / totalPrice) : blockGross;
+    if (!blockNet) blockNet = blockGross;
+
+    var blockMealText = block.meal || '';
+    var breakfastValue = /no\s*meal|không|không bao gồm/i.test(blockMealText) ? "Không" : (blockMealText || finalData.breakfast || "Không");
+
+    rates.push({
+      check_in: block.firstCheckIn ? formatDateToSheetStr(block.firstCheckIn) : finalData.check_in,
+      check_out: block.lastCheckOut ? formatDateToSheetStr(block.lastCheckOut) : finalData.check_out,
+      room_type: block.room_type,
+      rooms: 1,
+      gross: blockGross.toString(),
+      commission: blockCommission.toString(),
+      net_rate: blockNet.toString(),
+      surcharge: "0",
+      other_programs: "0",
+      breakfast: breakfastValue
+    });
+  }
+
+  return rates;
+}
+
+function buildBookingComFallbackRoomNightRates_(finalData, finalRoomType) {
+  var checkInDate = dateFromAnySheetValue_(finalData.check_in);
+  var checkOutDate = dateFromAnySheetValue_(finalData.check_out);
+  if (!checkInDate || !checkOutDate) return [];
+
+  var roomCount = parseInt(finalData.rooms, 10) || 1;
+  var nightCount = Math.max(1, Math.round((checkOutDate.getTime() - checkInDate.getTime()) / (24 * 60 * 60 * 1000)));
+
+  // Nếu chỉ 1 phòng 1 đêm thì không cần bung fallback.
+  if (roomCount <= 1 && nightCount <= 1) return [];
+
+  var totalRows = roomCount * nightCount;
+  var grossTotal = parseFloat(cleanMoneyString(finalData.total_price)) || 0;
+  var commissionTotal = parseFloat(cleanMoneyString(finalData.commission)) || 0;
+  var surchargeTotal = parseFloat(cleanMoneyString(finalData.surcharge)) || 0;
+  var otherProgramsTotal = parseFloat(cleanMoneyString(finalData.other_programs)) || 0;
+  var netTotal = parseFloat(cleanMoneyString(finalData.net_rate)) || grossTotal;
+
+  var grossPerRow = Math.round(grossTotal / totalRows);
+  var commissionPerRow = Math.round(commissionTotal / totalRows);
+  var surchargePerRow = Math.round(surchargeTotal / totalRows);
+  var otherProgramsPerRow = Math.round(otherProgramsTotal / totalRows);
+  var netPerRow = Math.round(netTotal / totalRows);
+
+  var rows = [];
+  for (var r = 0; r < roomCount; r++) {
+    for (var n = 0; n < nightCount; n++) {
+      var stayDate = new Date(checkInDate.getTime());
+      stayDate.setDate(stayDate.getDate() + n);
+      var nextDate = new Date(stayDate.getTime());
+      nextDate.setDate(nextDate.getDate() + 1);
+
+      rows.push({
+        check_in: formatDateToSheetStr(stayDate),
+        check_out: formatDateToSheetStr(nextDate),
+        room_type: finalRoomType || finalData.room_type || 'Booking.com Room',
+        rooms: 1,
+        gross: grossPerRow.toString(),
+        commission: commissionPerRow.toString(),
+        net_rate: netPerRow.toString(),
+        surcharge: surchargePerRow.toString(),
+        other_programs: otherProgramsPerRow.toString(),
+        breakfast: finalData.breakfast || 'Không'
+      });
+    }
+  }
+
+  return rows;
+}
+
+function formatBookingComRoomType_(roomText, roomQty) {
+  var text = (roomText || '').toString().trim();
+  var qty = roomQty || 1;
+
+  // Ưu tiên mã phòng nội bộ dạng 2G1M6, 1G1M8...
+  var codeMatch = text.match(/\b(\d+G\s*\d+M\d+)\b/i);
+  if (codeMatch) {
+    return codeMatch[1].replace(/\s+/g, '').toUpperCase() + ' (x' + qty + ')';
+  }
+
+  // Fallback nếu mã nằm trong ngoặc hoặc dạng code chữ/số
+  codeMatch = text.match(/\(([A-Z0-9]{3,})\)/i);
+  if (codeMatch) {
+    return codeMatch[1].toUpperCase() + ' (x' + qty + ')';
+  }
+
+  return text ? (text + ' (x' + qty + ')') : ('Booking.com Room (x' + qty + ')');
+}
+
+function monthNameToNumber_(monthName) {
+  var key = (monthName || '').toString().toLowerCase().substring(0, 3);
+  var map = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  return map[key] || null;
+}
+
+function calculateProportionalAmount_(partAmount, totalAmount, targetAmount) {
+  var part = parseFloat(cleanMoneyString(partAmount)) || 0;
+  var total = parseFloat(cleanMoneyString(totalAmount)) || 0;
+  var target = parseFloat(cleanMoneyString(targetAmount)) || 0;
+  if (!part || !total || !target) return "0";
+  return Math.round(part * target / total).toString();
+}
+
+function extractTripComDailyRates(cleanText, finalData) {
+  var text = cleanText || "";
+  var checkInBase = parseDateToSheetFormat(finalData.check_in);
+  var year = inferBookingYear_(checkInBase, finalData.check_in);
+
+  // Pattern 1: Tiếng Anh - "Jun 14 (1 room(s))"
+  var MONTH_MAP = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+  var enRegex = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*\(\d+\s*room\(s\)\)/gi;
+  var matches = [];
+  var match;
+  while ((match = enRegex.exec(text)) !== null) {
+    var monthNum = MONTH_MAP[match[1].charAt(0).toUpperCase() + match[1].substring(1).toLowerCase()];
+    if (monthNum) {
+      matches.push({ index: match.index, day: parseInt(match[2], 10), month: monthNum });
+    }
+  }
+
+  // Pattern 2: Tiếng Việt fallback - "Ngày 14 tháng 6 (1 phòng)"
+  if (matches.length === 0) {
+    var viRegex = /Ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s*\([^)]*phòng[^)]*\)/gi;
+    while ((match = viRegex.exec(text)) !== null) {
+      matches.push({ index: match.index, day: parseInt(match[1], 10), month: parseInt(match[2], 10) });
+    }
+  }
+
+  if (matches.length === 0) return [];
+
+  var rates = [];
+  for (var i = 0; i < matches.length; i++) {
+    var start = matches[i].index;
+    var end = (i + 1 < matches.length) ? matches[i + 1].index : Math.min(text.length, start + 2000);
+    var block = text.substring(start, end);
+
+    var stayDate = new Date(year, matches[i].month - 1, matches[i].day);
+    var nextDate = new Date(stayDate.getTime());
+    nextDate.setDate(nextDate.getDate() + 1);
+
+    // Lấy giá từ block - ưu tiên Your payout làm Net
+    var gross = extractTripComMoneyAfterKey_(block, /Original room rate/i)
+             || extractTripComMoneyAfterKey_(block, /Giá phòng ban đầu/i);
+    var discount = extractTripComDiscount_(block);
+    var net = extractTripComMoneyAfterKey_(block, /Your payout/i)
+           || extractTripComMoneyAfterKey_(block, /Khoản thanh toán của bạn/i);
+
+    // Fallback: Final room rate
+    if (!net || net === "0") {
+      net = extractTripComMoneyAfterKey_(block, /Final room rate/i)
+         || extractTripComMoneyAfterKey_(block, /Giá phòng cuối cùng/i);
+    }
+
+    if (net && net !== "0" && net !== 0) {
+      rates.push({
+        check_in: formatDateToSheetStr(stayDate),
+        check_out: formatDateToSheetStr(nextDate),
+        gross: gross || "0",
+        commission: discount || "0",
+        net_rate: net,
+        surcharge: "0",
+        other_programs: "0"
+      });
+    }
+  }
+
+  return rates;
+}
+
+function formatDateToSheetStr(dateObj) {
+  var d = dateObj.getDate();
+  var m = dateObj.getMonth() + 1;
+  var y = dateObj.getFullYear();
+  return (d < 10 ? '0'+d : d) + '/' + (m < 10 ? '0'+m : m) + '/' + y;
+}
+
+function dateFromAnySheetValue_(value) {
+  if (!value) return null;
+
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  var parsed = parseDateToSheetFormat(value);
+  if (Object.prototype.toString.call(parsed) === '[object Date]' && !isNaN(parsed.getTime())) {
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  var s = (parsed || value || "").toString().trim();
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10));
+
+  m = s.match(/^(\d{1,2})-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-(\d{4})/i);
+  if (m) {
+    var monthMap = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+    var mon = s.match(/-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-/i)[1].toLowerCase().substring(0,3);
+    return new Date(parseInt(m[2], 10), monthMap[mon], parseInt(m[1], 10));
+  }
+
+  var auto = new Date(s);
+  if (!isNaN(auto.getTime())) return new Date(auto.getFullYear(), auto.getMonth(), auto.getDate());
+  return null;
+}
+
+function dateFromTravelokaDate_(dateText) {
+  if (!dateText) return null;
+  var monthMap = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  var m = dateText.toString().trim().match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),\s*(\d{4})$/i);
+  if (!m) return dateFromAnySheetValue_(dateText);
+  return new Date(parseInt(m[3], 10), monthMap[m[1].toLowerCase().substring(0, 3)], parseInt(m[2], 10));
+}
+
+function extractTravelokaDailyRates(cleanText, finalData) {
+  var text = cleanText || "";
+  var dateIn = dateFromAnySheetValue_(finalData.check_in);
+  var dateOut = dateFromAnySheetValue_(finalData.check_out);
+  if (!dateIn || !dateOut) return [];
+
+  var nights = Math.round((dateOut - dateIn) / (1000 * 60 * 60 * 24));
+  if (nights <= 1) return [];
+
+  var totalNet = cleanMoneyString(finalData.net_rate);
+  var totalGross = cleanMoneyString(finalData.total_price);
+  var totalSurcharge = cleanMoneyString(finalData.surcharge);
+  var totalOther = cleanMoneyString(finalData.other_programs);
+
+  var rows = [];
+
+  // ═══════════════════════════════════════════════════════════════════
+  // BLOCK-BASED PARSER: Tìm ngày trước, rồi quét VND values trong block.
+  // Xử lý được: dấu "|", "x 2 phòng", "VND trước số" và "số trước VND".
+  // ═══════════════════════════════════════════════════════════════════
+  var normalized = text.replace(/\|/g, ' ').replace(/\s+/g, ' ');
+
+  // Tìm tất cả date markers (English + Vietnamese)
+  var datePattern = /(?:((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*20\d{2})|Ng[àa]y\s+(\d{1,2})\s+th[áa]ng\s+(\d{1,2})\s+n[aă]m\s+(20\d{2}))/gi;
+  var dateMatches = [];
+  var match;
+  while ((match = datePattern.exec(normalized)) !== null) {
+    var stayDate;
+    if (match[1]) {
+      stayDate = dateFromTravelokaDate_(match[1]);
+    } else {
+      stayDate = new Date(parseInt(match[4], 10), parseInt(match[3], 10) - 1, parseInt(match[2], 10));
+    }
+    if (stayDate) {
+      dateMatches.push({ index: match.index, endIndex: match.index + match[0].length, date: stayDate });
+    }
+  }
+
+  if (dateMatches.length === 0) return [];
+
+  // Quét VND values trong từng block (từ date đến date tiếp theo)
+  for (var i = 0; i < dateMatches.length; i++) {
+    var start = dateMatches[i].endIndex;
+    var end = (i + 1 < dateMatches.length) ? dateMatches[i + 1].index : Math.min(normalized.length, start + 500);
+    var block = normalized.substring(start, end);
+
+    // Tìm tất cả số tiền VND trong block
+    // Hỗ trợ: "VND 450000", "450.000 VND", "VND 0", "0 VND"
+    // Bỏ qua: "x 2", "x 2 phòng", "x2" (multiplier, không phải tiền)
+    var amounts = [];
+    var vndScan = /(?:VND\s*([\d,.]+)|([\d,.]+)\s*VND)/gi;
+    var vm;
+    while ((vm = vndScan.exec(block)) !== null) {
+      var raw = vm[1] || vm[2];
+      // Bỏ qua nếu số đứng sau "x" (multiplier)
+      var before = block.substring(Math.max(0, vm.index - 3), vm.index);
+      if (/x\s*$/i.test(before)) continue;
+      amounts.push(cleanMoneyString(raw));
+    }
+
+    if (amounts.length < 2) continue;
+
+    // Traveloka bảng giá có 4 cột: Room Rate, Extra Bed, Surcharge, Subtotal
+    // Chỉ lấy tối đa 4 giá trị VND đầu tiên, tránh bắt nhầm dòng tổng (Subtotal Rates)
+    if (amounts.length > 4) amounts = amounts.slice(0, 4);
+
+    var sd = dateMatches[i].date;
+    var nd = new Date(sd);
+    nd.setDate(nd.getDate() + 1);
+
+    // Map: amounts = [roomRate, extraBed, surcharge, subtotal] hoặc ít hơn
+    var subtotal = amounts[amounts.length - 1];
+    var surcharge = amounts.length >= 4 ? amounts[amounts.length - 2] : 0;
+
+    rows.push({
+      check_in: formatDateToSheetStr(sd),
+      check_out: formatDateToSheetStr(nd),
+      gross: subtotal,
+      commission: 0,
+      net_rate: subtotal,
+      surcharge: surcharge,
+      other_programs: 0
+    });
+  }
+
+  // Nếu tìm được >= 2 dòng giá ngày thì dùng, không bắt buộc khớp chính xác nights từ AI
+  // (vì AI có thể trả sai ngày check-in/check-out)
+  if (rows.length < 2) return [];
+
+  // Nếu tổng có adjustment/coupon, phân bổ vào net/other theo tỷ lệ và dòng cuối hấp thụ sai số.
+  var sumGross = 0;
+  for (var i = 0; i < rows.length; i++) sumGross += cleanMoneyString(rows[i].gross);
+  if (!totalGross) totalGross = sumGross;
+  if (!totalNet) totalNet = totalGross;
+
+  var sumNet = 0, sumOther = 0, sumSurcharge = 0;
+  for (var j = 0; j < rows.length; j++) {
+    var gross = cleanMoneyString(rows[j].gross);
+    var ratio = totalGross > 0 ? (gross / totalGross) : (1 / rows.length);
+    if (j < rows.length - 1) {
+      rows[j].net_rate = Math.round(totalNet * ratio);
+      rows[j].other_programs = Math.round(totalOther * ratio);
+      rows[j].surcharge = Math.round(totalSurcharge * ratio);
+      sumNet += rows[j].net_rate;
+      sumOther += rows[j].other_programs;
+      sumSurcharge += rows[j].surcharge;
+    } else {
+      rows[j].net_rate = totalNet - sumNet;
+      rows[j].other_programs = totalOther - sumOther;
+      rows[j].surcharge = totalSurcharge - sumSurcharge;
+    }
+  }
+
+  return rows;
+}
+
+function extractAirbnbDailyRates(cleanText, finalData) {
+  var dateIn = dateFromAnySheetValue_(finalData.check_in);
+  var dateOut = dateFromAnySheetValue_(finalData.check_out);
+  if (!dateIn || !dateOut) return [];
+
+  var nights = Math.round((dateOut - dateIn) / (1000 * 60 * 60 * 24));
+  if (nights <= 1) return [];
+
+  // Airbnb thường email summary không luôn có bảng giá từng ngày.
+  // Khi chưa bắt được bảng giá ngày rõ ràng, chia đều tổng tiền để đảm bảo đủ dòng vận hành.
+  var totalNet = cleanMoneyString(finalData.net_rate);
+  var totalGross = cleanMoneyString(finalData.total_price);
+  var totalComm = cleanMoneyString(finalData.commission);
+  var totalSurcharge = cleanMoneyString(finalData.surcharge);
+  var totalOther = cleanMoneyString(finalData.other_programs);
+
+  if (!totalNet && !totalGross) return [];
+  if (!totalGross) totalGross = totalNet;
+  if (!totalNet) totalNet = totalGross;
+
+  var rows = [];
+  var current = new Date(dateIn);
+  var sumGross = 0, sumNet = 0, sumComm = 0, sumSurcharge = 0, sumOther = 0;
+
+  for (var i = 0; i < nights; i++) {
+    var nextDay = new Date(current);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    var gross = (i < nights - 1) ? Math.round(totalGross / nights) : (totalGross - sumGross);
+    var net = (i < nights - 1) ? Math.round(totalNet / nights) : (totalNet - sumNet);
+    var comm = (i < nights - 1) ? Math.round(totalComm / nights) : (totalComm - sumComm);
+    var surcharge = (i < nights - 1) ? Math.round(totalSurcharge / nights) : (totalSurcharge - sumSurcharge);
+    var other = (i < nights - 1) ? Math.round(totalOther / nights) : (totalOther - sumOther);
+
+    rows.push({
+      check_in: formatDateToSheetStr(current),
+      check_out: formatDateToSheetStr(nextDay),
+      gross: gross,
+      commission: comm,
+      net_rate: net,
+      surcharge: surcharge,
+      other_programs: other
+    });
+
+    sumGross += gross;
+    sumNet += net;
+    sumComm += comm;
+    sumSurcharge += surcharge;
+    sumOther += other;
+    current.setDate(current.getDate() + 1);
+  }
+
+  return rows;
+}
+
+function extractAgodaDailyRates(cleanText, finalData) {
+  var text = cleanText || "";
+  var dateIn = dateFromAnySheetValue_(finalData.check_in);
+  var dateOut = dateFromAnySheetValue_(finalData.check_out);
+
+  if (!dateIn || !dateOut) return [];
+
+  var nights = Math.round((dateOut - dateIn) / (1000 * 60 * 60 * 24));
+  if (nights <= 1) return []; // Fallback to 1 row if 1 night or less
+  
+  var current = new Date(dateIn);
+  var dailyNets = [];
+  var sumExtractedNet = 0;
+  var monthNamesEn = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  
+  for (var i = 0; i < nights; i++) {
+    var d = current.getDate();
+    var m = current.getMonth() + 1;
+    var y = current.getFullYear();
+    
+    var monEn = monthNamesEn[m - 1];
+    var dStr = "(?:0?" + d + ")";
+    var mStr = "(?:" + monEn + "|Tháng\\s*0?" + m + ")";
+    var yStr = y.toString();
+    
+    // Pattern: "May 21, 2026" or "21 May 2026" or "Tháng 5 21, 2026" or "21 Tháng 5 2026"
+    var datePattern = new RegExp("(?:" + mStr + "\\s+" + dStr + "\\s*,?\\s*" + yStr + "|" + dStr + "\\s+" + mStr + "\\s*,?\\s*" + yStr + ")", "i");
+    
+    var match = text.match(datePattern);
+    if (match) {
+       var snippet = text.substring(match.index, Math.min(text.length, match.index + 150));
+       var currencyMatch = snippet.match(/(?:VND|USD|EUR|THB|AUD|SGD|GBP|JPY|KRW|MYR|PHP|IDR)\s*[|:]?\s*([\d,]+(?:\.\d+)?)/i);
+       var net = 0;
+       
+       if (currencyMatch) {
+         net = cleanMoneyString(currencyMatch[1]);
+       } else {
+         var nums = snippet.substring(match[0].length).match(/[\d,]+(?:\.\d+)?/g);
+         if (nums) {
+           for (var k = 0; k < nums.length; k++) {
+             var val = cleanMoneyString(nums[k]);
+             if (val > 10) {
+               net = val;
+               break;
+             }
+           }
+         }
+       }
+       
+       if (net > 0) {
+         var nextDay = new Date(current);
+         nextDay.setDate(nextDay.getDate() + 1);
+         dailyNets.push({
+           check_in: formatDateToSheetStr(current),
+           check_out: formatDateToSheetStr(nextDay),
+           net_rate: net,
+           gross: 0,
+           commission: 0,
+           surcharge: 0,
+           other_programs: 0
+         });
+         sumExtractedNet += net;
+       }
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  
+  if (dailyNets.length !== nights) return [];
+  
+  var totalGross = cleanMoneyString(finalData.total_price);
+  var totalComm = cleanMoneyString(finalData.commission);
+  var commSign = (finalData.commission && finalData.commission.toString().indexOf("-") > -1) ? -1 : 1;
+  if (totalComm > 0 && commSign === -1) totalComm = -totalComm; 
+  
+  var totalSurcharge = cleanMoneyString(finalData.surcharge);
+  var totalOther = cleanMoneyString(finalData.other_programs);
+  
+  var sumGross = 0, sumComm = 0, sumSurcharge = 0, sumOther = 0;
+  
+  for (var i = 0; i < dailyNets.length; i++) {
+    var ratio = sumExtractedNet > 0 ? (dailyNets[i].net_rate / sumExtractedNet) : (1 / nights);
+    
+    if (i < dailyNets.length - 1) {
+      dailyNets[i].gross = Math.round(totalGross * ratio);
+      dailyNets[i].commission = Math.round(totalComm * ratio);
+      dailyNets[i].surcharge = Math.round(totalSurcharge * ratio);
+      dailyNets[i].other_programs = Math.round(totalOther * ratio);
+      
+      sumGross += dailyNets[i].gross;
+      sumComm += dailyNets[i].commission;
+      sumSurcharge += dailyNets[i].surcharge;
+      sumOther += dailyNets[i].other_programs;
+    } else {
+      dailyNets[i].gross = totalGross - sumGross;
+      dailyNets[i].commission = totalComm - sumComm;
+      dailyNets[i].surcharge = totalSurcharge - sumSurcharge;
+      dailyNets[i].other_programs = totalOther - sumOther;
+    }
+  }
+  
+  return dailyNets;
+}
+
+function extractExpediaDailyRates(cleanText, finalData) {
+  var text = cleanText || "";
+  var dateIn = dateFromAnySheetValue_(finalData.check_in);
+  var dateOut = dateFromAnySheetValue_(finalData.check_out);
+  if (!dateIn || !dateOut) return [];
+
+  var nights = Math.round((dateOut - dateIn) / (1000 * 60 * 60 * 24));
+  if (nights <= 1) return [];
+
+  var totalGross = cleanMoneyString(finalData.total_price);
+  var totalNet = cleanMoneyString(finalData.net_rate);
+  // Expedia: không tự suy luận hoa hồng từ chênh lệch Gross/Net.
+  // Chỉ dùng commission nếu email/AI quét được trường commission rõ ràng.
+  var totalComm = cleanMoneyString(finalData.commission);
+
+  // Mẫu Expedia: "Giá cơ sở mỗi ngày - Trọn gói - 1,379,507 VND"
+  var baseRate = findExpediaBaseDailyRate_(text);
+
+  var rates = [];
+  var current = new Date(dateIn);
+  var sumNet = 0;
+  var sumComm = 0;
+
+  for (var i = 0; i < nights; i++) {
+    var nextDay = new Date(current);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    // Expedia: "Giá cơ sở mỗi ngày" = đơn giá CHƯA thuế → dùng cho TẤT CẢ đêm
+    var gross;
+    if (baseRate > 0) {
+      gross = baseRate;
+    } else {
+      gross = (i < nights - 1) ? Math.round(totalGross / nights) : (totalGross - rates.reduce(function(s,r){return s+r.gross;},0));
+    }
+
+    var ratio = (1 / nights);
+    var net = (i < nights - 1) ? Math.round(totalNet / nights) : (totalNet - sumNet);
+    var comm = (i < nights - 1) ? Math.round(totalComm / nights) : (totalComm - sumComm);
+
+    rates.push({
+      check_in: formatDateToSheetStr(current),
+      check_out: formatDateToSheetStr(nextDay),
+      gross: gross,
+      commission: comm,
+      net_rate: net,
+      surcharge: 0,
+      other_programs: 0
+    });
+
+    sumNet += net;
+    sumComm += comm;
+    current.setDate(current.getDate() + 1);
+  }
+
+  return rates;
+}
+
+function findExpediaBaseDailyRate_(text) {
+  var m = text.match(/(?:Giá cơ sở mỗi ngày|Base rate per day|Daily base rate)[^\d-]*((?:-|−)?[\d,.]+)\s*VND/i);
+  if (m) return cleanMoneyString(m[1]);
+
+  // Fallback: lấy số tiền đứng ngay trước VND trong block giá cơ sở.
+  var idx = text.search(/Giá cơ sở mỗi ngày|Base rate per day|Daily base rate/i);
+  if (idx === -1) return 0;
+  var snippet = text.substring(idx, Math.min(text.length, idx + 250));
+  var nums = snippet.match(/((?:-|−)?[\d,.]+)\s*VND/gi);
+  if (!nums || nums.length === 0) return 0;
+  return cleanMoneyString(nums[0]);
+}
+
+function extractTripComMoneyAfterKey_(block, keyRegex) {
+  var m = block.match(keyRegex);
+  if (!m) return "0";
+  // Lấy phần text từ key đến hết dòng hoặc 300 ký tự
+  var snippet = block.substring(m.index, Math.min(block.length, m.index + 300));
+  // Tìm số tiền gần nhất sau key (có thể có *1 cuối)
+  var nums = snippet.match(/[\d,]+(?:\.\d+)?(?:\*\d+)?/g);
+  if (!nums) return "0";
+
+  for (var i = 0; i < nums.length; i++) {
+    var cleaned = normalizeTripComMoney_(nums[i]);
+    if (cleaned !== "0" && cleaned !== 0 && parseInt(cleaned.toString().replace(/-/g, ""), 10) > 100) return cleaned;
+  }
+  return "0";
+}
+
+function extractTripComDiscount_(block) {
+  // Tìm Discounts hoặc Giảm giá
+  var m = block.match(/Discounts|Giảm giá/i);
+  if (!m) return "0";
+  var snippet = block.substring(m.index, Math.min(block.length, m.index + 300));
+  // Tìm số âm đầu tiên
+  var nums = snippet.match(/(?:-|−)\d[\d,.]*(?:\.\d+)?(?:\*\d+)?/g);
+  if (!nums || nums.length === 0) return "0";
+  return normalizeTripComMoney_(nums[0]);
+}
+
+function normalizeTripComMoney_(value) {
+  if (!value) return "0";
+  var s = value.toString().replace(/−/g, "-").replace(/\*\d+/g, "").replace(/\+/g, "").trim();
+  // Trip.com: 964706.00 -> 964706 (bỏ .00 phần thập phân)
+  if (/^-?\d+\.\d{2}$/.test(s)) s = s.replace(/\.\d{2}$/, "");
+  // Bỏ dấu phẩy phân cách hàng nghìn
+  s = s.replace(/,/g, "");
+  return cleanMoneyString(s);
+}
+
+function inferBookingYear_(parsedCheckInDate, rawCheckIn) {
+  if (parsedCheckInDate && Object.prototype.toString.call(parsedCheckInDate) === '[object Date]' && !isNaN(parsedCheckInDate.getTime())) {
+    return parsedCheckInDate.getFullYear();
+  }
+  var raw = rawCheckIn ? rawCheckIn.toString() : "";
+  var y = raw.match(/20\d{2}/);
+  return y ? parseInt(y[0], 10) : new Date().getFullYear();
+}
+
+function formatDateKey_(value) {
+  if (!value) return "";
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  var parsed = parseDateToSheetFormat(value);
+  if (Object.prototype.toString.call(parsed) === '[object Date]' && !isNaN(parsed.getTime())) {
+    return Utilities.formatDate(parsed, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return value.toString().trim();
+}
+
+function hasBookingDateKey_(sheet, compositeKey) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  var target = compositeKey.toString();
+  var data = sheet.getRange(2, 4, lastRow - 1, 4).getValues(); // D:G = Mã BK, Tên khách, Check-in, Check-out
+  for (var i = 0; i < data.length; i++) {
+    var bookingId = data[i][0] ? data[i][0].toString().trim() : "";
+    var checkInKey = formatDateKey_(data[i][2]);
+    if ((bookingId + "__" + checkInKey) === target) return true;
+  }
+  return false;
+}
+
+// ============================================================================
+// MODULE 4: BỘ QUÉT DỮ LIỆU CỨNG (V25 - THÊM TRAVELOKA + EXPEDIA PAYMENT)
+// ============================================================================
+
+
+function detectPlatform(text, subject) {
+  if (subject.indexOf("Expedia") > -1 || text.indexOf("Khoản tiền thu từ Expedia") > -1) return "Expedia";
+  if (text.indexOf("Trip.com") > -1 || text.indexOf("auto_reservation@trip.com") > -1) return "Trip.com";
+  if (text.indexOf("Airbnb") > -1 || text.indexOf("HMCS") > -1) return "Airbnb";
+  if (text.indexOf("Traveloka") > -1 || text.indexOf("hotel@traveloka.com") > -1) return "Traveloka"; // ✅ V25
+  return "Agoda"; 
+}
+
+
+
+function scanDataByPlatform(text, platform) {
+  var data = {
+    net_rate: "0", total_price: "0", commission: "0", 
+    surcharge: "0", other_programs: "0", has_breakfast: "Không"
+  };
+
+
+  if (platform === "Expedia") {
+    data.net_rate = findValueNearKey(text, /Khoản tiền thu từ Expedia Group/i);
+    data.total_price = findValueNearKey(text, /Tổng khoản tiền đặt phòng/i);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ✅ V25: Quét Payment Status bằng regex (từ email mẫu thực tế)
+    // ═══════════════════════════════════════════════════════════════════
+    if (/THANH TOÁN TRƯỚC|Expedia thu khoản thanh toán từ khách/i.test(text)) {
+      data.payment_status = "Prepaid";
+    } else if (/Khách sạn thu tiền thanh toán|Khách sạn thu khoản thanh toán từ khách/i.test(text)) {
+      data.payment_status = "Postpaid";
+    }
+
+    // Expedia: không tự tính hoa hồng = Net - Gross.
+    // Nếu email không có dòng Commission rõ ràng thì giữ Hoa Hồng = 0.
+    data.commission = findValueNearKey(text, /(?:Commission|Hoa hồng|Tiền hoa hồng)/i);
+
+  } else if (platform === "Trip.com") {
+    // ✅ FIX V26: Sửa lại cách lấy dữ liệu Trip.com theo feedback
+    // Tổng Tiền (Gross) = Giá phòng ban đầu
+    // Thực nhận = Khoản thanh toán của bạn
+    // Hoa hồng = Giảm giá
+    data.net_rate = findValueNearKey(text, /(?:Khoản thanh toán của bạn|Your payout|Settlement Price|Net Price)/i);
+    data.total_price = findValueNearKey(text, /(?:Giá phòng ban đầu|Original room rate|Total Amount)/i);
+    
+    var discountMatch = text.match(/(?:Giảm giá|Discount)[^0-9-]*((?:-|−)?[\d,.]+)/i);
+    if (discountMatch) {
+      data.commission = discountMatch[1];
+    } else {
+      data.commission = findValueNearKey(text, /(?:Giảm giá|Discount)/i);
+    }
+
+
+  } else if (platform === "Airbnb") {
+    var airbnbDates = extractAirbnbStayDates_(text);
+    if (airbnbDates) {
+      data.check_in = airbnbDates.check_in;
+      data.check_out = airbnbDates.check_out;
+    }
+
+    data.net_rate = findValueNearKey(text, /(?:Bạn kiếm được|Bạn sẽ nhận được|Host payout|Payout|Total payout|Your payout)/i);
+    data.total_price = findValueNearKey(text, /(?:Tổng \(VND\)|Guest paid|Guest total|Total paid by guest|Total price|Subtotal)/i);
+    data.commission = findValueNearKey(text, /(?:Phí dịch vụ|Service fee|Host service fee)/i);
+    data.surcharge = findValueNearKey(text, /(?:Phí dọn dẹp|Cleaning fee|Điều chỉnh|Adjustment)/i);
+    data.payment_status = "Prepaid";
+
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ✅ V25: TRAVELOKA - Quét dữ liệu giá tiền (CẬP NHẬT TỪ MẪU THỰC TẾ)
+  // Từ khóa: "Tổng phụ Tỷ lệ", "Tổng số tiền bạn sẽ nhận được", "Giá phòng"
+  // ═══════════════════════════════════════════════════════════════════
+  } else if (platform === "Traveloka") {
+
+    // --- Thực nhận (Net) - ƯU TIÊN tìm trước ---
+    data.net_rate = findValueNearKey(text, /(?:Tổng số tiền bạn sẽ nhận được|Tổng số tiền bạn sẽ nhận|bạn sẽ nhận được|Total you will receive)/i);
+    if (data.net_rate === "0") {
+      data.net_rate = findValueNearKey(text, /(?:Hotel Receives|Thanh toán cho khách sạn|Net Amount|Amount to Hotel)/i);
+    }
+
+    // --- Tổng cộng (Gross) ---
+    data.total_price = findValueNearKey(text, /(?:Tổng phụ Tỷ lệ|Tổng phụ|Subtotal Rates)/i);
+    if (data.total_price === "0") {
+      data.total_price = findValueNearKey(text, /(?:Total Price|Tổng giá|Total Amount|Tổng cộng)/i);
+    }
+    if (data.total_price === "0") {
+      data.total_price = findValueNearKey(text, /(?:Total Price|Tổng giá|Total Amount|Tổng cộng)/i);
+    }
+    // Nếu vẫn không tìm được, thử lấy từ "Giá phòng"
+    if (data.total_price === "0") {
+      data.total_price = findValueNearKey(text, /Giá phòng/i);
+    }
+    // Nếu tất cả đều 0, dùng net_rate làm total_price
+    if (data.total_price === "0" && data.net_rate !== "0") {
+      data.total_price = data.net_rate;
+    }
+
+    // --- Bù trừ / Điều chỉnh ---
+    var discountMatch = text.match(/(?:Điều chỉnh thăng chức và làm tròn|Điều chỉnh)[^0-9-]*((?:-|−)?[\d,.]+)/i);
+    if (discountMatch) {
+      data.surcharge = discountMatch[1];
+    }
+    
+    // --- Hoa hồng ---
+    data.commission = findValueNearKey(text, /(?:Commission|Hoa hồng)/i);
+
+    // --- Ăn sáng (check KHÔNG TRƯỚC, hỗ trợ cả tiếng Anh + Việt) ---
+    if (/Breakfast Not Included|Not Included.*Breakfast/i.test(text)) {
+      data.has_breakfast = "Không";
+    } else if (/không bao gồm/i.test(text) && /(?:sáng|breakfast|bữa ăn)/i.test(text)) {
+      data.has_breakfast = "Không";
+    } else if (/(Breakfast Included|Kèm bữa sáng|BF Included|Ăn sáng.*bao gồm|bao gồm.*ăn sáng)/i.test(text)) {
+      data.has_breakfast = "Có";
+    }
+
+    // --- Payment Status ---
+    if (/Trả trước|Đã đặt và thanh toán bởi Traveloka|Prepaid|Booked and Payable by\s*(?:\|\s*)?Traveloka/i.test(text)) {
+      data.payment_status = "Prepaid";
+    } else if (/Thanh toán tại khách sạn|Pay at hotel|Hotel Collect/i.test(text)) {
+      data.payment_status = "Postpaid";
+    }
+
+
+  } else {
+    // --- AGODA (LOGIC CŨ + FIX MỚI) ---
+
+    // 1. Tổng tiền
+    data.total_price = findValueNearKey(text, /(Reference sell rate|Giá bán tham khảo)/i);
+
+    // 2. Net Rate
+    data.net_rate = findValueNearKey(text, /(Net rate|Giá thực tế)/i);
+
+    // 3. Commission
+    data.commission = findValueNearKey(text, /(Commission|Tiền hoa hồng)/i);
+
+    // 4. Khoản bù trừ (Surcharge) - FIX LỖI
+    var surMatch = text.match(/(?:Khoản bù trừ|Surcharge)[^0-9-]*((?:-|−)[\d,.]+)/i);
+    if (surMatch) {
+        data.surcharge = surMatch[1];
+    } else {
+        data.surcharge = findValueNearKey(text, /(Khoản bù trù|Surcharge)/i);
+    }
+
+    // 5. Chương trình khác
+    var otherMatch = text.match(/(?:Chương trình khác|Other programs)[^0-9-]*((?:-|−)[\d,.]+)/i);
+    if (otherMatch) {
+        data.other_programs = otherMatch[1];
+    } else {
+        data.other_programs = findValueNearKey(text, /(Chương trình khác|Other programs)/i);
+    }
+
+
+    // 6. Vé ăn sáng
+    if (/(Breakfast|Ăn sáng|Kèm bữa sáng|BF Included)/i.test(text)) {
+      data.has_breakfast = "Có";
+    }
+  }
+
+
+  return data;
+}
+
+
+
+function findValueNearKey(text, keyRegex) {
+  var match = text.match(keyRegex);
+  if (!match) return "0";
+
+  var snippet = text.substring(match.index, match.index + 400);
+  var moneyRegex = /((?:-|−)?[\d,.]+)/g;
+  var numbers = snippet.match(moneyRegex);
+
+  if (numbers) {
+    for (var i = 0; i < numbers.length; i++) {
+      var num = numbers[i];
+      if ((num.length > 3 && (num.includes(',') || num.includes('.'))) || num.length > 5) {
+        return num;
+      }
+    }
+  }
+  return "0";
+}
+
+
+
+
+// ============================================================================
+// MODULE 4.5: V2 - CHU?N H?A INPUT MARKDOWN CHO AI
+// ============================================================================
+
+/**
+ * ? V2: Build input Markdown c? c?u tr?c ?? AI ??c ?n ??nh h?n.
+ * Kh?ng thay ??i logic ghi Sheet / h?y / regex ti?n hi?n t?i.
+ */
+function buildStructuredAIInput(message, cleanText, hardData, platform) {
+  var subject = message.getSubject();
+  var fromEmail = message.getFrom();
+  var extracted = extractStructuredFields(cleanText, platform, subject);
+  var lines = [];
+  lines.push("# NORMALIZED BOOKING EMAIL", "");
+  lines.push("## 1. Email Metadata", "| Field | Value |", "|---|---|");
+  lines.push("| Platform | " + safeMarkdownValue(platform) + " |");
+  lines.push("| Subject | " + safeMarkdownValue(subject) + " |");
+  lines.push("| From | " + safeMarkdownValue(fromEmail) + " |", "");
+  lines.push("## 2. Extracted Fields From Clean Text", "| Field | Value |", "|---|---|");
+  var keys = ["booking_id","hotel_name","property_id","city","guest_first_name","guest_last_name","guest_full_name","country","check_in","check_out","room_type","rooms","occupancy","extra_bed","rate_plan","payment_status","customer_notes"];
+  for (var i = 0; i < keys.length; i++) lines.push("| " + keys[i] + " | " + safeMarkdownValue(extracted[keys[i]]) + " |");
+  lines.push("", "## 3. Money / Regex Hints From Code", "| Field | Value |", "|---|---|");
+  lines.push("| total_price / gross | " + safeMarkdownValue(hardData.total_price) + " |");
+  lines.push("| net_rate | " + safeMarkdownValue(hardData.net_rate) + " |");
+  lines.push("| commission | " + safeMarkdownValue(hardData.commission) + " |");
+  lines.push("| surcharge | " + safeMarkdownValue(hardData.surcharge) + " |");
+  lines.push("| other_programs | " + safeMarkdownValue(hardData.other_programs) + " |");
+  lines.push("| breakfast | " + safeMarkdownValue(hardData.has_breakfast) + " |");
+  lines.push("| payment_status_hint | " + safeMarkdownValue(hardData.payment_status) + " |", "");
+  lines.push("## 4. Regex Hints JSON", "```json", JSON.stringify(hardData, null, 2), "```", "");
+  lines.push("## 5. Raw Cleaned Fallback Text", "```text", cleanText, "```");
+  return lines.join("\n");
+}
+
+function extractStructuredFields(cleanText, platform, subject) {
+  var data = {};
+  data.booking_id = extractByRegex(subject + " " + cleanText, /(?:Booking ID|M? s? ??t ph?ng|M? ??t ph?ng|Itinerary #|Booking Number|Trip\.com Booking ID|Traveloka Itinerary|M? s? h?nh tr?nh)[:\s|#-]*(\d{8,18})/i);
+  if (!data.booking_id) data.booking_id = extractByRegex(subject + " " + cleanText, /(?:M? x?c nh?n|Confirmation code)[:\s|]*([A-Z0-9]{8,12})/i);
+  data.property_id = extractByRegex(cleanText, /Property ID\s*(\d+)/i);
+  data.hotel_name = extractByRegex(cleanText, /(?:Booking confirmation[^|]*\|\s*)+([^|]+?)\s*\(Property ID/i);
+  if (!data.hotel_name) data.hotel_name = extractByRegex(cleanText, /\|\s*([^|]+?)\s*\(Property ID\s*\d+/i);
+  data.city = extractByRegex(cleanText, /City[^|]*\|?\s*:?\s*([^|]+)/i);
+  data.guest_first_name = extractByRegex(cleanText, /Customer First Name[^|]*\|\s*([^|]+)/i);
+  data.guest_last_name = extractByRegex(cleanText, /Customer Last Name[^|]*\|\s*([^|]+)/i);
+  data.guest_full_name = (data.guest_first_name || data.guest_last_name) ? ((data.guest_first_name || "") + " " + (data.guest_last_name || "")).replace(/\s+/g, " ").trim() : extractByRegex(cleanText, /(?:T?n:|Name:)\s*([^,|]+)/i);
+  data.country = extractByRegex(cleanText, /Country of Residence[^|]*\|\s*([^|]+)/i);
+  data.check_in = extractByRegex(cleanText, /Check-in[^|]*\|\s*([^|]+)/i);
+  data.check_out = extractByRegex(cleanText, /Check-out[^|]*\|\s*([^|]+)/i);
+  var roomBlock = cleanText.match(/Room Type[^|]*\|\s*No\. of Rooms[^|]*\|\s*Occupancy[^|]*\|\s*No\. of Extra Bed[^|]*\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)/i);
+  if (roomBlock) { data.room_type = roomBlock[1].trim(); data.rooms = roomBlock[2].trim(); data.occupancy = roomBlock[3].trim(); data.extra_bed = roomBlock[4].trim(); }
+  else { data.room_type = extractByRegex(cleanText, /Room Type[^|]*\|\s*([^|]+)/i); data.rooms = extractByRegex(cleanText, /No\. of Rooms[^|]*\|\s*([^|]+)/i); data.occupancy = extractByRegex(cleanText, /Occupancy[^|]*\|\s*([^|]+)/i); }
+  data.rate_plan = extractByRegex(cleanText, /(?:T?n ch?nh s?ch gi?|Rate plan|Rate Plan)[:\s]*([^|]+)/i);
+  data.payment_status = extractByRegex(cleanText, /\|\s*(TR? TR??C|Tr? tr??c|Prepaid|Pay at hotel|Hotel Collect|Postpaid|Thanh to?n t?i kh?ch s?n)\s*\|/i);
+  data.customer_notes = extractByRegex(cleanText, /Customer Notes[^|]*\|\s*([^|]+)/i);
+  return data;
+}
+
+function extractByRegex(text, regex) { var match = text.match(regex); return match ? match[1].toString().trim() : ""; }
+
+function safeMarkdownValue(value) {
+  if (value === null || value === undefined) return "";
+  return value.toString().replace(/\|/g, "/").replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// ============================================================================
+// MODULE 5: AI ENGINE & HỖ TRỢ (V25 - THÊM TRAVELOKA)
+// ============================================================================
+
+
+function callOpenAI(fullText, hints, platform) {
+  var apiUrl = "https://api.openai.com/v1/chat/completions";
+
+  // ✅ THÊM DÒNG NÀY
+  var currentYear = new Date().getFullYear();
+
+  var prompt = `
+    Bạn là chuyên gia xử lý dữ liệu Booking khách sạn (${platform}).
+
+    DỮ LIỆU ĐẦU VÀO ĐÃ CHUẨN HÓA (Markdown nếu bật V2):
+    ${fullText}
+
+
+    GỢI Ý TỪ CODE (Ưu tiên tuyệt đối - KHÔNG ĐƯỢC thay đổi nếu giá trị khác 0):
+    ${JSON.stringify(hints)}
+
+
+    YÊU CẦU:
+
+
+    1. HOTEL NAME: 
+       - Agoda: Tìm tên ngay trước dòng "(Property ID...".
+       - Expedia: Tìm tên nằm đầu email.
+       - Traveloka: Tìm tên khách sạn ở đầu email, trước "(Property ID)" hoặc "Thành phố".
+
+
+    2. ROOM TYPE (QUAN TRỌNG): 
+       - Nếu có gợi ý 'room_code_hint' (VD: 1G1M8), hãy ghép nó vào tên phòng.
+       - Ví dụ: "Prime Deluxe King Room (1G1M8)".
+
+    3. MONEY (Chuyển về số nguyên - Xóa VND, dấu chấm, phẩy):
+       - surcharge (Khoản bù trù): Ưu tiên gợi ý từ code. (Thường là số âm).
+       - other_programs: Ưu tiên gợi ý.
+       - net_rate: Ưu tiên gợi ý. KHÔNG ĐƯỢC trả 0 nếu gợi ý khác 0.
+       - total_price: Ưu tiên gợi ý. KHÔNG ĐƯỢC trả 0 nếu gợi ý khác 0.
+
+    4. DATES (QUAN TRỌNG): 
+   - Định dạng ISO "YYYY-MM-DD".
+   - Nếu email chỉ có ngày/tháng không có năm, SỬ DỤNG NĂM ${currentYear}.
+   - Ví dụ: "25 Thg 1" -> "${currentYear}-01-25"
+
+    5. BREAKFAST: "Có"/"Không".
+
+
+      6. PAYMENT STATUS (Thanh toán - Bắt buộc tiếng Anh):
+       - Nếu gợi ý từ code có 'payment_status' → Ưu tiên tuyệt đối giá trị đó.
+       - Nếu thấy "TRẢ TRƯỚC", "Prepaid", "Đã thanh toán", "Expedia thu", "Airbnb thu" -> Trả về: "Prepaid".
+       - Nếu thấy "Thanh toán tại khách sạn", "Pay at hotel", "Postpaid", "Hotel Collect" -> Trả về: "Postpaid".
+       - Mặc định nếu không rõ: "Prepaid".
+
+
+    OUTPUT JSON:
+    {
+      "platform": "${platform}",
+      "hotel_name": "string",
+      "booking_id": "string",
+      "guest_name": "string",
+      "check_in": "YYYY-MM-DD",
+      "check_out": "YYYY-MM-DD",
+      "room_type": "string",
+      "rooms": 1,
+      "occupancy": "string",
+      "net_rate": 0,
+      "total_price": 0,
+      "commission": 0,
+      "surcharge": 0,
+      "other_programs": 0,
+      "breakfast": "Có/Không",
+      "payment_status": "string",
+      "special_requests": "string"
+    }
+  `;
+
+
+  var payload = {
+    "model": CONFIG.MODEL_NAME,
+    "messages": [{ "role": "user", "content": prompt }],
+    "response_format": { "type": "json_object" },
+    "temperature": 0
+  };
+
+
+  var options = {
+    "method": "post", "contentType": "application/json",
+    "payload": JSON.stringify(payload),
+    "headers": { "Authorization": "Bearer " + CONFIG.OPENAI_API_KEY },
+    "muteHttpExceptions": true
+  };
+
+
+  var response = UrlFetchApp.fetch(apiUrl, options);
+  var json = JSON.parse(response.getContentText());
+
+  if (json.error) throw new Error(json.error.message);
+  return JSON.parse(json.choices[0].message.content);
+}
+
+
+
+function getDeepCleanBody(message) {
+  var body = message.getBody();
+  body = body.replace(/<style([\s\S]*?)<\/style>/gi, "").replace(/<script([\s\S]*?)<\/script>/gi, "");
+  body = body.replace(/<\/td>/gi, " | ").replace(/<\/tr>/gi, "\n").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<\/div>/gi, "\n");
+  body = body.replace(/<[^>]+>/g, " ");
+  return body.replace(/\s+/g, " ").trim();
+}
+
+
+
+function extractAirbnbStayDates_(text) {
+  if (!text) return null;
+
+  // Airbnb VI: "Nhận phòng Trả phòng ... Th 2, 4 thg 5   Th 4, 6 thg 5"
+  // Lưu ý: "Th 2" / "Th 4" là thứ trong tuần, KHÔNG PHẢI ngày/tháng.
+  var normalized = text.toString().replace(/\s+/g, " ").trim();
+  var sectionMatch = normalized.match(/Nhận phòng\s+Trả phòng([\s\S]{0,300}?)(?:Khách|Mã xác nhận|KHÁCH|MÃ XÁC NHẬN)/i);
+  var section = sectionMatch ? sectionMatch[1] : normalized;
+  var dateRegex = /Th\s*\d\s*,\s*(\d{1,2})\s*thg\s*(\d{1,2})/gi;
+  var dates = [];
+  var match;
+
+  while ((match = dateRegex.exec(section)) !== null) {
+    dates.push({ day: parseInt(match[1], 10), month: parseInt(match[2], 10) });
+    if (dates.length >= 2) break;
+  }
+
+  if (dates.length < 2) return null;
+
+  var year = new Date().getFullYear();
+  var checkIn = new Date(year, dates[0].month - 1, dates[0].day);
+  var checkOut = new Date(year, dates[1].month - 1, dates[1].day);
+
+  // Nếu checkout nhỏ hơn checkin thì booking qua năm sau.
+  if (checkOut.getTime() < checkIn.getTime()) {
+    checkOut = new Date(year + 1, dates[1].month - 1, dates[1].day);
+  }
+
+  return {
+    check_in: Utilities.formatDate(checkIn, Session.getScriptTimeZone(), "yyyy-MM-dd"),
+    check_out: Utilities.formatDate(checkOut, Session.getScriptTimeZone(), "yyyy-MM-dd")
+  };
+}
+
+function parseDateToSheetFormat(dateStr) {
+  if (!dateStr || dateStr.length < 10) return dateStr;
+  try {
+    var parts = dateStr.split("-");
+    if (parts.length === 3) return new Date(parts[0], parts[1] - 1, parts[2]);
+  } catch (e) {}
+  return dateStr;
+}
+
+
+
+function cleanMoneyString(val) {
+  if (!val) return 0;
+  var str = val.toString().trim();
+  // Loại bỏ .00 hoặc ,00 ở cuối (nếu có)
+  str = str.replace(/[.,]00$/, '');
+  // Chỉ giữ lại số và dấu trừ
+  str = str.replace(/[^\d-]/g, '');
+  var num = parseInt(str, 10);
+  return isNaN(num) ? 0 : num;
+}
+
+
+
+function getHeadAndTail(text) {
+  if (text.length < 30000) return text;
+  return text.substring(0, 10000) + "\n\n...[CUT]...\n\n" + text.substring(text.length - 15000);
+}
+
+
+
+function quickFindID(text, subject) {
+  // ✅ V25: Thêm Traveloka Itinerary
+  var match = text.match(/(?:Booking ID|Mã đặt phòng|Itinerary #|Booking Number|Trip\.com Booking ID|Traveloka Itinerary|Mã số hành trình)[:\s]*[-]?\s*(\d{8,18})/i);
+  if (match) return match[1].trim();
+  var airbnbMatch = text.match(/(?:Mã xác nhận|Confirmation code)[:\s]*([A-Z0-9]{8,10})/i);
+  if (airbnbMatch) return airbnbMatch[1].trim();
+  return null;
+}
+
+
+
+function isEmailTooOld(emailDate, limitMinutes) {
+  var diff = new Date() - emailDate; 
+  return (diff / 60000) > limitMinutes;
+}
+
+
+
+function getOrCreateSheet(ss, sheetName) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    if (sheetName === CONFIG.SHEET_DATA_NAME) {
+      // ✅ V23: Thêm cột "Ngày Hủy" vào header
+      sheet.appendRow([
+        "Ngày Email", "Platform", "Tên Khách Sạn", "Mã BK", "Tên Khách", 
+        "Check-in", "Check-out", "Loại Phòng", "SL Phòng", "Số Khách", 
+        "Tổng Tiền (Gross)", "Hoa Hồng (Comm)", "Khoản Bù Trù", "Chương Trình Khác", "Thực Nhận (Net)", 
+        "Ăn Sáng", "Thanh Toán", "Yêu Cầu Đặc Biệt", "Trạng Thái", "Xếp Phòng", "DATE CANCELLED"
+      ]);
+      sheet.getRange("K:O").setNumberFormat("#,##0"); 
+      sheet.getRange("F:G").setNumberFormat("dd/mm/yyyy");
+      sheet.getRange("U:U").setNumberFormat("dd/mm/yyyy");
+      sheet.setFrozenRows(1);
+      applyDuplicateBookingHighlight_(sheet);
+    } else {
+      sheet.appendRow(["Thời gian", "Nội dung Log"]);
+      sheet.setColumnWidth(2, 600);
+    }
+  }
+  if (sheetName === CONFIG.SHEET_DATA_NAME) {
+    applyDuplicateBookingHighlight_(sheet);
+  }
+  return sheet;
+}
+
+
+
+function getExistingBookingIds(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return []; 
+  var data = sheet.getRange(2, 4, lastRow - 1, 1).getValues();
+  return data.map(r => r[0].toString().trim());
+}
+
+
+
+function logToSheet(ss, message) {
+  var logSheet = getOrCreateSheet(ss, CONFIG.SHEET_LOG_NAME);
+  logSheet.appendRow([new Date(), message]);
+  if (logSheet.getLastRow() > 800) logSheet.deleteRows(2, 600); 
+}
+
+
+
+/**
+ * V26: Gan nhan (label) Gmail cho email da xu ly
+ * Tu dong tao label neu chua ton tai
+ */
+function applyGmailLabel(message, labelName) {
+  try {
+    var label = GmailApp.getUserLabelByName(labelName);
+    if (!label) {
+      label = GmailApp.createLabel(labelName);
+    }
+    var thread = message.getThread();
+    thread.addLabel(label);
+  } catch (e) {
+    // Khong throw loi - label la tinh nang phu, khong nen lam hong luong chinh
+  }
+}
+
+
+
+// ============================================================================
+// MODULE 6: XỬ LÝ EMAIL HỦY (GIỮ NGUYÊN - FALLBACK)
+// ============================================================================
+
+
+/**
+ * ✅ V23 (Fallback): Kiểm tra email có phải là email hủy không
+ */
+function isCancellationEmail(subject, fromEmail) {
+  if (subject.indexOf("CANCELLED") > -1 && subject.indexOf("Agoda") > -1) return true;
+  if (subject.indexOf("Cancellation request accepted") > -1) return true;
+  if (subject.indexOf("Expedia - Hủy đặt phòng") > -1) return true;
+  if (fromEmail.indexOf("automated@airbnb.com") > -1 && subject.indexOf("Đã hủy") > -1) return true;
+  return false;
+}
+
+
+
+/**
+ * ✅ V23: Xử lý email hủy - Cập nhật trạng thái trong Sheet
+ */
+function processCancellationEmail(message, subject, fromEmail, sheet, ss) {
+  try {
+    var platform = detectCancellationPlatform(subject, fromEmail);
+    var bookingId = extractCancelBookingId(message, subject, platform);
+
+    if (!bookingId) {
+      logToSheet(ss, "⚠️ Không tìm thấy Mã BK trong email hủy: " + subject.substring(0, 50));
+      return false;
+    }
+
+    var updated = updateBookingStatusToCancel(sheet, bookingId, message.getDate(), ss);
+
+    if (updated) {
+      logToSheet(ss, "🚫 ĐÃ HỦY: " + bookingId + " (" + platform + ")");
+      return true;
+    } else {
+      logToSheet(ss, "⚠️ Không tìm thấy booking " + bookingId + " trong Sheet để hủy");
+      return false;
+    }
+
+  } catch (e) {
+    logToSheet(ss, "❌ Lỗi xử lý email hủy: " + e.toString());
+    return false;
+  }
+}
+
+
+
+/**
+ * ✅ V23: Xác định platform từ email hủy
+ */
+function detectCancellationPlatform(subject, fromEmail) {
+  if (subject.indexOf("Agoda") > -1) return "Agoda";
+  if (subject.indexOf("Cancellation request accepted") > -1) return "Trip.com";
+  if (subject.indexOf("Expedia") > -1) return "Expedia";
+  if (fromEmail.indexOf("airbnb.com") > -1) return "Airbnb";
+  return "Unknown";
+}
+
+
+
+/**
+ * ✅ V23: Trích xuất Booking ID từ email hủy
+ */
+function extractCancelBookingId(message, subject, platform) {
+  var bookingId = null;
+
+  if (platform === "Agoda") {
+    var agodaMatch = subject.match(/Agoda Booking ID\s*(\d+)/i);
+    if (agodaMatch) bookingId = agodaMatch[1];
+
+  } else if (platform === "Trip.com") {
+    var tripMatch = subject.match(/(?:booking no\.?#?|#)(\d{10,20})/i);
+    if (tripMatch) bookingId = tripMatch[1];
+
+  } else if (platform === "Expedia") {
+    var body = getDeepCleanBody(message);
+    var expediaMatch = body.match(/(?:Mã đặt phòng|Itinerary)[:\s]*(\d{8,15})/i);
+    if (expediaMatch) bookingId = expediaMatch[1];
+
+  } else if (platform === "Airbnb") {
+    var airbnbMatch = subject.match(/(?:Lượt đặt phòng|Reservation)\s*([A-Z0-9]{8,12})/i);
+    if (airbnbMatch) bookingId = airbnbMatch[1];
+  }
+
+  return bookingId ? bookingId.trim() : null;
+}
+
+
+
+/**
+ * ✅ V23: Cập nhật trạng thái booking thành CANCEL
+ */
+function updateBookingStatusToCancel(sheet, bookingId, cancelDate, ss) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+
+  var bookingIds = sheet.getRange(2, 4, lastRow - 1, 1).getValues();
+  var cancelDateValue = (Object.prototype.toString.call(cancelDate) === '[object Date]')
+    ? Utilities.formatDate(cancelDate, Session.getScriptTimeZone(), "dd/MM/yyyy")
+    : cancelDate;
+  var updatedCount = 0;
+
+  for (var i = 0; i < bookingIds.length; i++) {
+    var currentId = bookingIds[i][0] ? bookingIds[i][0].toString().trim() : "";
+
+    if (currentId === bookingId.toString().trim()) {
+      var rowIndex = i + 2;
+      var currentStatus = sheet.getRange(rowIndex, 19).getValue();
+
+      if (currentStatus !== "CANCEL") {
+        sheet.getRange(rowIndex, 19).setValue("CANCEL");      // S: Trạng Thái
+        sheet.getRange(rowIndex, 21).setValue(cancelDateValue); // U: DATE CANCELLED
+        updatedCount++;
+      }
+    }
+  }
+
+  if (updatedCount > 0 && ss) {
+    logToSheet(ss, "🚫 Đã cập nhật hủy " + updatedCount + " dòng cho Mã BK: " + bookingId);
+  }
+
+  return updatedCount > 0;
+}
+
+
+
+// ============================================================================
+// MODULE 7: CẤU HÌNH PLATFORM ĐỘNG (THÊM MỚI V25)
+// ============================================================================
+
+
+/**
+ * ✅ V25: Tạo sheet Platform_Config nếu chưa có, điền header + dữ liệu mẫu
+ */
+function getOrCreateConfigSheet(ss) {
+  var sheet = ss.getSheetByName(CONFIG.SHEET_CONFIG_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.SHEET_CONFIG_NAME);
+
+    // Header
+    sheet.appendRow([
+      "Platform", "Trạng Thái", "Email Gửi Booking", 
+      "Từ Khóa Booking", "Từ Khóa Hủy", "Email Gửi Hủy", "Ghi Chú"
+    ]);
+
+    // Dữ liệu mẫu - 5 platform
+    var sampleData = [
+      ["Agoda",     "ON", "",                          "Agoda Booking ID && CONFIRMED",              "Agoda Booking ID && CANCELLED",           "no-reply@agoda.com"],
+      ["Expedia",   "ON", "",                          "Expedia - Đặt phòng mới",                   "Expedia - Hủy đặt phòng",                ""],
+      ["Trip.com",  "ON", "auto_reservation@trip.com", "Action required - New booking received || Trip.com - Thông báo đơn đặt mới || Booking no.", "Cancellation request accepted", "auto_reservation@trip.com"],
+      ["Airbnb",    "ON", "automated@airbnb.com",    "Đã xác nhận đặt phòng",                     "Đã hủy",                                 "automated@airbnb.com"],
+      ["Traveloka", "ON", "hotel@traveloka.com",       "CONFIRMED - Traveloka Itinerary",            "",                                        ""]
+    ];
+
+    for (var i = 0; i < sampleData.length; i++) {
+      sheet.appendRow(sampleData[i]);
+    }
+
+    // Format
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 120);  // Platform
+    sheet.setColumnWidth(2, 100);  // Trạng Thái
+    sheet.setColumnWidth(3, 200);  // Email Gửi Booking
+    sheet.setColumnWidth(4, 350);  // Từ Khóa Booking
+    sheet.setColumnWidth(5, 350);  // Từ Khóa Hủy
+    sheet.setColumnWidth(6, 200);  // Email Gửi Hủy
+    sheet.setColumnWidth(7, 120);  // Ghi Chú
+
+    // Tô màu header
+    sheet.getRange(1, 1, 1, 7).setBackground("#4a86e8").setFontColor("#ffffff").setFontWeight("bold");
+
+    logToSheet(ss, "✅ V25: Đã tạo sheet Platform_Config với " + sampleData.length + " platform mẫu.");
+  }
+  return sheet;
+}
+
+
+
+/**
+ * ✅ V25: Đọc config từ Sheet Platform_Config
+ * @return {Array} - Mảng object config cho từng platform đang ON
+ */
+function loadPlatformConfig(ss) {
+  var configSheet = getOrCreateConfigSheet(ss);
+  var lastRow = configSheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = configSheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  var configs = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var status = row[1].toString().trim().toUpperCase();
+
+    if (status === "ON") {
+      configs.push({
+        platform:        row[0].toString().trim(),
+        fromEmail:       row[2].toString().trim(),
+        bookingKeyword:  row[3].toString().trim(),
+        cancelKeyword:   row[4].toString().trim(),
+        cancelFrom:      row[5].toString().trim()
+      });
+    }
+  }
+
+  return configs;
+}
+
+
+
+/**
+ * ✅ V25: Build Gmail Search Query từ config
+ * Xử lý toán tử && → chuyển thành Gmail syntax ("keyword1" "keyword2")
+ */
+function buildSearchQuery(configs) {
+  var parts = [];
+
+  for (var i = 0; i < configs.length; i++) {
+    var cfg = configs[i];
+
+    // --- Booking mới ---
+    if (cfg.bookingKeyword) {
+      var bookingPart = buildSingleQueryPart(cfg.bookingKeyword, cfg.fromEmail);
+      parts.push(bookingPart);
+    }
+
+    // --- Email hủy ---
+    if (cfg.cancelKeyword) {
+      var cancelFrom = cfg.cancelFrom || cfg.fromEmail; // Dùng cancelFrom, nếu trống thì dùng fromEmail
+      var cancelPart = buildSingleQueryPart(cfg.cancelKeyword, cancelFrom);
+      parts.push(cancelPart);
+    }
+  }
+
+  if (parts.length === 0) return "";
+
+  return "(" + parts.join(" OR ") + ") -subject:Re: newer_than:1d";
+}
+
+
+
+/**
+ * ✅ V25.1: Build 1 phần query cho 1 keyword + from
+ * "Agoda Booking ID && CONFIRMED || Xác nhận đặt phòng && Agoda" + "auto@trip.com" 
+ *   → (from:auto@trip.com (("Agoda Booking ID" "CONFIRMED") OR ("Xác nhận đặt phòng" "Agoda")))
+ */
+function buildSingleQueryPart(keyword, fromEmail) {
+  var queryParts = [];
+
+  // Thêm from: nếu có
+  if (fromEmail) {
+    queryParts.push("from:" + fromEmail);
+  }
+
+  // Xử lý || (OR) và && (AND)
+  var orKeywords = keyword.split("||");
+  var orParts = [];
+  
+  for (var i = 0; i < orKeywords.length; i++) {
+    var andKeywords = orKeywords[i].split("&&");
+    var andParts = [];
+    for (var j = 0; j < andKeywords.length; j++) {
+      var kw = andKeywords[j].trim();
+      if (kw) andParts.push('"' + kw + '"');
+    }
+    if (andParts.length > 0) {
+      orParts.push("(" + andParts.join(" ") + ")");
+    }
+  }
+
+  if (orParts.length > 0) {
+    queryParts.push("(" + orParts.join(" OR ") + ")");
+  }
+
+  return "(" + queryParts.join(" ") + ")";
+}
+
+
+
+/**
+ * ✅ V25: Phát hiện platform từ config (Dynamic)
+ * Kiểm tra subject + body có khớp từ khóa booking trong config không
+ */
+function detectPlatformFromConfig(text, subject, fromEmail, configs) {
+  var combined = subject + " " + text + " " + fromEmail;
+
+  for (var i = 0; i < configs.length; i++) {
+    var cfg = configs[i];
+    if (!cfg.bookingKeyword) continue;
+
+    // Kiểm tra from email (nếu config có chỉ định)
+    if (cfg.fromEmail && fromEmail.indexOf(cfg.fromEmail) === -1) {
+      continue;
+    }
+
+    // Kiểm tra từ khóa (hỗ trợ &&)
+    if (matchKeywords(combined, cfg.bookingKeyword)) {
+      return cfg.platform;
+    }
+  }
+
+  // Fallback: dùng hàm cũ
+  return detectPlatform(text, subject);
+}
+
+
+
+/**
+ * ✅ V25: Kiểm tra email hủy từ config (Dynamic)
+ */
+function isCancellationFromConfig(subject, fromEmail, configs) {
+  for (var i = 0; i < configs.length; i++) {
+    var cfg = configs[i];
+    if (!cfg.cancelKeyword) continue; // Platform không hỗ trợ hủy
+
+    // Kiểm tra from email hủy
+    var expectedFrom = cfg.cancelFrom || cfg.fromEmail;
+    if (expectedFrom && fromEmail.indexOf(expectedFrom) === -1) {
+      continue;
+    }
+
+    // Kiểm tra từ khóa hủy (hỗ trợ &&)
+    if (matchKeywords(subject + " " + fromEmail, cfg.cancelKeyword)) {
+      return true;
+    }
+  }
+
+  // Fallback: dùng hàm cũ
+  return isCancellationEmail(subject, fromEmail);
+}
+
+
+
+/**
+ * ✅ V25.1: Kiểm tra text có chứa từ khóa không
+ * Hỗ trợ toán tử || (OR) và && (AND)
+ * "Keyword A && Keyword B || Keyword C"
+ * Ưu tiên && xử lý theo nhóm khối trước, sau đó || đại diện mức kết hợp
+ */
+function matchKeywords(text, keywordStr) {
+  var orGroups = keywordStr.split("||");
+  
+  for (var i = 0; i < orGroups.length; i++) {
+    var andKeywords = orGroups[i].split("&&");
+    var matchAllAnd = true;
+    
+    for (var j = 0; j < andKeywords.length; j++) {
+      var kw = andKeywords[j].trim();
+      if (kw && text.indexOf(kw) === -1) {
+        matchAllAnd = false;
+        break;
+      }
+    }
+    
+    // Nếu có 1 nhóm OR (||) đúng toàn bộ phần AND (&&), thì coi như text thỏa mãn
+    if (matchAllAnd) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+
+
+// ============================================================================
+// MODULE 7.5: V2 TEST MODE - QUÉT EMAIL GẮN LABEL TEST BOOKING
+// ============================================================================
+
+/**
+ * ✅ V2 TEST: Chạy thủ công để kiểm tra AI đọc email thế nào.
+ * Cách dùng:
+ * 1. Trong Gmail, gắn label "Test Booking" cho email muốn test.
+ * 2. Vào Apps Script, chọn hàm testStructuredAIFromLabel.
+ * 3. Bấm Run.
+ * 4. Xem kết quả tại sheet AI_Test_Results.
+ *
+ * Hàm này KHÔNG ghi vào Booking_Master_DB_Final_V20.
+ * Hàm này KHÔNG mark processed và KHÔNG đổi trạng thái booking thật.
+ */
+function testStructuredAIFromLabel() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var resultSheet = getOrCreateTestResultSheet(ss);
+
+  // Load platform config để phát hiện email hủy
+  var platformConfigs = loadPlatformConfig(ss);
+
+  var label = GmailApp.getUserLabelByName(CONFIG.TEST_LABEL_NAME);
+  if (!label) {
+    resultSheet.appendRow(["", "❌ ERROR", "Không tìm thấy Gmail label: " + CONFIG.TEST_LABEL_NAME]);
+    return;
+  }
+
+  var threads = label.getThreads(0, CONFIG.TEST_BATCH_SIZE || 5);
+  if (!threads || threads.length === 0) {
+    resultSheet.appendRow(["", "⚠️ EMPTY", "Không có email nào trong label: " + CONFIG.TEST_LABEL_NAME]);
+    return;
+  }
+
+  for (var i = 0; i < threads.length; i++) {
+    var messages = threads[i].getMessages();
+
+    for (var j = 0; j < messages.length; j++) {
+      var message = messages[j];
+      var subject = message.getSubject();
+      var fromEmail = message.getFrom();
+
+      try {
+        // ═══════════════════════════════════════════════════════════════
+        // ✅ KIỂM TRA EMAIL HỦY TRƯỚC (giống luồng chính)
+        // ═══════════════════════════════════════════════════════════════
+        if (isCancellationFromConfig(subject, fromEmail, platformConfigs)) {
+          var cancelPlatform = detectCancellationPlatform(subject, fromEmail);
+          var cancelBookingId = extractCancelBookingId(message, subject, cancelPlatform);
+          var cancelDate = Utilities.formatDate(message.getDate(), Session.getScriptTimeZone(), "dd/MM/yyyy");
+
+          // ✅ TEST MODE: cập nhật TẤT CẢ dòng cùng Mã BK.
+          // Trip.com daily-rate split tạo nhiều dòng cùng booking ID, nên email hủy phải hủy toàn bộ các ngày.
+          var updatedCancelRows = cancelBookingId ? updateAllRowsByBookingId_(resultSheet, cancelBookingId, "CANCEL", cancelDate, "Email hủy: " + subject) : 0;
+          if (updatedCancelRows === 0) {
+            // Nếu chưa có booking gốc trong sheet test, mới append dòng CANCEL để bạn biết email hủy đã được nhận diện.
+            resultSheet.appendRow([
+              message.getDate(),
+              cancelPlatform,
+              "",
+              cancelBookingId || "KHÔNG TÌM THẤY ID",
+              "", "", "", "", "", "",
+              "", "", "", "", "", "", "",
+              "Email hủy: " + subject,
+              "CANCEL",
+              "",
+              cancelDate
+            ]);
+          }
+
+          // ✅ Gửi trạng thái hủy lên Supabase database luôn
+          if (cancelBookingId) {
+            syncCancellationToSupabase_(cancelBookingId, cancelDate, ss);
+          }
+          continue;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // 📋 XỬ LÝ BOOKING MỚI (giống luồng chính)
+        // ═══════════════════════════════════════════════════════════════
+        var plainText = getDeepCleanBody(message);
+        var smartContext = getHeadAndTail(plainText);
+        var platform = detectPlatform(smartContext, subject);
+        var hardData = scanDataByPlatform(smartContext, platform);
+        var aiInput = CONFIG.USE_STRUCTURED_AI_INPUT
+          ? buildStructuredAIInput(message, smartContext, hardData, platform)
+          : smartContext;
+
+        var finalData = callOpenAI(aiInput, hardData, platform);
+
+        // Override regex giống production
+        if (hardData.total_price && hardData.total_price !== "0") finalData.total_price = hardData.total_price;
+        if (hardData.net_rate && hardData.net_rate !== "0") finalData.net_rate = hardData.net_rate;
+        if (hardData.commission && hardData.commission !== "0") finalData.commission = hardData.commission;
+        if (hardData.surcharge && hardData.surcharge !== "0") finalData.surcharge = hardData.surcharge;
+        if (hardData.other_programs && hardData.other_programs !== "0") finalData.other_programs = hardData.other_programs;
+        if (hardData.payment_status) finalData.payment_status = hardData.payment_status;
+        if (hardData.has_breakfast) finalData.breakfast = hardData.has_breakfast;
+
+        // Làm sạch tiền giống production
+        finalData.total_price = cleanMoneyString(finalData.total_price);
+        finalData.net_rate = cleanMoneyString(finalData.net_rate);
+        finalData.commission = cleanMoneyString(finalData.commission);
+        finalData.surcharge = cleanMoneyString(finalData.surcharge);
+        finalData.other_programs = cleanMoneyString(finalData.other_programs);
+
+        // Format room type giống production
+        var finalRoomType = finalData.room_type || "";
+        if (platform !== "Traveloka" && finalRoomType) {
+          var roomCodeMatch = finalRoomType.match(/(\d+G\s*\d+M\d+)/i);
+          if (!roomCodeMatch) roomCodeMatch = finalRoomType.match(/\(([A-Z0-9]{3,})\)/i);
+          if (roomCodeMatch) {
+            var roomCode = roomCodeMatch[1].replace(/\s+/g, '').toUpperCase();
+            finalRoomType = roomCode + ' (x' + (finalData.rooms || 1) + ')';
+          }
+        }
+
+        // Trip.com guest name fix
+        if (platform === "Trip.com" && finalData && finalData.guest_name) {
+          finalData.guest_name = finalData.guest_name.replace(/\//g, " ").replace(/\s+/g, " ").trim();
+        }
+
+        var testRows = buildBookingRowsByPlatform_(message, finalData, finalRoomType, platform, plainText, "✅ TEST");
+        for (var r = 0; r < testRows.length; r++) {
+          var testRow = testRows[r];
+          var bookingId = testRow[3] ? testRow[3].toString().trim() : "";
+          var checkInKey = formatDateKey_(testRow[5]);
+          var compositeKey = bookingId + "__" + checkInKey;
+          if (bookingId && hasBookingDateKey_(resultSheet, compositeKey)) continue;
+          resultSheet.appendRow(testRow);
+
+          // ✅ Gửi lên Supabase database luôn
+          if (bookingId) {
+            var testBookingData = {
+              booking_id: bookingId,
+              platform: testRow[1] || platform,
+              hotel_name: testRow[2] || '',
+              guest_name: testRow[4] || '',
+              check_in: testRow[5],
+              check_out: testRow[6],
+              room_type: testRow[7] || '',
+              rooms: testRow[8] || 1,
+              occupancy: testRow[9] || '',
+              total_price: testRow[10] || '0',
+              commission: testRow[11] || '0',
+              surcharge: testRow[12] || '0',
+              other_programs: testRow[13] || '',
+              net_rate: testRow[14] || '0',
+              breakfast: testRow[15] || '',
+              payment_status: testRow[16] || '',
+              special_requests: testRow[17] || ''
+            };
+            syncBookingToSupabase_(testBookingData, ss);
+          }
+        }
+        paintDuplicateBookingRows_(resultSheet);
+
+      } catch (e) {
+        resultSheet.appendRow([
+          message.getDate(), "", "", "", "", "", "", "", "", "",
+          "", "", "", "", "", "", "", e.toString(), "❌ ERROR", "", ""
+        ]);
+      }
+    }
+  }
+}
+
+/**
+ * Tạo sheet test với header giống y hệt sheet booking chính.
+ */
+function getOrCreateTestResultSheet(ss) {
+  var sheetName = CONFIG.TEST_RESULT_SHEET_NAME || "AI_Test_Results";
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.appendRow([
+      "Ngày Email",        // A
+      "Platform",          // B
+      "Tên Khách Sạn",     // C
+      "Mã BK",             // D
+      "Tên Khách",         // E
+      "Check-in",          // F
+      "Check-out",         // G
+      "Loại Phòng",        // H
+      "SL Phòng",          // I
+      "Số Khách",          // J
+      "Tổng Tiền (Gross)", // K
+      "Hoa Hồng (Comm)",   // L
+      "Khoản Bù Trù",     // M
+      "Chương Trình Khác", // N
+      "Thực Nhận (Net)",   // O
+      "Ăn Sáng",           // P
+      "Thanh Toán",        // Q
+      "Yêu Cầu Đặc Biệt", // R
+      "Trạng Thái",        // S
+      "Xếp Phòng",         // T
+      "DATE CANCELLED"     // U
+    ]);
+    sheet.setFrozenRows(1);
+
+    // Format giống sheet chính
+    sheet.getRange("K:O").setNumberFormat("#,##0");
+    sheet.getRange("F:G").setNumberFormat("dd/mm/yyyy");
+
+    // Tô màu header
+    sheet.getRange(1, 1, 1, 21).setBackground("#ff9900").setFontColor("#ffffff").setFontWeight("bold");
+    sheet.getRange("U:U").setNumberFormat("dd/mm/yyyy");
+
+    // Độ rộng cột
+    sheet.setColumnWidth(1, 140);  // Ngày
+    sheet.setColumnWidth(2, 90);   // Platform
+    sheet.setColumnWidth(3, 250);  // Hotel
+    sheet.setColumnWidth(4, 120);  // Mã BK
+    sheet.setColumnWidth(5, 180);  // Tên Khách
+    sheet.setColumnWidth(6, 110);  // Check-in
+    sheet.setColumnWidth(7, 110);  // Check-out
+    sheet.setColumnWidth(8, 160);  // Loại Phòng
+    sheet.setColumnWidth(9, 80);   // SL Phòng
+    sheet.setColumnWidth(10, 90);  // Số Khách
+    sheet.setColumnWidth(11, 130); // Gross
+    sheet.setColumnWidth(12, 130); // Commission
+    sheet.setColumnWidth(13, 110); // Bù trù
+    sheet.setColumnWidth(14, 130); // CT khác
+    sheet.setColumnWidth(15, 130); // Net
+    sheet.setColumnWidth(16, 80);  // Ăn sáng
+    sheet.setColumnWidth(17, 90);  // Thanh toán
+    sheet.setColumnWidth(18, 250); // YCDB
+    sheet.setColumnWidth(19, 90);  // Trạng thái
+    sheet.setColumnWidth(20, 110); // Xếp Phòng
+    sheet.setColumnWidth(21, 130); // DATE CANCELLED
+    applyDuplicateBookingHighlight_(sheet);
+  }
+  applyDuplicateBookingHighlight_(sheet);
+  return sheet;
+}
+
+function applyDuplicateBookingHighlight_(sheet) {
+  if (!sheet) return;
+
+  var range = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 21); // A2:U
+  var formula = '=AND($D2<>"",COUNTIF($D:$D,$D2)>1)';
+
+  var rules = sheet.getConditionalFormatRules() || [];
+  var keptRules = [];
+  for (var i = 0; i < rules.length; i++) {
+    var rule = rules[i];
+    var bc = rule.getBooleanCondition && rule.getBooleanCondition();
+    var keep = true;
+    if (bc && bc.getCriteriaType && bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
+      var values = bc.getCriteriaValues ? bc.getCriteriaValues() : [];
+      if (values && values[0] === formula) keep = false;
+    }
+    if (keep) keptRules.push(rule);
+  }
+
+  var newRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(formula)
+    .setBackground('#e5e7eb')
+    .setRanges([range])
+    .build();
+
+  keptRules.push(newRule);
+  sheet.setConditionalFormatRules(keptRules);
+
+  // Tô trực tiếp một lần để thấy ngay trên sheet hiện tại.
+  paintDuplicateBookingRows_(sheet);
+}
+
+function paintDuplicateBookingRows_(sheet) {
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var numRows = lastRow - 1;
+  var idValues = sheet.getRange(2, 4, numRows, 1).getDisplayValues(); // D: Mã BK
+  var counts = {};
+
+  for (var i = 0; i < idValues.length; i++) {
+    var id = idValues[i][0] ? idValues[i][0].toString().trim() : "";
+    if (id) counts[id] = (counts[id] || 0) + 1;
+  }
+
+  var backgrounds = [];
+  for (var r = 0; r < idValues.length; r++) {
+    var rowId = idValues[r][0] ? idValues[r][0].toString().trim() : "";
+    var color = (rowId && counts[rowId] > 1) ? "#e5e7eb" : null;
+    var rowColors = [];
+    for (var c = 0; c < 21; c++) rowColors.push(color);
+    backgrounds.push(rowColors);
+  }
+
+  sheet.getRange(2, 1, numRows, 21).setBackgrounds(backgrounds);
+}
+
+/**
+ * Tìm dòng theo Mã BK ở cột D trong sheet test/chính.
+ * Trả về số dòng thật trên Google Sheet; 0 nếu không tìm thấy.
+ */
+function findRowByBookingId_(sheet, bookingId) {
+  if (!bookingId) return 0;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+
+  var target = bookingId.toString().trim();
+  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues(); // Cột D: Mã BK
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] && values[i][0].toString().trim() === target) {
+      return i + 2;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Cập nhật tất cả dòng cùng Mã BK trong sheet test/chính.
+ * Dùng cho booking Trip.com đã tách thành nhiều dòng theo từng ngày.
+ */
+function updateAllRowsByBookingId_(sheet, bookingId, statusValue, cancelDate, noteValue) {
+  if (!bookingId) return 0;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+
+  var target = bookingId.toString().trim();
+  var values = sheet.getRange(2, 4, lastRow - 1, 1).getValues(); // D: Mã BK
+  var updatedCount = 0;
+
+  for (var i = 0; i < values.length; i++) {
+    var currentId = values[i][0] ? values[i][0].toString().trim() : "";
+    if (currentId === target) {
+      var rowIndex = i + 2;
+      sheet.getRange(rowIndex, 19).setValue(statusValue || "CANCEL"); // S
+      sheet.getRange(rowIndex, 21).setValue(cancelDate || "");        // U: DATE CANCELLED
+      if (noteValue) sheet.getRange(rowIndex, 18).setValue(noteValue); // R
+      updatedCount++;
+    }
+  }
+
+  return updatedCount;
+}
+
+
+// ============================================================================
+// MODULE 8: RECOVERY - QUET LAI EMAIL BI SOT (CHAY THU CONG)
+// ============================================================================
+
+
+/**
+ * HAM CHINH DE KHOI PHUC - Chay thu cong khi he thong bi su co
+ * 
+ * CACH DUNG:
+ *   1. Mo Apps Script Editor
+ *   2. Chon ham "recoverMissedBookings" tu dropdown
+ *   3. Nhan Run
+ *   4. Kiem tra Sheet "System_Logs" de theo doi tien trinh
+ *
+ * MAC DINH: Quet lai 3 ngay gan nhat
+ * NEU MUON THAY DOI: Sua bien RECOVERY_DAYS ben duoi
+ */
+function recoverMissedBookings() {
+  var RECOVERY_DAYS = 3;
+  var BATCH_SIZE = 50;
+  var MAX_BATCHES = 4;
+
+  try {
+    var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+    // 1. Doc config platform
+    var platformConfigs = loadPlatformConfig(ss);
+    if (platformConfigs.length === 0) {
+      logToSheet(ss, "[RECOVERY] Khong co platform nao ON trong Platform_Config.");
+      return;
+    }
+
+    // 2. Build query voi khoang thoi gian mo rong
+    var searchQuery = buildRecoverySearchQuery(platformConfigs, RECOVERY_DAYS);
+    logToSheet(ss, "========== BAT DAU RECOVERY ==========");
+    logToSheet(ss, "[RECOVERY] Quet lai " + RECOVERY_DAYS + " ngay gan nhat");
+    logToSheet(ss, "[RECOVERY] Query: " + searchQuery.substring(0, 200));
+    logToSheet(ss, "======================================");
+
+    // 3. Lay sheet du lieu + danh sach ID da co
+    var sheetData = getOrCreateSheet(ss, CONFIG.SHEET_DATA_NAME);
+    var existingIds = getExistingBookingIds(sheetData);
+    logToSheet(ss, "[RECOVERY] Hien co " + existingIds.length + " booking trong Sheet.");
+
+    // 4. Quet theo batch
+    var totalProcessed = 0;
+    var totalCancelled = 0;
+    var totalSkippedDuplicate = 0;
+    var totalThreads = 0;
+    var totalEmails = 0;
+
+    for (var batch = 0; batch < MAX_BATCHES; batch++) {
+      var startIndex = batch * BATCH_SIZE;
+      var threads;
+
+      try {
+        threads = GmailApp.search(searchQuery, startIndex, BATCH_SIZE);
+      } catch (e) {
+        logToSheet(ss, "[RECOVERY] Batch " + (batch + 1) + ": Loi tim email - " + e.toString());
+        break;
+      }
+
+      if (threads.length === 0) {
+        logToSheet(ss, "[RECOVERY] Batch " + (batch + 1) + ": Het email de quet.");
+        break;
+      }
+
+      logToSheet(ss, "[RECOVERY] Batch " + (batch + 1) + "/" + MAX_BATCHES + ": Dang xu ly " + threads.length + " thread (tu #" + (startIndex + 1) + ")...");
+
+      var batchResult = recoverBatch(threads, sheetData, existingIds, platformConfigs, ss);
+
+      totalProcessed += batchResult.processed;
+      totalCancelled += batchResult.cancelled;
+      totalSkippedDuplicate += batchResult.skippedDuplicate;
+      totalThreads += threads.length;
+      totalEmails += batchResult.totalEmails;
+
+      existingIds = getExistingBookingIds(sheetData);
+
+      if (threads.length < BATCH_SIZE) break;
+
+      Utilities.sleep(2000);
+    }
+
+    // 5. Bao cao tong hop
+    logToSheet(ss, "========== RECOVERY HOAN THANH ==========");
+    logToSheet(ss, "  Threads da quet: " + totalThreads);
+    logToSheet(ss, "  Tong email da kiem tra: " + totalEmails);
+    logToSheet(ss, "  Booking MOI da them: " + totalProcessed);
+    logToSheet(ss, "  Booking HUY da xu ly: " + totalCancelled);
+    logToSheet(ss, "  Email trung ID (bo qua): " + totalSkippedDuplicate);
+    logToSheet(ss, "=========================================");
+
+  } catch (e) {
+    Logger.log("RECOVERY CRITICAL ERROR: " + e.toString());
+    logToSheet(SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID), "[RECOVERY] LOI NGHIEM TRONG: " + e.toString());
+  }
+}
+
+
+
+/**
+ * Build Gmail Search Query cho Recovery (mo rong thoi gian)
+ * Giong buildSearchQuery nhung dung newer_than:Xd thay vi newer_than:1d
+ */
+function buildRecoverySearchQuery(configs, days) {
+  var parts = [];
+
+  for (var i = 0; i < configs.length; i++) {
+    var cfg = configs[i];
+
+    if (cfg.bookingKeyword) {
+      var bookingPart = buildSingleQueryPart(cfg.bookingKeyword, cfg.fromEmail);
+      parts.push(bookingPart);
+    }
+
+    if (cfg.cancelKeyword) {
+      var cancelFrom = cfg.cancelFrom || cfg.fromEmail;
+      var cancelPart = buildSingleQueryPart(cfg.cancelKeyword, cancelFrom);
+      parts.push(cancelPart);
+    }
+  }
+
+  if (parts.length === 0) return "";
+
+  return "(" + parts.join(" OR ") + ") -subject:Re: newer_than:" + days + "d";
+}
+
+
+
+/**
+ * Xu ly 1 batch thread cho Recovery
+ * Khac mainAutoProcess1: KHONG gioi han 30 phut
+ */
+function recoverBatch(threads, sheetData, existingIds, platformConfigs, ss) {
+  var result = {processed: 0, cancelled: 0, skippedDuplicate: 0, totalEmails: 0};
+
+  for (var i = 0; i < threads.length; i++) {
+    var messages = threads[i].getMessages();
+    result.totalEmails += messages.length;
+
+    for (var j = 0; j < messages.length; j++) {
+      var message = messages[j];
+      var subject = message.getSubject();
+      var fromEmail = message.getFrom();
+
+      // KHONG kiem tra isEmailTooOld() - day la diem khac biet chinh
+
+      // Kiem tra email huy
+      if (isCancellationFromConfig(subject, fromEmail, platformConfigs)) {
+        var cancelResult = processCancellationEmail(message, subject, fromEmail, sheetData, ss);
+        if (cancelResult) {
+          result.cancelled++;
+          message.markRead();
+        }
+        continue;
+      }
+
+      // Xu ly booking moi
+      var plainText = getDeepCleanBody(message);
+
+      // Kiem tra trung ID nhanh
+      var quickID = quickFindID(plainText, subject);
+      if (quickID && existingIds.includes(quickID)) {
+        result.skippedDuplicate++;
+        continue;
+      }
+
+      // Xu ly chi tiet (dung chung core processor)
+      var success = processSingleEmailCore(message, plainText, sheetData, existingIds, ss);
+      if (success) {
+        result.processed++;
+      }
+    }
+  }
+
+  return result;
+}
+
+
+
+// ============================================================================
+// MODULE 10: GOOGLE DRIVE PDF PROCESSING (BOOKING.COM)
+// ============================================================================
+
+function processDriveBookings(sheetData, existingIds, ss) {
+  var pendingFolderId = String(CONFIG.DRIVE_FOLDER_PENDING || '').trim();
+  var doneFolderId = String(CONFIG.DRIVE_FOLDER_DONE || '').trim();
+  
+  if (!pendingFolderId || !doneFolderId || pendingFolderId === 'ĐIỀN_ID_THƯ_MỤC_PENDING_VÀO_ĐÂY') {
+    return;
+  }
+  
+  try {
+    var pendingFolder = DriveApp.getFolderById(pendingFolderId);
+    var doneFolder = DriveApp.getFolderById(doneFolderId);
+    
+    var files = pendingFolder.getFilesByType(MimeType.PDF);
+    var processedCount = 0;
+    var cancelledCount = 0;
+    
+    if (files.hasNext()) {
+      logToSheet(ss, '📂 [DRIVE] Bắt đầu quét thư mục PDF: ' + pendingFolder.getName());
+    } else {
+      logToSheet(ss, '📂 [DRIVE] Thư mục hiện tại đang trống, không có file PDF nào.');
+    }
+    
+    while (files.hasNext() && processedCount < CONFIG.DRIVE_BATCH_SIZE) {
+      var file = files.next();
+      var fileName = file.getName();
+      
+      logToSheet(ss, '📄 [DRIVE] Đang xử lý file: ' + fileName);
+      
+      // 1. Extract Text
+      var plainText = extractTextFromPdf_(file.getId());
+      if (!plainText || plainText.length < 50) {
+        logToSheet(ss, '❌ [DRIVE] Không đọc được chữ từ file (hoặc quá ngắn): ' + fileName);
+        continue;
+      }
+      
+      // ═══════════════════════════════════════════════════════════
+      // 1.5. KIỂM TRA ĐƠN HỦY (Booking.com)
+      // ═══════════════════════════════════════════════════════════
+      var isCancelled = /đã\s*hủy|cancelled|cancellation|hủy\s*đặt\s*phòng|booking\s*was\s*cancelled/i.test(plainText);
+      if (isCancelled) {
+        var cancelId = quickFindID(plainText, fileName);
+        if (cancelId) {
+          var cancelDate = new Date();
+          var updated = updateBookingStatusToCancel(sheetData, cancelId, cancelDate, ss);
+          if (updated) {
+            syncCancellationToSupabase_(cancelId, cancelDate.toISOString(), ss);
+            logToSheet(ss, '🚫 [DRIVE] ĐƠN HỦY! Đã MAP mã ' + cancelId + ' -> CANCEL + đồng bộ Supabase');
+            cancelledCount++;
+          } else {
+            logToSheet(ss, '⚠️ [DRIVE] ĐƠN HỦY nhưng không tìm thấy mã ' + cancelId + ' trong Sheet.');
+          }
+          file.moveTo(doneFolder);
+          processedCount++;
+        } else {
+          logToSheet(ss, '⚠️ [DRIVE] Phát hiện file HỦY nhưng không tìm được Mã Booking: ' + fileName);
+        }
+        continue;
+      }
+      
+      // ═══════════════════════════════════════════════════════════
+      // 2. KIỂM TRA TRÙNG ID
+      // ═══════════════════════════════════════════════════════════
+      var quickID = quickFindID(plainText, fileName);
+      if (quickID && existingIds.includes(quickID)) {
+        logToSheet(ss, '⚠️ [DRIVE] Bỏ qua - Đã tồn tại mã (Duplicate): ' + quickID);
+        file.moveTo(doneFolder);
+        processedCount++;
+        continue;
+      }
+      
+      // ═══════════════════════════════════════════════════════════
+      // 3. PHÂN TÍCH QUA AI (Force Booking.com)
+      // ═══════════════════════════════════════════════════════════
+      var platform = 'Booking.com';
+      var bookingMarkdown = normalizeBookingComPdfToMarkdown_(plainText, fileName);
+      var smartContext = getHeadAndTail(bookingMarkdown);
+      var hardData = scanDataByPlatform(smartContext, platform);
+      var finalData = callOpenAI(smartContext, hardData, platform);
+      
+      if (!finalData || !finalData.booking_id) {
+        logToSheet(ss, '❌ [DRIVE] AI không nhận diện được booking từ file: ' + fileName);
+        continue;
+      }
+      
+      // Force platform
+      finalData.platform = 'Booking.com';
+      
+      // Làm sạch số tiền
+      finalData.total_price = cleanMoneyString(finalData.total_price);
+      finalData.net_rate = cleanMoneyString(finalData.net_rate);
+      finalData.commission = cleanMoneyString(finalData.commission);
+      finalData.surcharge = cleanMoneyString(finalData.surcharge);
+      finalData.other_programs = cleanMoneyString(finalData.other_programs);
+      
+      // Format tên phòng
+      var finalRoomType = finalData.room_type || '';
+      var roomCodeMatch = finalRoomType.match(/(\d+G\s*\d+M\d+)/i);
+      if (!roomCodeMatch) {
+        roomCodeMatch = finalRoomType.match(/\(([A-Z0-9]{3,})\)/i);
+      }
+      if (roomCodeMatch) {
+        var roomCode = roomCodeMatch[1].replace(/\s+/g, '').toUpperCase();
+        var roomQty = finalData.rooms || 1;
+        finalRoomType = roomCode + ' (x' + roomQty + ')';
+      }
+      
+      // ═══════════════════════════════════════════════════════════
+      // 4. GHI VÀO GOOGLE SHEET (21 cột đúng cấu trúc)
+      // Booking.com PDF: ưu tiên tách từng unit/phòng trong file
+      // ═══════════════════════════════════════════════════════════
+      var currentId = finalData.booking_id.toString().trim();
+      if (existingIds.includes(currentId)) {
+        logToSheet(ss, '⚠️ [DRIVE] Bỏ qua ID trùng (AI Check): ' + currentId);
+        file.moveTo(doneFolder);
+        processedCount++;
+        continue;
+      }
+      
+      var unitRates = CONFIG.SPLIT_BOOKINGCOM_BY_UNIT ? extractBookingComUnitRates(bookingMarkdown, finalData) : [];
+      if ((!unitRates || unitRates.length === 0) && CONFIG.SPLIT_BOOKINGCOM_BY_UNIT) {
+        unitRates = buildBookingComFallbackRoomNightRates_(finalData, finalRoomType);
+        if (unitRates && unitRates.length > 0) {
+          logToSheet(ss, 'ℹ️ [DRIVE] Không bắt được block chi tiết, dùng fallback tách ' + unitRates.length + ' dòng theo SL phòng × số đêm cho mã: ' + currentId);
+        }
+      }
+      var rowsToWrite = [];
+      if (unitRates && unitRates.length > 0) {
+        for (var ur = 0; ur < unitRates.length; ur++) {
+          var unitRoomType = formatBookingComRoomType_(unitRates[ur].room_type, unitRates[ur].rooms || 1);
+          rowsToWrite.push([
+            new Date(),
+            'Booking.com',
+            finalData.hotel_name || '',
+            finalData.booking_id || '',
+            finalData.guest_name || '',
+            parseDateToSheetFormat(unitRates[ur].check_in),
+            parseDateToSheetFormat(unitRates[ur].check_out),
+            unitRoomType,
+            unitRates[ur].rooms || 1,
+            finalData.occupancy || '',
+            unitRates[ur].gross || 0,
+            unitRates[ur].commission || 0,
+            unitRates[ur].surcharge || 0,
+            unitRates[ur].other_programs || 0,
+            unitRates[ur].net_rate || 0,
+            unitRates[ur].breakfast || finalData.breakfast || 'Không',
+            finalData.payment_status || '',
+            finalData.special_requests || '',
+            'SUCCESS',
+            '',
+            ''
+          ]);
+        }
+        logToSheet(ss, '✅ [DRIVE] Booking.com đã tách ' + unitRates.length + ' dòng unit/phòng cho mã: ' + currentId);
+      } else {
+        rowsToWrite.push([
+          new Date(),                                        // A: Ngày Email
+          'Booking.com',                                     // B: Platform
+          finalData.hotel_name || '',                         // C: Văn Khách Sạn
+          finalData.booking_id || '',                         // D: Mã BK
+          finalData.guest_name || '',                         // E: Tên Khách
+          parseDateToSheetFormat(finalData.check_in),         // F: Check-in
+          parseDateToSheetFormat(finalData.check_out),        // G: Check-out
+          finalRoomType,                                      // H: Loại Phòng
+          finalData.rooms || 1,                               // I: SL Phòng
+          finalData.occupancy || '',                           // J: Số Khách
+          finalData.total_price || 0,                          // K: Tổng Tiền
+          finalData.commission || 0,                           // L: Hoa Hồng
+          finalData.surcharge || 0,                            // M: Khoản Bù Trừ
+          finalData.other_programs || 0,                       // N: Chương Trình Khác
+          finalData.net_rate || 0,                              // O: Thực Nhận
+          finalData.breakfast || 'Không',                      // P: Ăn Sáng
+          finalData.payment_status || '',                       // Q: Thanh Toán
+          finalData.special_requests || '',                     // R: Yêu Cầu Đặc Biệt
+          'SUCCESS',                                           // S: Status
+          '',                                                  // T: Xếp Phòng
+          ''                                                   // U: Date Cancelled
+        ]);
+      }
+      
+      for (var rw = 0; rw < rowsToWrite.length; rw++) {
+        sheetData.appendRow(rowsToWrite[rw]);
+      }
+      existingIds.push(currentId);
+      logToSheet(ss, '✅ [DRIVE] Đã lưu: ' + currentId + ' (' + finalData.guest_name + ') - ' + rowsToWrite.length + ' dòng');
+      
+      // ═══════════════════════════════════════════════════════════
+      // 5. ĐỒNG BỘ LÊN SUPABASE
+      // ═══════════════════════════════════════════════════════════
+      if (unitRates && unitRates.length > 0) {
+        for (var si = 0; si < unitRates.length; si++) {
+          var syncData = Object.assign({}, finalData);
+          syncData.check_in = unitRates[si].check_in;
+          syncData.check_out = unitRates[si].check_out;
+          syncData.room_type = formatBookingComRoomType_(unitRates[si].room_type, unitRates[si].rooms || 1);
+          syncData.rooms = unitRates[si].rooms || 1;
+          syncData.total_price = unitRates[si].gross;
+          syncData.commission = unitRates[si].commission;
+          syncData.surcharge = unitRates[si].surcharge;
+          syncData.other_programs = unitRates[si].other_programs;
+          syncData.net_rate = unitRates[si].net_rate;
+          syncData.breakfast = unitRates[si].breakfast || finalData.breakfast || 'Không';
+          var unitCheckInIso = parseDateToISO_(syncData.check_in);
+          var baseSupabaseCode = buildSupabaseBookingCode_(currentId, unitCheckInIso, null);
+          syncData.supabase_booking_code = baseSupabaseCode + '_P' + (si + 1);
+          syncBookingToSupabase_(syncData, ss);
+        }
+      } else {
+        syncBookingToSupabase_(finalData, ss);
+      }
+      
+      // 6. Chuyển file sang thư mục DONE
+      file.moveTo(doneFolder);
+      logToSheet(ss, '✅ [DRIVE] Move file thành công: ' + fileName);
+      processedCount++;
+    }
+    
+    if (processedCount > 0 || cancelledCount > 0) {
+      logToSheet(ss, '✅ [DRIVE] Tổng kết: ' + processedCount + ' file xử lý, ' + cancelledCount + ' đơn hủy.');
+    }
+    
+  } catch (err) {
+    logToSheet(ss, '❌ [DRIVE] Lỗi quét Drive: ' + err.toString());
+  }
+}
+
+/**
+ * Convert PDF thành Google Doc tạm thời để lấy Text (Cực chuẩn xác)
+ */
+function extractTextFromPdf_(fileId) {
+  try {
+    var token = ScriptApp.getOAuthToken();
+    var url = 'https://www.googleapis.com/drive/v3/files/' + fileId + '/copy';
+    
+    var payload = {
+      mimeType: 'application/vnd.google-apps.document'
+    };
+    
+    var options = {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+    
+    var response = UrlFetchApp.fetch(url, options);
+    var code = response.getResponseCode();
+    
+    if (code !== 200) {
+      Logger.log('Error converting PDF: ' + response.getContentText());
+      return null;
+    }
+    
+    var docId = JSON.parse(response.getContentText()).id;
+    var doc = DocumentApp.openById(docId);
+    var text = doc.getBody().getText();
+    
+    // Xóa file tạm
+    DriveApp.getFileById(docId).setTrashed(true);
+    
+    return text;
+  } catch (e) {
+    Logger.log('Exception in extractTextFromPdf_: ' + e.toString());
+    return null;
+  }
+}
+
+
+
+// ============================================================================
+// MODULE 99: SUPABASE DIRECT SYNC (THAY THẾ N8N)
+// ============================================================================
+// Gửi booking trực tiếp từ Apps Script → Supabase REST API
+// KHÔNG ghi đè assigned_room nếu Supabase đã có giá trị
+// ============================================================================
+
+var SUPABASE_CONFIG = {
+  URL: 'https://sziehrfievxbfleetyem.supabase.co',
+  API_KEY: 'sb_publishable_6C7vK3YPboTgiszNE4n8Ew_tFL1pMNT',
+  TABLE: 'ota_orders'
+};
+
+/**
+ * Gửi 1 booking lên Supabase ota_orders.
+ * ✅ OPTIMIZED: Dùng UPSERT 1 lần thay vì SELECT + INSERT/UPDATE (tránh timeout)
+ * BẢO VỆ: Không ghi đè assigned_room, app_confirm_status, status nếu đã có.
+ */
+function syncBookingToSupabase_(bookingData, ss) {
+  try {
+    if (!bookingData || !bookingData.booking_id) return;
+
+    var bookingCode = bookingData.booking_id.toString().trim();
+    if (!bookingCode) return;
+
+    var now = new Date().toISOString();
+
+    // Parse dates trước để tạo mã booking riêng theo từng dòng/ngày
+    var checkIn = parseDateToISO_(bookingData.check_in);
+    var checkOut = parseDateToISO_(bookingData.check_out);
+    var allowDuplicateBookingCode = bookingData.allow_duplicate_booking_code === true;
+    var supabaseBookingCode = bookingData.supabase_booking_code
+      ? bookingData.supabase_booking_code.toString().trim()
+      : buildSupabaseBookingCode_(bookingCode, checkIn, null);
+    var originalNotes = bookingData.special_requests || '';
+    var syncNotes = 'Mã gốc: ' + bookingCode + (originalNotes ? ' | ' + originalNotes : '');
+
+    // Build payload - CHỈ gửi các field an toàn
+    var payload = {
+      booking_code: supabaseBookingCode,
+      platform: bookingData.platform || '',
+      facility_name: bookingData.hotel_name || '',
+      guest_name: bookingData.guest_name || '',
+      guest_count: (bookingData.occupancy || '').toString(),
+      room_type: bookingData.room_type || '',
+      room_quantity: parseInt(bookingData.rooms) || 1,
+      breakfast_status: bookingData.breakfast || '',
+      total_amount: parseFloat(cleanMoneyString(bookingData.total_price)) || 0,
+      commission_amount: parseFloat(cleanMoneyString(bookingData.commission)) || 0,
+      transfer_amount: parseFloat(cleanMoneyString(bookingData.surcharge)) || 0,
+      other_programs: bookingData.other_programs || '',
+      net_amount: parseFloat(cleanMoneyString(bookingData.net_rate)) || 0,
+      payment_status: bookingData.payment_status || '',
+      notes: syncNotes,
+      status: 'Pending',
+      email_date: now,
+      created_at: now,
+      updated_at: now
+    };
+
+    if (checkIn) payload.check_in = checkIn;
+    if (checkOut) payload.check_out = checkOut;
+
+    // ✅ UPSERT: 1 API call duy nhất (thay vì SELECT + INSERT/UPDATE)
+    // on_conflict=booking_code: Nếu trùng → merge/update đúng record.
+    // Booking.com nhiều phòng dùng suffix _P1/_P2/_P3 nên không bị ghi đè nhau.
+    var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE;
+    if (!allowDuplicateBookingCode) {
+      url += '?on_conflict=booking_code';
+    }
+
+    var preferHeader = allowDuplicateBookingCode
+      ? 'return=minimal'
+      : 'resolution=merge-duplicates,return=minimal';
+
+    var res = UrlFetchApp.fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_CONFIG.API_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': preferHeader
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) {
+      if (ss) logToSheet(ss, '✅ Supabase SYNC: ' + supabaseBookingCode + ' (gốc: ' + bookingCode + ')');
+    } else {
+      if (ss) logToSheet(ss, '⚠️ Supabase SYNC ' + supabaseBookingCode + ' HTTP ' + code);
+    }
+
+  } catch (e) {
+    if (ss) logToSheet(ss, '❌ Supabase sync lỗi (' + (bookingData.booking_id || '?') + '): ' + e.toString());
+  }
+}
+
+/**
+ * Sync trạng thái hủy lên Supabase
+ * ✅ FIX: Dùng LIKE để match cả mã gốc lẫn mã có suffix _ngày
+ * Ví dụ: bookingCode = "30092" → match "30092", "30092_2026-05-12", "30092_2026-05-13"...
+ */
+function syncCancellationToSupabase_(bookingCode, cancellationDate, ss) {
+  try {
+    if (!bookingCode) return;
+
+    var payload = {
+      status: 'Cancelled',
+      updated_at: new Date().toISOString()
+    };
+
+    if (cancellationDate) {
+      payload.cancellation_date = parseDateToISO_(cancellationDate) || new Date().toISOString();
+    }
+
+    // Dùng LIKE để match tất cả các dòng: "30092", "30092_2026-05-12", ...
+    var likePattern = bookingCode + '*';
+    var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE
+      + '?booking_code=like.' + encodeURIComponent(likePattern);
+
+    var res = UrlFetchApp.fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_CONFIG.API_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    var code = res.getResponseCode();
+    var body = res.getContentText();
+    var updatedCount = 0;
+    try { updatedCount = JSON.parse(body).length || 0; } catch(x) {}
+
+    if (code >= 200 && code < 300) {
+      if (ss) logToSheet(ss, '🚫 Supabase CANCEL: ' + bookingCode + ' (' + updatedCount + ' bản ghi đã hủy)');
+    } else {
+      if (ss) logToSheet(ss, '❌ Supabase CANCEL FAIL: ' + bookingCode + ' HTTP ' + code + ' - ' + body);
+    }
+
+  } catch (e) {
+    if (ss) logToSheet(ss, '❌ Supabase cancel sync lỗi: ' + e.toString());
+  }
+}
+
+// --- SUPABASE REST API HELPERS ---
+
+function supabaseSelect_(bookingCode) {
+  var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE
+    + '?booking_code=eq.' + encodeURIComponent(bookingCode)
+    + '&select=id,booking_code,assigned_room,status,app_confirm_status'
+    + '&limit=1';
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'GET',
+    headers: {
+      'apikey': SUPABASE_CONFIG.API_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY
+    },
+    muteHttpExceptions: true
+  });
+
+  var data = JSON.parse(res.getContentText());
+  return (data && data.length > 0) ? data[0] : null;
+}
+
+function supabaseInsert_(payload) {
+  var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE;
+
+  UrlFetchApp.fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_CONFIG.API_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+}
+
+function supabaseUpdate_(bookingCode, payload) {
+  var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE
+    + '?booking_code=eq.' + encodeURIComponent(bookingCode);
+
+  UrlFetchApp.fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SUPABASE_CONFIG.API_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+}
+
+/**
+ * Parse ngày từ nhiều format sang ISO string cho Supabase
+ */
+function buildSupabaseBookingCode_(bookingCode, checkInIso, rowNumber) {
+  var base = String(bookingCode || '').trim();
+  if (!base) return '';
+
+  var dateKey = '';
+  if (checkInIso) {
+    dateKey = String(checkInIso).slice(0, 10);
+  }
+
+  if (dateKey) return base + '_' + dateKey;
+  if (rowNumber) return base + '_ROW_' + rowNumber;
+  return base;
+}
+
+function appendOriginalCodeNote_(notes, originalCode) {
+  var cleanNotes = String(notes || '').trim();
+  var prefix = 'Mã gốc: ' + String(originalCode || '').trim();
+  if (!cleanNotes) return prefix;
+  if (cleanNotes.indexOf(prefix) !== -1) return cleanNotes;
+  return prefix + ' | ' + cleanNotes;
+}
+
+function parseDateToISO_(dateValue) {
+  if (!dateValue) return null;
+
+  // Nếu đã là Date object
+  if (Object.prototype.toString.call(dateValue) === '[object Date]' && !isNaN(dateValue.getTime())) {
+    return dateValue.toISOString();
+  }
+
+  var s = dateValue.toString().trim();
+
+  // Format dd/MM/yyyy
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1])).toISOString();
+  }
+
+  // Format yyyy-MM-dd
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])).toISOString();
+  }
+
+  // Fallback
+  var d = new Date(s);
+  return !isNaN(d.getTime()) ? d.toISOString() : null;
+}
+
+/**
+ * Đồng bộ thủ công: Quét toàn bộ sheet và gửi lên Supabase
+ * Chạy 1 lần nếu cần sync lại dữ liệu cũ
+ */
+function manualSyncAllToSupabase() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(CONFIG.SHEET_DATA_NAME);
+  if (!sheet) { logToSheet(ss, '❌ Không tìm thấy sheet ' + CONFIG.SHEET_DATA_NAME); return; }
+
+  var data = sheet.getDataRange().getValues();
+  var synced = 0;
+  var skipped = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var bookingCode = (row[3] || '').toString().trim();
+    if (!bookingCode) { skipped++; continue; }
+
+    var bookingData = {
+      booking_id: bookingCode,
+      platform: row[1] || '',
+      hotel_name: row[2] || '',
+      guest_name: row[4] || '',
+      check_in: row[5],
+      check_out: row[6],
+      room_type: row[7] || '',
+      rooms: row[8] || 1,
+      occupancy: row[9] || '',
+      total_price: row[10] || '0',
+      commission: row[11] || '0',
+      surcharge: row[12] || '0',
+      other_programs: row[13] || '',
+      net_rate: row[14] || '0',
+      breakfast: row[15] || '',
+      payment_status: row[16] || '',
+      special_requests: row[17] || ''
+    };
+
+    syncBookingToSupabase_(bookingData, null);
+    synced++;
+
+    // Tránh rate limit
+    if (synced % 50 === 0) {
+      Utilities.sleep(1000);
+      logToSheet(ss, '🔄 Manual sync progress: ' + synced + '/' + (data.length - 1));
+    }
+  }
+
+  logToSheet(ss, '✅ Manual sync hoàn tất: ' + synced + ' đơn đã sync, ' + skipped + ' bỏ qua.');
+}
+
+
+// ============================================================================
+// TEST: Kiểm tra kết nối Supabase
+// Chạy hàm testSupabaseConnection() trong Apps Script Editor để test
+// ============================================================================
+function testSupabaseConnection() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var testId = 'TEST_' + Date.now();
+
+  logToSheet(ss, '🧪 [TEST] Bắt đầu test kết nối Supabase...');
+
+  // 1. Test SELECT
+  try {
+    var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE + '?limit=1&select=id,booking_code';
+    var res = UrlFetchApp.fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_CONFIG.API_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY
+      },
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() === 200) {
+      logToSheet(ss, '✅ [TEST] SELECT OK');
+    } else {
+      logToSheet(ss, '❌ [TEST] SELECT FAIL - HTTP ' + res.getResponseCode());
+      return;
+    }
+  } catch (e) {
+    logToSheet(ss, '❌ [TEST] SELECT ERROR: ' + e.toString());
+    return;
+  }
+
+  // 2. Test INSERT
+  try {
+    supabaseInsert_({
+      booking_code: testId,
+      platform: 'TEST',
+      facility_name: 'Test Hotel',
+      guest_name: 'Test Guest - Supabase Direct Sync',
+      room_type: 'Test Room',
+      room_quantity: 1,
+      total_amount: 0,
+      net_amount: 0,
+      status: 'Pending',
+      check_in: new Date().toISOString(),
+      check_out: new Date().toISOString(),
+      email_date: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    logToSheet(ss, '✅ [TEST] INSERT OK - Mã: ' + testId);
+  } catch (e) {
+    logToSheet(ss, '❌ [TEST] INSERT FAIL: ' + e.toString());
+    return;
+  }
+
+  // 3. Verify
+  var verify = supabaseSelect_(testId);
+  if (verify) {
+    logToSheet(ss, '✅ [TEST] VERIFY OK - Đơn test tồn tại');
+  } else {
+    logToSheet(ss, '⚠️ [TEST] VERIFY - Không tìm thấy (có thể RLS chặn)');
+  }
+
+  // 4. Cleanup
+  try {
+    var delUrl = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE
+      + '?booking_code=eq.' + encodeURIComponent(testId);
+    UrlFetchApp.fetch(delUrl, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_CONFIG.API_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY
+      },
+      muteHttpExceptions: true
+    });
+    logToSheet(ss, '🗑️ [TEST] Đã xóa đơn test');
+  } catch (e) {
+    logToSheet(ss, '⚠️ [TEST] Không xóa được: ' + e.toString());
+  }
+
+  logToSheet(ss, '🎉 [TEST] HOÀN TẤT - Supabase hoạt động tốt!');
+}
+
+
+// ============================================================================
+// MODULE 100: AUTO SYNC ON SHEET EDIT (TRIGGER)
+// ============================================================================
+// Khi sửa dòng trên Sheet Booking → tự động gửi lên Supabase
+// ============================================================================
+
+/**
+ * ✅ Chạy 1 lần duy nhất để cài đặt Trigger
+ * Xóa sạch tất cả trigger cũ rác để tránh đụng độ và tạo mới.
+ */
+function setupOnEditTrigger() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  
+  // 1. Xóa toàn bộ trigger cũ trong project này để làm sạch
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    var fn = triggers[i].getHandlerFunction();
+    if (fn === 'onSheetEdit_' || fn === 'onSheetEditSync' || fn === 'onEdit' || fn === 'syncToSupabase') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+
+  // 2. Tạo installable trigger mới, gắn thẳng vào bảng tính
+  ScriptApp.newTrigger('onSheetEditSync')
+    .forSpreadsheet(ss)
+    .onEdit()
+    .create();
+
+  logToSheet(ss, '✅ Đã cài đặt lại Trigger: onSheetEditSync (Bắt sự kiện chỉnh sửa)');
+}
+
+// ============================================================================
+// MENU ĐIỀU KHIỂN CHO GOOGLE SHEETS
+// ============================================================================
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('🤖 AI Auto Booking')
+      .addItem('▶️ 1. Cài đặt tự đồng bộ khi gõ', 'setupOnEditTrigger')
+      .addItem('▶️ 2. Gửi các dòng đang chọn lên Database', 'syncSelectedRowsToSupabase')
+      .addItem('▶️ 3. Đồng bộ toàn bộ Sheet', 'manualSyncAllToSupabase')
+      .addItem('▶️ 4. Quét Email & Hóa đơn mới nhất', 'mainAutoProcess1')
+      .addItem('▶️ 5. Khởi tạo Thư mục Drive Tự động', 'setupDriveFolders')
+      .addItem('▶️ 6. Test Drive → Sheet Test + Database', 'runDrivePDFTestAndSync')
+      .addToUi();
+}
+
+/**
+ * Lấy các dòng đang được bôi đen và đẩy lên Supabase
+ */
+function syncSelectedRowsToSupabase() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getActiveSheet();
+  var ui = SpreadsheetApp.getUi();
+  
+  if (sheet.getName() !== CONFIG.SHEET_DATA_NAME) {
+    ui.alert('❌ Lỗi', 'Vui lòng chọn các dòng bên trong sheet: ' + CONFIG.SHEET_DATA_NAME, ui.ButtonSet.OK);
+    return;
+  }
+
+  var range = sheet.getActiveRange();
+  var startRow = range.getRow();
+  var numRows = range.getNumRows();
+
+  if (startRow <= 1) {
+    ui.alert('❌ Lỗi', 'Vui lòng không chọn dòng tiêu đề (dòng 1). Hãy bôi đen các dòng chứa mã booking cần đồng bộ.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var countSuccess = 0;
+  for (var i = 0; i < numRows; i++) {
+    var row = startRow + i;
+    var rowData = sheet.getRange(row, 1, 1, 21).getValues()[0];
+    
+    var bookingCode = String(rowData[3] || '').trim(); // Cột D = Mã BK
+    if (!bookingCode) continue;
+
+    var rowCheckIn = parseDateToISO_(rowData[5]); // Cột F = Check-in
+    var rowCheckOut = parseDateToISO_(rowData[6]); // Cột G = Check-out
+    var supabaseBookingCode = buildSupabaseBookingCode_(bookingCode, rowCheckIn, row);
+    
+    var now = new Date().toISOString();
+    var payload = {
+      booking_code: supabaseBookingCode,
+      platform: String(rowData[1] || ''),
+      facility_name: String(rowData[2] || ''),
+      guest_name: String(rowData[4] || ''),
+      room_type: String(rowData[7] || ''),
+      room_quantity: parseInt(rowData[8], 10) || 1,
+      guest_count: String(rowData[9] || ''),
+      total_amount: parseFloat(cleanMoneyString(String(rowData[10] || '0'))) || 0,
+      commission_amount: parseFloat(cleanMoneyString(String(rowData[11] || '0'))) || 0,
+      transfer_amount: parseFloat(cleanMoneyString(String(rowData[12] || '0'))) || 0,
+      other_programs: String(rowData[13] || ''),
+      net_amount: parseFloat(cleanMoneyString(String(rowData[14] || '0'))) || 0,
+      breakfast_status: String(rowData[15] || ''),
+      payment_status: String(rowData[16] || ''),
+      notes: appendOriginalCodeNote_(String(rowData[17] || ''), bookingCode),
+      status: String(rowData[18] || 'Pending'),
+      updated_at: now
+    };
+
+    var emailDate = parseDateToISO_(rowData[0]);
+    if (emailDate) {
+      payload.email_date = emailDate;
+      payload.created_at = emailDate;
+    } else {
+      payload.email_date = now;
+      payload.created_at = now;
+    }
+
+    if (rowCheckIn) payload.check_in = rowCheckIn;
+    if (rowCheckOut) payload.check_out = rowCheckOut;
+
+    var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE + '?on_conflict=booking_code';
+    var res = UrlFetchApp.fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_CONFIG.API_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() >= 200 && res.getResponseCode() < 300) {
+      countSuccess++;
+    }
+  }
+
+  ui.alert('✅ Thành công', 'Đã gửi ' + countSuccess + '/' + numRows + ' dòng đang chọn lên Database.', ui.ButtonSet.OK);
+}
+
+/**
+ * Trigger handler chính: Bắt sự kiện khi có dòng bị sửa chữa.
+ */
+function onSheetEditSync(e) {
+  try {
+    // Nếu chạy thủ công mà không có event (e), thoát luôn tránh lỗi
+    if (!e || !e.range) return;
+
+    var sheet = e.range.getSheet();
+    var sheetName = sheet.getName();
+
+    // Chỉ chạy khi sửa ở sheet dữ liệu chính
+    if (sheetName !== CONFIG.SHEET_DATA_NAME) return;
+
+    var row = e.range.getRow();
+    // Bỏ qua nếu sửa ở dòng tiêu đề (header)
+    if (row <= 1) return;
+
+    // Đọc toàn bộ dữ liệu của dòng vừa sửa (21 cột: A-U)
+    var rowData = sheet.getRange(row, 1, 1, 21).getValues()[0];
+    var bookingCode = String(rowData[3] || '').trim(); // Cột D = Mã BK
+
+    // Bỏ qua nếu dòng này chưa có mã booking hoặc chưa có Ngày Check-in
+    // (Bảo vệ: Tránh tạo ra các bản ghi lỗi chứa đuôi _ROW_ khi người dùng đang gõ tay từng ô)
+    if (!bookingCode || !rowData[5]) return;
+
+    var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+
+    // Tìm ngày gốc (xử lý trường hợp booking bị tách dòng làm nhiều đêm)
+    var originalDates = findOriginalDates_(sheet, bookingCode);
+
+    // Build payload để gửi sang Supabase
+    var now = new Date().toISOString();
+    var rowCheckIn = parseDateToISO_(rowData[5]); // Cột F = Check-in của chính dòng này
+    var rowCheckOut = parseDateToISO_(rowData[6]); // Cột G = Check-out của chính dòng này
+    var supabaseBookingCode = buildSupabaseBookingCode_(bookingCode, rowCheckIn, row);
+    var payload = {
+      booking_code: supabaseBookingCode,
+      platform: String(rowData[1] || ''),
+      facility_name: String(rowData[2] || ''),
+      guest_name: String(rowData[4] || ''),
+      room_type: String(rowData[7] || ''),
+      room_quantity: parseInt(rowData[8], 10) || 1,
+      guest_count: String(rowData[9] || ''),
+      total_amount: parseFloat(cleanMoneyString(String(rowData[10] || '0'))) || 0,
+      commission_amount: parseFloat(cleanMoneyString(String(rowData[11] || '0'))) || 0,
+      transfer_amount: parseFloat(cleanMoneyString(String(rowData[12] || '0'))) || 0,
+      other_programs: String(rowData[13] || ''),
+      net_amount: parseFloat(cleanMoneyString(String(rowData[14] || '0'))) || 0,
+      breakfast_status: String(rowData[15] || ''),
+      payment_status: String(rowData[16] || ''),
+      notes: appendOriginalCodeNote_(String(rowData[17] || ''), bookingCode),
+      status: String(rowData[18] || 'Pending'),
+      updated_at: now
+    };
+
+    // Thêm ngày đặt (cột A = email date)
+    var emailDate = parseDateToISO_(rowData[0]);
+    if (emailDate) {
+      payload.email_date = emailDate;
+      payload.created_at = emailDate;
+    } else {
+      payload.email_date = now;
+      payload.created_at = now;
+    }
+
+    // Dùng ngày của chính dòng hiện tại để mỗi dòng Sheet là 1 booking riêng
+    if (rowCheckIn) payload.check_in = rowCheckIn;
+    if (rowCheckOut) payload.check_out = rowCheckOut;
+
+    // Gửi REST API UPSERT lên Supabase
+    var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE + '?on_conflict=booking_code';
+    var res = UrlFetchApp.fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_CONFIG.API_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal' // Quan trọng: return=minimal để tránh timeout
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) {
+      logToSheet(ss, '📝 onEdit SYNC OK: ' + supabaseBookingCode + ' (gốc: ' + bookingCode + ', dòng ' + row + ')');
+    } else {
+      logToSheet(ss, '❌ onEdit SYNC FAIL: ' + supabaseBookingCode + ' HTTP ' + code + ' - ' + res.getContentText());
+    }
+
+  } catch (err) {
+    try {
+      var ss2 = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+      logToSheet(ss2, '❌ onEdit ERROR: ' + err.toString());
+    } catch (e2) {
+      Logger.log('onSheetEditSync error: ' + err.toString());
+    }
+  }
+}
+
+/**
+ * ✅ Wrapper tương thích ngược cho trigger cũ.
+ */
+function onSheetEdit_(e) {
+  return onSheetEditSync(e);
+}
+
+/**
+ * Tìm ngày check-in đầu tiên và check-out cuối cùng của cùng booking code.
+ */
+function findOriginalDates_(sheet, bookingCode) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { firstCheckIn: null, lastCheckOut: null };
+
+  var data = sheet.getRange(2, 4, lastRow - 1, 4).getValues(); // D, E, F, G
+
+  var firstCheckIn = null;
+  var lastCheckOut = null;
+
+  for (var i = 0; i < data.length; i++) {
+    var code = String(data[i][0] || '').trim();
+    if (code === bookingCode) {
+      var ci = data[i][2]; // F
+      var co = data[i][3]; // G
+
+      if (!firstCheckIn && ci) firstCheckIn = ci;
+      if (co) lastCheckOut = co;
+    }
+  }
+
+  return {
+    firstCheckIn: firstCheckIn,
+    lastCheckOut: lastCheckOut
+  };
+}
+
+/**
+ * ✅ Hàm Test giả lập (Chạy thủ công để cấp quyền cho AppScript)
+ */
+function testOnEditManual() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(CONFIG.SHEET_DATA_NAME);
+  
+  if (!sheet) {
+    logToSheet(ss, '❌ [TEST EDIT] Không tìm thấy sheet: ' + CONFIG.SHEET_DATA_NAME);
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  var testRow = 2;
+  var testBookingCode = '';
+  
+  for (var i = 2; i <= Math.min(lastRow, 50); i++) {
+    var code = sheet.getRange(i, 4).getValue();
+    if (code && String(code).trim()) {
+      testRow = i;
+      testBookingCode = String(code).trim();
+      break;
+    }
+  }
+
+  if (!testBookingCode) {
+    logToSheet(ss, '❌ [TEST EDIT] Không tìm thấy dòng có booking code để test');
+    return;
+  }
+
+  logToSheet(ss, '🧪 [TEST EDIT] Đang giả lập trigger sync dòng ' + testRow + ' - Mã: ' + testBookingCode);
+
+  var fakeEvent = {
+    range: sheet.getRange(testRow, 1),
+    source: ss
+  };
+
+  onSheetEditSync(fakeEvent);
+
+  logToSheet(ss, '🎉 [TEST EDIT] Hoàn tất giả lập! Kiểm tra log bên trên để xem kết quả Supabase.');
+}
+
+
+/**
+ * ✅ Gửi 1 đơn booking MẪU lên Supabase để test
+ * Chạy hàm này → kiểm tra database có nhận đơn không
+ */
+function sendSampleBooking() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var now = new Date().toISOString();
+  var testCode = 'TEST_' + new Date().getTime();
+
+  var payload = {
+    booking_code: testCode,
+    platform: 'Test Platform',
+    facility_name: 'Prestige Travel Hotel',
+    guest_name: 'Khách Test Mẫu',
+    check_in: new Date(Date.now() + 86400000).toISOString(),      // Ngày mai
+    check_out: new Date(Date.now() + 86400000 * 3).toISOString(),  // 3 ngày sau
+    room_type: 'Deluxe Double Room',
+    room_quantity: 1,
+    guest_count: '2 Adults',
+    total_amount: 3500000,
+    commission_amount: 525000,
+    transfer_amount: 2975000,
+    other_programs: '',
+    net_amount: 2975000,
+    breakfast_status: 'Có bữa sáng',
+    payment_status: 'Đã thanh toán',
+    notes: 'Đơn test từ Apps Script - ' + new Date().toLocaleString('vi-VN'),
+    status: 'Pending',
+    email_date: now,
+    created_at: now,
+    updated_at: now
+  };
+
+  logToSheet(ss, '🧪 [SAMPLE] Đang gửi đơn mẫu: ' + testCode);
+
+  var url = SUPABASE_CONFIG.URL + '/rest/v1/' + SUPABASE_CONFIG.TABLE + '?on_conflict=booking_code';
+  var res = UrlFetchApp.fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_CONFIG.API_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_CONFIG.API_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var code = res.getResponseCode();
+  if (code >= 200 && code < 300) {
+    logToSheet(ss, '✅ [SAMPLE] Gửi thành công! Mã: ' + testCode);
+    logToSheet(ss, '📋 [SAMPLE] Chi tiết: ' + payload.guest_name + ' | ' + payload.room_type + ' | ' + payload.total_amount + ' VND');
+  } else {
+    logToSheet(ss, '❌ [SAMPLE] Gửi thất bại! HTTP ' + code + ' - ' + res.getContentText());
+  }
+}
+
+// ============================================================================
+// KHỞI TẠO THƯ MỤC DRIVE
+// ============================================================================
+function setupDriveFolders() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var rootFolder = DriveApp.getRootFolder();
+    var mainName = "AI_Booking_PDFs";
+    var pendingName = "1_Booking_Pending";
+    var doneName = "2_Booking_Done";
+    
+    // Tìm hoặc tạo thư mục MẸ ở ngoài cùng
+    var mainIter = rootFolder.getFoldersByName(mainName);
+    var mainFolder = mainIter.hasNext() ? mainIter.next() : rootFolder.createFolder(mainName);
+    
+    // Tìm hoặc tạo thư mục CON ở bên trong thư mục MẸ
+    var pendingIter = mainFolder.getFoldersByName(pendingName);
+    var doneIter = mainFolder.getFoldersByName(doneName);
+    
+    var pendingFolder = pendingIter.hasNext() ? pendingIter.next() : mainFolder.createFolder(pendingName);
+    var doneFolder = doneIter.hasNext() ? doneIter.next() : mainFolder.createFolder(doneName);
+    
+    var msg = "✅ Đã tạo cấu trúc thư mục thành công!\n" +
+              "Tất cả nằm trong thư mục chính: " + mainName + " (trên Google Drive)\n\n" +
+              "📌 Vui lòng copy 2 đoạn mã ID dưới đây dán vào dòng 53-54 trong Code:\n\n" +
+              "ID Thư mục PENDING:\n" + pendingFolder.getId() + "\n\n" +
+              "ID Thư mục DONE:\n" + doneFolder.getId();
+              
+    ui.alert("Thông báo", msg, ui.ButtonSet.OK);
+    
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) {
+      logToSheet(ss, '✅ [SETUP] PENDING FOLDER ID: ' + pendingFolder.getId());
+      logToSheet(ss, '✅ [SETUP] DONE FOLDER ID: ' + doneFolder.getId());
+    }
+  } catch (err) {
+    ui.alert("❌ Lỗi", "Không thể tạo thư mục. Lỗi: " + err.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Chạy quét file PDF từ Drive thủ công (CHẾ ĐỘ CHẠY THẬT - SHEET CHÍNH)
+ * Ghi vào Sheet chính, đồng bộ Supabase, di chuyển file sang DONE
+ */
+function runDrivePDFProcessing() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheetData = getOrCreateSheet(ss, CONFIG.SHEET_DATA_NAME);
+  var existingIds = getExistingBookingIds(sheetData);
+  var ui = SpreadsheetApp.getUi();
+  
+  logToSheet(ss, '-----------------------------------------');
+  logToSheet(ss, '▶️ [DRIVE LIVE] BẮT ĐẦU QUÉT FILE PDF BOOKING.COM → SHEET CHÍNH + DATABASE');
+  logToSheet(ss, '-----------------------------------------');
+  
+  processDriveBookings(sheetData, existingIds, ss);
+  
+  logToSheet(ss, '-----------------------------------------');
+  logToSheet(ss, '⏹️ [DRIVE LIVE] KẾT THÚC QUÉT FILE PDF BOOKING.COM');
+  logToSheet(ss, '-----------------------------------------');
+  
+  ui.alert('✅ Hoàn tất', 'Đã quét xong thư mục Drive!\n\n- Đơn mới: Ghi vào Sheet chính + Đồng bộ Supabase\n- Đơn hủy: MAP mã booking -> CANCEL + Đồng bộ Supabase\n- File đã xử lý: Tự động chuyển sang thư mục DONE\n\nKiểm tra tab System_Logs để xem chi tiết.', ui.ButtonSet.OK);
+}
+
+/**
+ * Chạy luồng TEST HOÀN CHỈNH theo yêu cầu:
+ * Drive Pending → AI parse Booking.com → ghi AI_Test_Results → gửi Supabase
+ * Đơn hủy: MAP mã booking trong AI_Test_Results → CANCEL → sync hủy Supabase
+ */
+function runDrivePDFTestAndSync() {
+  var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var testSheet = getOrCreateSheet(ss, CONFIG.TEST_RESULT_SHEET_NAME);
+  var existingIds = getExistingBookingIds(testSheet);
+  var ui = SpreadsheetApp.getUi();
+  
+  // Đảm bảo sheet test có header đúng 21 cột như sheet chính
+  if (testSheet.getLastRow() === 0) {
+    testSheet.appendRow([
+      "Ngày Email", "Platform", "Văn Khách Sạn", "Mã BK", "Tên Khách",
+      "Check-in", "Check-out", "Loại Phòng", "SL Phòng", "Số Khách",
+      "Tổng Tiền", "Hoa Hồng (Comm)", "Khoản Bù Trừ", "Chương Trình Khác", "Thực Nhận (Net)",
+      "Ăn Sáng", "Thanh Toán", "Yêu Cầu Đặc Biệt", "Status", "Xếp Phòng", "Date Cancelled"
+    ]);
+  }
+  
+  logToSheet(ss, '-----------------------------------------');
+  logToSheet(ss, '▶️ [DRIVE TEST+DB] BẮT ĐẦU: DRIVE → AI_Test_Results → SUPABASE');
+  logToSheet(ss, '-----------------------------------------');
+  
+  processDriveBookings(testSheet, existingIds, ss);
+  
+  logToSheet(ss, '-----------------------------------------');
+  logToSheet(ss, '⏹️ [DRIVE TEST+DB] KẾT THÚC: DRIVE → AI_Test_Results → SUPABASE');
+  logToSheet(ss, '-----------------------------------------');
+  
+  ui.alert('✅ Test + Database hoàn tất', 'Đã chạy đúng luồng bạn yêu cầu:\n\n- Đơn mới: Ghi vào AI_Test_Results + gửi Supabase\n- Đơn hủy: MAP mã trong AI_Test_Results → CANCEL + gửi hủy Supabase\n- File đã xử lý: Chuyển sang DONE\n\nLưu ý: Luồng này KHÔNG ghi vào Sheet chính.', ui.ButtonSet.OK);
+}
+
+
+
